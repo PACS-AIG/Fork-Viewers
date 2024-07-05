@@ -24,6 +24,16 @@ export const mergeMap: MergeMap = {
       return series;
     },
   },
+  'retrieve.series.metadata': {
+    mergeKey: undefined,
+    tagFunc: (series, sourceName) => {
+      series.forEach(series => {
+        series.metadata.RetrieveAETitle = sourceName;
+        DicomMetadataStore.updateSeriesMetadata(series.metadata);
+      });
+      return series;
+    },
+  },
 };
 
 /**
