@@ -46,7 +46,7 @@ function App({ config, defaultExtensions, defaultModes }) {
     run();
   }, []);
 
-  useEffect(() => {console.log(`init app ${init}`);
+  useEffect(() => {
     if (init) {
       const handleMessage = event => {
         // Do something with event.data
