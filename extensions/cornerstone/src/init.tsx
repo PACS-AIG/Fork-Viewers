@@ -104,7 +104,7 @@ export default async function init({
   window.extensionManager = extensionManager;
   window.commandsManager = commandsManager;
 
-  if (
+/*   if (
     appConfig.showWarningMessageForCrossOrigin &&
     !window.crossOriginIsolated &&
     !sharedArrayBufferDisabled
@@ -115,7 +115,7 @@ export default async function init({
         'Cross Origin Isolation is not enabled, read more about it here: https://docs.ohif.org/faq/',
       type: 'warning',
     });
-  }
+  } */
 
   if (appConfig.showCPUFallbackMessage && cornerstone.getShouldUseCPURendering()) {
     _showCPURenderingModal(uiModalService, hangingProtocolService);
