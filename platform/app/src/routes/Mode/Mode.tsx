@@ -82,7 +82,8 @@ export default function ModeRoute({
     extensionManager.setActiveDataSource(dataSourceName);
   }
 
-  const dataSource = extensionManager.getActiveDataSource()[0];
+  const activeDataSource = extensionManager.getActiveDataSource();
+  const dataSource = activeDataSource ? activeDataSource[0] : null;
 
   // Only handling one route per mode for now
   const route = mode.routes[0];
