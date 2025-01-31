@@ -60,7 +60,7 @@ export default async function init({
   } else {
     cornerstone.setUseSharedArrayBuffer(csEnums.SharedArrayBufferModes.TRUE);
   }
-console.log(value, cornerstone.setUseSharedArrayBuffer, sharedArrayBufferDisabled);
+
   await cs3DInit({
     rendering: {
       preferSizeOverAccuracy: Boolean(appConfig.preferSizeOverAccuracy),
