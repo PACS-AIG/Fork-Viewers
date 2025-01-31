@@ -124,10 +124,6 @@ export default async function init({
     }
   );
 
-  cornerstoneTools.segmentation.config.setGlobalRepresentationConfig(contourRepresentation, {
-    renderFill: false,
-  });
-
   const metadataProvider = OHIF.classes.MetadataProvider;
 
   volumeLoader.registerVolumeLoader(

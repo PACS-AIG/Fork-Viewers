@@ -6,14 +6,7 @@ export const toolGroupIds = {
   default: 'default',
 };
 
-function _initToolGroups(
-  toolNames,
-  Enums,
-  toolGroupService,
-  commandsManager,
-  modeLabelConfig,
-  servicesManager
-) {
+function _initToolGroups(toolNames, Enums, toolGroupService, commandsManager, modeLabelConfig) {
   const tools = {
     active: [
       {
@@ -187,22 +180,8 @@ function _initToolGroups(
   toolGroupService.createToolGroupAndAddTools(toolGroupIds.MIP, mipTools);
 }
 
-function initToolGroups(
-  toolNames,
-  Enums,
-  toolGroupService,
-  commandsManager,
-  modeLabelConfig,
-  servicesManager
-) {
-  _initToolGroups(
-    toolNames,
-    Enums,
-    toolGroupService,
-    commandsManager,
-    modeLabelConfig,
-    servicesManager
-  );
+function initToolGroups(toolNames, Enums, toolGroupService, commandsManager, modeLabelConfig) {
+  _initToolGroups(toolNames, Enums, toolGroupService, commandsManager, modeLabelConfig);
 }
 
 export default initToolGroups;
