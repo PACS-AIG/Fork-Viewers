@@ -1,3 +1,17 @@
+import { toolNames as SRToolNames } from '@ohif/extension-cornerstone-dicom-sr';
+
+const colours = {
+  'viewport-0': 'rgb(200, 0, 0)',
+  'viewport-1': 'rgb(200, 200, 0)',
+  'viewport-2': 'rgb(0, 200, 0)',
+};
+
+const colorsByOrientation = {
+  axial: 'rgb(200, 0, 0)',
+  sagittal: 'rgb(200, 200, 0)',
+  coronal: 'rgb(0, 200, 0)',
+};
+
 function initDefaultToolGroup(
   extensionManager,
   toolGroupService,
@@ -25,7 +39,10 @@ function initDefaultToolGroup(
         toolName: toolNames.Zoom,
         bindings: [{ mouseButton: Enums.MouseBindings.Secondary }],
       },
-      { toolName: toolNames.StackScrollMouseWheel, bindings: [] },
+      {
+        toolName: toolNames.StackScroll,
+        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }],
+      },
     ],
     passive: [
       { toolName: toolNames.Length },
@@ -63,7 +80,6 @@ function initDefaultToolGroup(
       { toolName: toolNames.Angle },
       { toolName: toolNames.CobbAngle },
       { toolName: toolNames.Magnify },
-      { toolName: toolNames.SegmentationDisplay },
       { toolName: toolNames.CalibrationLine },
       {
         toolName: toolNames.PlanarFreehandContourSegmentation,
@@ -75,8 +91,15 @@ function initDefaultToolGroup(
       { toolName: toolNames.PlanarFreehandROI },
       { toolName: toolNames.SplineROI },
       { toolName: toolNames.LivewireContour },
+      { toolName: toolNames.WindowLevelRegion },
     ],
-    enabled: [{ toolName: toolNames.ImageOverlayViewer }, { toolName: toolNames.ReferenceLines }],
+    enabled: [
+      { toolName: toolNames.ImageOverlayViewer },
+      { toolName: toolNames.ReferenceLines },
+      {
+        toolName: SRToolNames.SRSCOORD3DPoint,
+      },
+    ],
     disabled: [
       {
         toolName: toolNames.AdvancedMagnify,
@@ -129,8 +152,8 @@ function initSRToolGroup(extensionManager, toolGroupService) {
         ],
       },
       {
-        toolName: toolNames.StackScrollMouseWheel,
-        bindings: [],
+        toolName: toolNames.StackScroll,
+        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }],
       },
     ],
     passive: [
@@ -141,17 +164,11 @@ function initSRToolGroup(extensionManager, toolGroupService) {
       { toolName: SRToolNames.SRCircleROI },
       { toolName: SRToolNames.SRPlanarFreehandROI },
       { toolName: SRToolNames.SRRectangleROI },
-      {
-        toolName: SRToolNames.SRPlanarFreehandContourSegmentation,
-        configuration: {
-          displayOnePointAsCrosshairs: true,
-        },
-      },
+      { toolName: toolNames.WindowLevelRegion },
     ],
     enabled: [
       {
         toolName: SRToolNames.DICOMSRDisplay,
-        bindings: [],
       },
     ],
     // disabled
@@ -165,6 +182,9 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager, m
   const utilityModule = extensionManager.getModuleEntry(
     '@ohif/extension-cornerstone.utilityModule.tools'
   );
+
+  const serviceManager = extensionManager._servicesManager;
+  const { cornerstoneViewportService } = serviceManager.services;
 
   const { toolNames, Enums } = utilityModule.exports;
 
@@ -182,7 +202,10 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager, m
         toolName: toolNames.Zoom,
         bindings: [{ mouseButton: Enums.MouseBindings.Secondary }],
       },
-      { toolName: toolNames.StackScrollMouseWheel, bindings: [] },
+      {
+        toolName: toolNames.StackScroll,
+        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }],
+      },
     ],
     passive: [
       { toolName: toolNames.Length },
@@ -220,7 +243,7 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager, m
       { toolName: toolNames.Angle },
       { toolName: toolNames.CobbAngle },
       { toolName: toolNames.PlanarFreehandROI },
-      { toolName: toolNames.SegmentationDisplay },
+      { toolName: toolNames.WindowLevelRegion },
       {
         toolName: toolNames.PlanarFreehandContourSegmentation,
         configuration: {
@@ -242,6 +265,20 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager, m
           autoPan: {
             enabled: false,
             panSize: 10,
+          },
+          getReferenceLineColor: viewportId => {
+            const viewportInfo = cornerstoneViewportService.getViewportInfo(viewportId);
+            const viewportOptions = viewportInfo?.viewportOptions;
+            if (viewportOptions) {
+              return (
+                colours[viewportOptions.id] ||
+                colorsByOrientation[viewportOptions.orientation] ||
+                '#0c0'
+              );
+            } else {
+              console.warn('missing viewport?', viewportId);
+              return '#0c0';
+            }
           },
         },
       },

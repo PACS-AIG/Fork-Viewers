@@ -8,7 +8,6 @@ import {
   BaseVolumeViewport,
 } from '@cornerstonejs/core';
 import { ToolGroupManager } from '@cornerstonejs/tools';
-import PropTypes from 'prop-types';
 import { ViewportDownloadForm } from '@ohif/ui';
 
 import { getEnabledElement as OHIFgetEnabledElement } from '../state';
@@ -22,7 +21,7 @@ const CornerstoneViewportDownloadForm = ({
   onClose,
   activeViewportId: activeViewportIdProp,
   cornerstoneViewportService,
-}) => {
+}: withAppTypes) => {
   const enabledElement = OHIFgetEnabledElement(activeViewportIdProp);
   const activeViewportElement = enabledElement?.element;
   const activeViewportEnabledElement = getEnabledElement(activeViewportElement);
@@ -128,7 +127,9 @@ const CornerstoneViewportDownloadForm = ({
           // for some reason we need a reset camera here, and I don't know why
           downloadViewport.resetCamera();
           const presentation = activeViewport.getViewPresentation();
-          downloadViewport.setViewPresentation(presentation);
+          if (downloadViewport.setView) {
+            downloadViewport.setView(activeViewport.getViewReference(), presentation);
+          }
           downloadViewport.render();
         }
       );
@@ -242,11 +243,6 @@ const CornerstoneViewportDownloadForm = ({
       downloadBlob={downloadBlob}
     />
   );
-};
-
-CornerstoneViewportDownloadForm.propTypes = {
-  onClose: PropTypes.func,
-  activeViewportId: PropTypes.string.isRequired,
 };
 
 export default CornerstoneViewportDownloadForm;

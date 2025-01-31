@@ -28,7 +28,10 @@ function _initToolGroups(
         toolName: toolNames.Zoom,
         bindings: [{ mouseButton: Enums.MouseBindings.Secondary }],
       },
-      { toolName: toolNames.StackScrollMouseWheel, bindings: [] },
+      {
+        toolName: toolNames.StackScroll,
+        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }],
+      },
     ],
     passive: [
       { toolName: toolNames.Length },
@@ -127,7 +130,7 @@ function _initToolGroups(
         },
       },
     ],
-    enabled: [{ toolName: toolNames.SegmentationDisplay }],
+    enabled: [],
     disabled: [
       {
         toolName: toolNames.Crosshairs,
@@ -155,7 +158,8 @@ function _initToolGroups(
   const mipTools = {
     active: [
       {
-        toolName: toolNames.VolumeRotateMouseWheel,
+        toolName: toolNames.VolumeRotate,
+        bindings: [{ mouseButton: Enums.MouseBindings.Wheel }],
         configuration: {
           rotateIncrementDegrees: 5,
         },
@@ -169,7 +173,6 @@ function _initToolGroups(
       },
     ],
     enabled: [
-      { toolName: toolNames.SegmentationDisplay },
       {
         toolName: toolNames.OrientationMarker,
         configuration: {

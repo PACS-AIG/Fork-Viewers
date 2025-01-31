@@ -21,6 +21,8 @@ async function createReportAsync({
   try {
     const naturalizedReport = await getReport();
 
+    if (!naturalizedReport) return;
+
     // The "Mode" route listens for DicomMetadataStore changes
     // When a new instance is added, it listens and
     // automatically calls makeDisplaySets
@@ -43,6 +45,7 @@ async function createReportAsync({
       message: error.message || `Failed to store ${reportType}`,
       type: 'error',
     });
+    throw new Error(`Failed to store ${reportType}. Error: ${error.message || 'Unknown error'}`);
   } finally {
     uiDialogService.dismiss({ id: loadingDialogId });
   }

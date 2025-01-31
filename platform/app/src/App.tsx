@@ -1,9 +1,11 @@
 // External
+
 import React, { useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
 import i18n from '@ohif/i18n';
 import { I18nextProvider } from 'react-i18next';
 import { BrowserRouter } from 'react-router-dom';
+
 import Compose from './routes/Mode/Compose';
 import {
   ExtensionManager,
@@ -15,7 +17,6 @@ import {
   DialogProvider,
   Modal,
   ModalProvider,
-  SnackbarProvider,
   ThemeWrapper,
   ViewportDialogProvider,
   ViewportGridProvider,
@@ -23,12 +24,18 @@ import {
   UserAuthenticationProvider,
   ToolboxProvider,
 } from '@ohif/ui';
+import {
+  ThemeWrapper as ThemeWrapperNext,
+  NotificationProvider,
+  TooltipProvider,
+} from '@ohif/ui-next';
 // Viewer Project
 // TODO: Should this influence study list?
 import { AppConfigProvider } from '@state';
 import createRoutes from './routes';
 import appInit from './appInit.js';
 import OpenIdConnectRoutes from './utils/OpenIdConnectRoutes';
+import { ShepherdJourneyProvider } from 'react-shepherd';
 
 let commandsManager: CommandsManager,
   extensionManager: ExtensionManager,
@@ -36,7 +43,27 @@ let commandsManager: CommandsManager,
   serviceProvidersManager: ServiceProvidersManager,
   hotkeysManager: HotkeysManager;
 
-function App({ config, defaultExtensions, defaultModes }) {
+function App({
+  config = {
+    /**
+     * Relative route from domain root that OHIF instance is installed at.
+     * For example:
+     *
+     * Hosted at: https://ohif.org/where-i-host-the/viewer/
+     * Value: `/where-i-host-the/viewer/`
+     * */
+    routerBaseName: '/',
+    /**
+     *
+     */
+    showLoadingIndicator: true,
+    showStudyList: true,
+    oidc: [],
+    extensions: [],
+  },
+  defaultExtensions = [],
+  defaultModes = [],
+}) {
   const [init, setInit] = useState(null);
   useEffect(() => {
     const run = async () => {
@@ -79,17 +106,19 @@ function App({ config, defaultExtensions, defaultModes }) {
   const canvas = document.createElement('canvas');
   const gl = canvas.getContext('webgl2');
 
-  const max3DTextureSize = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
-  appConfigState.max3DTextureSize = max3DTextureSize;
+  if (gl) {
+    const max3DTextureSize = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
+    appConfigState.max3DTextureSize = max3DTextureSize;
+  }
 
   const {
     uiDialogService,
     uiModalService,
-    uiNotificationService,
     uiViewportDialogService,
     viewportGridService,
     cineService,
     userAuthenticationService,
+    uiNotificationService,
     customizationService,
   } = servicesManager.services;
 
@@ -97,14 +126,17 @@ function App({ config, defaultExtensions, defaultModes }) {
     [AppConfigProvider, { value: appConfigState }],
     [UserAuthenticationProvider, { service: userAuthenticationService }],
     [I18nextProvider, { i18n }],
+    [ThemeWrapperNext],
     [ThemeWrapper],
     [ToolboxProvider],
     [ViewportGridProvider, { service: viewportGridService }],
     [ViewportDialogProvider, { service: uiViewportDialogService }],
     [CineProvider, { service: cineService }],
-    [SnackbarProvider, { service: uiNotificationService }],
+    [NotificationProvider, { service: uiNotificationService }],
+    [TooltipProvider],
     [DialogProvider, { service: uiDialogService }],
     [ModalProvider, { service: uiModalService, modal: Modal }],
+    [ShepherdJourneyProvider],
   ];
 
   // Loop through and register each of the service providers registered with the ServiceProvidersManager.
@@ -167,27 +199,9 @@ App.propTypes = {
   /* Extensions that are "bundled" or "baked-in" to the application.
    * These would be provided at build time as part of they entry point. */
   defaultExtensions: PropTypes.array,
-};
-
-App.defaultProps = {
-  config: {
-    /**
-     * Relative route from domain root that OHIF instance is installed at.
-     * For example:
-     *
-     * Hosted at: https://ohif.org/where-i-host-the/viewer/
-     * Value: `/where-i-host-the/viewer/`
-     * */
-    routerBaseName: '/',
-    /**
-     *
-     */
-    showLoadingIndicator: true,
-    showStudyList: true,
-    oidc: [],
-    extensions: [],
-  },
-  defaultExtensions: [],
+  /* Modes that are "bundled" or "baked-in" to the application.
+   * These would be provided at build time as part of they entry point. */
+  defaultModes: PropTypes.array,
 };
 
 export default App;

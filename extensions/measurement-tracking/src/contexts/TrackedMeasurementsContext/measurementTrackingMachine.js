@@ -1,4 +1,3 @@
-import { hydrateStructuredReport } from '@ohif/extension-cornerstone-dicom-sr';
 import { assign } from 'xstate';
 
 const RESPONSE = {
@@ -250,7 +249,7 @@ const machineConfiguration = {
             target: 'tracking',
             actions: [
               'setTrackedStudyAndMultipleSeries',
-              'jumpToFirstMeasurementInActiveViewport',
+              'jumpToSameImageInActiveViewport',
               'setIsDirtyToClean',
             ],
             cond: 'shouldHydrateStructuredReport',
@@ -274,7 +273,7 @@ const machineConfiguration = {
             target: 'tracking',
             actions: [
               'setTrackedStudyAndMultipleSeries',
-              'jumpToFirstMeasurementInActiveViewport',
+              'jumpToSameImageInActiveViewport',
               'setIsDirtyToClean',
             ],
           },

@@ -1,17 +1,16 @@
-import React, { useContext, useEffect } from 'react';
+import React, { useContext, useEffect, useMemo } from 'react';
 import PropTypes from 'prop-types';
 import { Machine } from 'xstate';
 import { useMachine } from '@xstate/react';
 import { useViewportGrid } from '@ohif/ui';
+import { promptLabelAnnotation, promptSaveReport } from '@ohif/extension-default';
 import { machineConfiguration, defaultOptions, RESPONSE } from './measurementTrackingMachine';
 import promptBeginTracking from './promptBeginTracking';
 import promptTrackNewSeries from './promptTrackNewSeries';
 import promptTrackNewStudy from './promptTrackNewStudy';
-import promptSaveReport from './promptSaveReport';
 import promptHydrateStructuredReport from './promptHydrateStructuredReport';
 import hydrateStructuredReport from './hydrateStructuredReport';
 import { useAppConfig } from '@state';
-import promptLabelAnnotation from './promptLabelAnnotation';
 
 const TrackedMeasurementsContext = React.createContext();
 TrackedMeasurementsContext.displayName = 'TrackedMeasurementsContext';
@@ -79,6 +78,30 @@ function TrackedMeasurementsContextProvider(
             index: imageIndex,
           },
         },
+      });
+    },
+
+    jumpToSameImageInActiveViewport: (ctx, evt) => {
+      const { trackedStudy, trackedSeries, activeViewportId } = ctx;
+      const measurements = measurementService.getMeasurements();
+      const trackedMeasurements = measurements.filter(
+        m => trackedStudy === m.referenceStudyUID && trackedSeries.includes(m.referenceSeriesUID)
+      );
+
+      const trackedMeasurement = trackedMeasurements[0];
+      const referencedDisplaySetUID = trackedMeasurement.displaySetInstanceUID;
+
+      // update the previously stored positionPresentation with the new viewportId
+      // presentation so that when we put the referencedDisplaySet back in the viewport
+      // it will be in the correct position zoom and pan
+      commandsManager.runCommand('updateStoredPositionPresentation', {
+        viewportId: activeViewportId,
+        displaySetInstanceUID: referencedDisplaySetUID,
+      });
+
+      viewportGridService.setDisplaySetsForViewport({
+        viewportId: activeViewportId,
+        displaySetInstanceUIDs: [referencedDisplaySetUID],
       });
     },
     showStructuredReportDisplaySetInActiveViewport: (ctx, evt) => {
@@ -168,7 +191,9 @@ function TrackedMeasurementsContextProvider(
   // - Fix viewport border resize
   // - created/destroyed hooks for extensions (cornerstone measurement subscriptions in it's `init`)
 
-  const measurementTrackingMachine = Machine(machineConfiguration, machineOptions);
+  const measurementTrackingMachine = useMemo(() => {
+    return Machine(machineConfiguration, machineOptions);
+  }, []); // Empty dependency array ensures this is only created once
 
   const [trackedMeasurements, sendTrackedMeasurementsEvent] = useMachine(
     measurementTrackingMachine

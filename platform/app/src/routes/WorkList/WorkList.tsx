@@ -20,7 +20,6 @@ import {
   StudyListPagination,
   StudyListFilter,
   TooltipClipboard,
-  Header,
   useModal,
   AboutModal,
   UserPreferences,
@@ -31,9 +30,12 @@ import {
   ButtonEnums,
 } from '@ohif/ui';
 
+import { Header } from '@ohif/ui-next';
+
 import { Types } from '@ohif/ui';
 
 import i18n from '@ohif/i18n';
+import { Onboarding, ScrollArea } from '@ohif/ui-next';
 
 const PatientInfoVisibility = Types.PatientInfoVisibility;
 
@@ -270,6 +272,7 @@ function WorkList({
 
     return {
       dataCY: `studyRow-${studyInstanceUid}`,
+      clickableCY: studyInstanceUid,
       row: [
         {
           key: 'patientName',
@@ -410,7 +413,7 @@ function WorkList({
                       disabled={!isValidMode}
                       startIconTooltip={
                         !isValidMode ? (
-                          <div className="font-inter flex w-[206px] whitespace-normal text-left text-xs font-normal text-white	">
+                          <div className="font-inter flex w-[206px] whitespace-normal text-left text-xs font-normal text-white">
                             {invalidModeDescription}
                           </div>
                         ) : null
@@ -495,29 +498,32 @@ function WorkList({
   }
 
   const { customizationService } = servicesManager.services;
-  const { component: dicomUploadComponent } =
-    customizationService.get('dicomUploadComponent') ?? {};
+  const { component: DicomUploadComponent } =
+    customizationService.getCustomization('dicomUploadComponent') || {};
+
   const uploadProps =
-    dicomUploadComponent && dataSource.getConfig()?.dicomUploadEnabled
+    DicomUploadComponent && dataSource.getConfig()?.dicomUploadEnabled
       ? {
           title: 'Upload files',
           closeButton: true,
           shouldCloseOnEsc: false,
           shouldCloseOnOverlayClick: false,
-          content: dicomUploadComponent.bind(null, {
-            dataSource,
-            onComplete: () => {
-              hide();
-              onRefresh();
-            },
-            onStarted: () => {
-              show({
-                ...uploadProps,
-                // when upload starts, hide the default close button as closing the dialogue must be handled by the upload dialogue itself
-                closeButton: false,
-              });
-            },
-          }),
+          content: () => (
+            <DicomUploadComponent
+              dataSource={dataSource}
+              onComplete={() => {
+                hide();
+                onRefresh();
+              }}
+              onStarted={() => {
+                show({
+                  ...uploadProps,
+                  // when upload starts, hide the default close button as closing the dialogue must be handled by the upload dialogue itself
+                  closeButton: false,
+                });
+              }}
+            />
+          ),
         }
       : undefined;
 
@@ -533,46 +539,53 @@ function WorkList({
         WhiteLabeling={appConfig.whiteLabeling}
         showPatientInfo={PatientInfoVisibility.DISABLED}
       />
+      <Onboarding />
       <InvestigationalUseDialog dialogConfiguration={appConfig?.investigationalUseDialog} />
-      <div className="ohif-scrollbar ohif-scrollbar-stable-gutter flex grow flex-col overflow-y-auto sm:px-5">
-        <StudyListFilter
-          numOfStudies={pageNumber * resultsPerPage > 100 ? 101 : numOfStudies}
-          filtersMeta={filtersMeta}
-          filterValues={{ ...filterValues, ...defaultSortValues }}
-          onChange={setFilterValues}
-          clearFilters={() => setFilterValues(defaultFilterValues)}
-          isFiltering={isFiltering(filterValues, defaultFilterValues)}
-          onUploadClick={uploadProps ? () => show(uploadProps) : undefined}
-          getDataSourceConfigurationComponent={
-            dataSourceConfigurationComponent ? () => dataSourceConfigurationComponent() : undefined
-          }
-        />
-        {hasStudies ? (
+      <div className="flex flex-col h-full overflow-y-auto">
+        <ScrollArea>
           <div className="flex grow flex-col">
-            <StudyListTable
-              tableDataSource={tableDataSource.slice(offset, offsetAndTake)}
-              numOfStudies={numOfStudies}
-              querying={querying}
+            <StudyListFilter
+              numOfStudies={pageNumber * resultsPerPage > 100 ? 101 : numOfStudies}
               filtersMeta={filtersMeta}
+              filterValues={{ ...filterValues, ...defaultSortValues }}
+              onChange={setFilterValues}
+              clearFilters={() => setFilterValues(defaultFilterValues)}
+              isFiltering={isFiltering(filterValues, defaultFilterValues)}
+              onUploadClick={uploadProps ? () => show(uploadProps) : undefined}
+              getDataSourceConfigurationComponent={
+                dataSourceConfigurationComponent
+                  ? () => dataSourceConfigurationComponent()
+                  : undefined
+              }
             />
-            <div className="grow">
-              <StudyListPagination
-                onChangePage={onPageNumberChange}
-                onChangePerPage={onResultsPerPageChange}
-                currentPage={pageNumber}
-                perPage={resultsPerPage}
+          </div>
+          {hasStudies ? (
+            <div className="flex grow flex-col">
+              <StudyListTable
+                tableDataSource={tableDataSource.slice(offset, offsetAndTake)}
+                numOfStudies={numOfStudies}
+                querying={querying}
+                filtersMeta={filtersMeta}
               />
+              <div className="grow">
+                <StudyListPagination
+                  onChangePage={onPageNumberChange}
+                  onChangePerPage={onResultsPerPageChange}
+                  currentPage={pageNumber}
+                  perPage={resultsPerPage}
+                />
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center pt-48">
-            {appConfig.showLoadingIndicator && isLoadingData ? (
-              <LoadingIndicatorProgress className={'h-full w-full bg-black'} />
-            ) : (
-              <EmptyStudies />
-            )}
-          </div>
-        )}
+          ) : (
+            <div className="flex flex-col items-center justify-center pt-48">
+              {appConfig.showLoadingIndicator && isLoadingData ? (
+                <LoadingIndicatorProgress className={'h-full w-full bg-black'} />
+              ) : (
+                <EmptyStudies />
+              )}
+            </div>
+          )}
+        </ScrollArea>
       </div>
     </div>
   );
@@ -617,6 +630,12 @@ function _tryParseInt(str, defaultValue) {
 }
 
 function _getQueryFilterValues(params) {
+  const newParams = new URLSearchParams();
+  for (const [key, value] of params) {
+    newParams.set(key.toLowerCase(), value);
+  }
+  params = newParams;
+
   const queryFilterValues = {
     patientName: params.get('patientname'),
     mrn: params.get('mrn'),

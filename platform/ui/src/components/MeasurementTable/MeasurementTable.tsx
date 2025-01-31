@@ -1,14 +1,15 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { useTranslation } from 'react-i18next';
+import { Types } from '@ohif/core';
 
 import MeasurementItem from './MeasurementItem';
 
 const MeasurementTable = ({
-  data,
+  data = [],
   title,
-  onClick,
-  onEdit,
+  onClick = () => {},
+  onEdit = () => {},
   onDelete,
   servicesManager,
 }: withAppTypes) => {
@@ -17,9 +18,11 @@ const MeasurementTable = ({
   const amount = data.length;
 
   const itemCustomization = customizationService.getCustomization('MeasurementItem', {
+    id: 'MeasurementItem',
     content: MeasurementItem,
     contentProps: {},
-  });
+  }) as Types.Customization;
+
   const CustomMeasurementItem = itemCustomization.content;
 
   const onMeasurementDeleteHandler = ({ uid }) => {
@@ -69,12 +72,6 @@ const MeasurementTable = ({
       </div>
     </div>
   );
-};
-
-MeasurementTable.defaultProps = {
-  data: [],
-  onClick: () => {},
-  onEdit: () => {},
 };
 
 MeasurementTable.propTypes = {

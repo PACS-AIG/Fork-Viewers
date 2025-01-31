@@ -68,7 +68,7 @@ const moreTools = [
             },
           },
           listeners: {
-            [EVENTS.STACK_VIEWPORT_NEW_STACK]: {
+            [EVENTS.VIEWPORT_NEW_IMAGE_SET]: {
               commandName: 'toggleImageSliceSync',
               commandOptions: { toggledState: true },
             },
@@ -136,6 +136,14 @@ const moreTools = [
           evaluate: 'evaluate.cornerstoneTool',
         }),
         createButton({
+          id: 'CobbAngle',
+          icon: 'icon-tool-cobb-angle',
+          label: 'Cobb Angle',
+          tooltip: 'Cobb Angle',
+          commands: setToolActiveToolbar,
+          evaluate: 'evaluate.cornerstoneTool',
+        }),
+        createButton({
           id: 'Magnify',
           icon: 'tool-magnify',
           label: 'Zoom-in',
@@ -180,7 +188,21 @@ const moreTools = [
           label: 'Ultrasound Directional',
           tooltip: 'Ultrasound Directional',
           commands: setToolActiveToolbar,
-          evaluate: ['evaluate.cornerstoneTool', 'evaluate.isUS'],
+          evaluate: [
+            'evaluate.cornerstoneTool',
+            {
+              name: 'evaluate.modality.supported',
+              supportedModalities: ['US'],
+            },
+          ],
+        }),
+        createButton({
+          id: 'WindowLevelRegion',
+          icon: 'icon-tool-window-region',
+          label: 'Window Level Region',
+          tooltip: 'Window Level Region',
+          commands: setToolActiveToolbar,
+          evaluate: 'evaluate.cornerstoneTool',
         }),
       ],
     },

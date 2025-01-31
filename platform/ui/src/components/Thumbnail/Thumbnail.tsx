@@ -17,9 +17,10 @@ const Thumbnail = ({
   description,
   seriesNumber,
   numInstances,
+  loadingProgress,
   countIcon,
   messages,
-  dragData,
+  dragData = {},
   isActive,
   onClick,
   onDoubleClick,
@@ -56,6 +57,7 @@ const Thumbnail = ({
       )}
       id={`thumbnail-${displaySetInstanceUID}`}
       data-cy={`study-browser-thumbnail`}
+      data-series={seriesNumber}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onTouchEnd={handleTouchEnd}
@@ -94,10 +96,19 @@ const Thumbnail = ({
             />
             {` ${numInstances}`}
           </div>
-          <DisplaySetMessageListTooltip
-            messages={messages}
-            id={`display-set-tooltip-${displaySetInstanceUID}`}
-          />
+          <div className="mr-2 flex last:mr-0">
+            {loadingProgress && loadingProgress < 1 && <>{Math.round(loadingProgress * 100)}%</>}
+            {loadingProgress && loadingProgress === 1 && (
+              <Icon
+                name={'database'}
+              className="w-3"
+            />
+          )}
+        </div>
+        <DisplaySetMessageListTooltip
+          messages={messages}
+          id={`display-set-tooltip-${displaySetInstanceUID}`}
+        />
         </div>
         <div className="break-all text-base text-white">{description}</div>
       </div>
@@ -124,14 +135,11 @@ Thumbnail.propTypes = {
   description: PropTypes.string.isRequired,
   seriesNumber: StringNumber.isRequired,
   numInstances: PropTypes.number.isRequired,
+  loadingProgress: PropTypes.number,
   messages: PropTypes.object,
   isActive: PropTypes.bool.isRequired,
   onClick: PropTypes.func.isRequired,
   onDoubleClick: PropTypes.func.isRequired,
-};
-
-Thumbnail.defaultProps = {
-  dragData: {},
 };
 
 export default Thumbnail;

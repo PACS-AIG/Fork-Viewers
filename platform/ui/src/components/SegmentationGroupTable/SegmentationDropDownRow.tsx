@@ -7,7 +7,7 @@ function SegmentationDropDownRow({
   segmentations = [],
   activeSegmentation,
   onActiveSegmentationChange,
-  disableEditing,
+  disableEditing = false,
   onToggleSegmentationVisibility,
   onSegmentationEdit,
   onSegmentationDownload,
@@ -98,7 +98,7 @@ function SegmentationDropDownRow({
             ],
           ]}
         >
-          <div className="hover:bg-secondary-dark  grid h-[28px] w-[28px]  cursor-pointer place-items-center rounded-[4px]">
+          <div className="hover:bg-secondary-dark grid h-[28px] w-[28px] cursor-pointer place-items-center rounded-[4px]">
             <Icon name="icon-more-menu"></Icon>
           </div>
         </Dropdown>
@@ -138,7 +138,7 @@ function SegmentationDropDownRow({
           />
         </Tooltip>
         <div
-          className="hover:bg-secondary-dark  mr-1 grid h-[28px]  w-[28px] cursor-pointer place-items-center rounded-[4px]"
+          className="hover:bg-secondary-dark mr-1 grid h-[28px] w-[28px] cursor-pointer place-items-center rounded-[4px]"
           onClick={() => onToggleSegmentationVisibility(activeSegmentation.id)}
         >
           {activeSegmentation.isVisible ? (
@@ -178,11 +178,6 @@ SegmentationDropDownRow.propTypes = {
   storeSegmentation: PropTypes.func,
   onSegmentationDelete: PropTypes.func,
   onSegmentationAdd: PropTypes.func,
-};
-
-SegmentationDropDownRow.defaultProps = {
-  segmentations: [],
-  disableEditing: false,
 };
 
 export default SegmentationDropDownRow;
