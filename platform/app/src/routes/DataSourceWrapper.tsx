@@ -94,7 +94,7 @@ function DataSourceWrapper(props: withAppTypes) {
     if (!dataSourceName) {
       const ds = extensionManager.getActiveDataSource();
       if (!ds) {
-        throw new Error(`No data source found for ${dataSourceName}`);
+        return null;
       }
       return ds[0];
     }
@@ -120,8 +120,10 @@ function DataSourceWrapper(props: withAppTypes) {
    */
   useEffect(() => {
     const initializeDataSource = async () => {
-      await dataSource.initialize({ params, query });
-      setIsDataSourceInitialized(true);
+      if (dataSource) {
+        await dataSource.initialize({ params, query });
+        setIsDataSourceInitialized(true);
+      }
     };
 
     initializeDataSource();
