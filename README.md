@@ -169,12 +169,13 @@ also supports a number of commands that can be found in their respective
 | Commands                | Description                                                   |
 | ---------------------------- | ------------------------------------------------------------- |
 | **Develop**                  |                                                               |
-| `dev` or `start`             | Default development experience for Viewer                     |
+| `dev`              | Default development experience for Viewer                     |
+| `dev:fast`             | Our experimental fast dev mode that uses rsbuild instead of webpack                     |
 | `test:unit`                  | Jest multi-project test runner; overall coverage              |
 | **Deploy**                   |                                                               |
 | `build`\*                    | Builds production output for our PWA Viewer                   |  |
 
-\* - For more information on our different builds, check out our [Deploy
+\* - For more information on different builds, check out our [Deploy
 Docs][deployment-docs]
 
 ## Project

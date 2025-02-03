@@ -199,7 +199,7 @@ class MetadataProvider {
         break;
       case WADO_IMAGE_LOADER_TAGS.VOI_LUT_MODULE:
         const { WindowCenter, WindowWidth, VOILUTFunction } = instance;
-        if (WindowCenter === undefined || WindowWidth === undefined) {
+        if (WindowCenter == null || WindowWidth == null) {
           return;
         }
         const windowCenter = Array.isArray(WindowCenter) ? WindowCenter : [WindowCenter];
@@ -382,7 +382,7 @@ class MetadataProvider {
         };
 
         break;
-      case WADO_IMAGE_LOADER_TAGS.PER_SERIES_MODULE:
+      case WADO_IMAGE_LOADER_TAGS.PET_SERIES_MODULE:
         metadata = {
           correctedImage: instance.CorrectedImage,
           units: instance.Units,
@@ -539,6 +539,7 @@ const WADO_IMAGE_LOADER = {
       frameOfReferenceUID: instance.FrameOfReferenceUID,
       rows: toNumber(instance.Rows),
       columns: toNumber(instance.Columns),
+      spacingBetweenSlices: toNumber(instance.SpacingBetweenSlices),
       imageOrientationPatient: toNumber(ImageOrientationPatient) || [0, 1, 0, 0, 0, -1],
       rowCosines: toNumber(rowCosines || [0, 1, 0]),
       isDefaultValueSetForRowCosine: toNumber(rowCosines) ? false : true,
@@ -564,7 +565,7 @@ const WADO_IMAGE_LOADER_TAGS = {
   SOP_COMMON_MODULE: 'sopCommonModule',
   PET_IMAGE_MODULE: 'petImageModule',
   PET_ISOTOPE_MODULE: 'petIsotopeModule',
-  PER_SERIES_MODULE: 'petSeriesModule',
+  PET_SERIES_MODULE: 'petSeriesModule',
   OVERLAY_PLANE_MODULE: 'overlayPlaneModule',
   PATIENT_DEMOGRAPHIC_MODULE: 'patientDemographicModule',
 

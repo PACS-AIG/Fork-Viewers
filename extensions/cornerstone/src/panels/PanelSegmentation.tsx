@@ -8,7 +8,7 @@ export default function PanelSegmentation({
   commandsManager,
   children,
 }: withAppTypes) {
-  const { customizationService, viewportGridService, displaySetService } = servicesManager.services;
+  const { customizationService, displaySetService } = servicesManager.services;
 
   const { segmentationsWithRepresentations, disabled } =
     useActiveViewportSegmentationRepresentations({
@@ -16,11 +16,6 @@ export default function PanelSegmentation({
     });
 
   const handlers = {
-    onSegmentationAdd: async () => {
-      const viewportId = viewportGridService.getState().activeViewportId;
-      commandsManager.run('createLabelmapForViewport', { viewportId });
-    },
-
     onSegmentationClick: (segmentationId: string) => {
       commandsManager.run('setActiveSegmentation', { segmentationId });
     },
@@ -114,37 +109,19 @@ export default function PanelSegmentation({
     },
   };
 
-  const { mode: SegmentationTableMode } = customizationService.getCustomization(
-    'PanelSegmentation.tableMode',
-    {
-      id: 'default.segmentationTable.mode',
-      mode: 'collapsed',
-    }
+  const segmentationTableMode = customizationService.getCustomization(
+    'panelSegmentation.tableMode'
   );
 
   // custom onSegmentationAdd if provided
-  const { onSegmentationAdd } = customizationService.getCustomization(
-    'PanelSegmentation.onSegmentationAdd',
-    {
-      id: 'segmentation.onSegmentationAdd',
-      onSegmentationAdd: handlers.onSegmentationAdd,
-    }
+  const onSegmentationAdd = customizationService.getCustomization(
+    'panelSegmentation.onSegmentationAdd'
   );
 
-  const { disableEditing } = customizationService.getCustomization(
-    'PanelSegmentation.disableEditing',
-    {
-      id: 'default.disableEditing',
-      disableEditing: false,
-    }
-  );
-
-  const { showAddSegment } = customizationService.getCustomization(
-    'PanelSegmentation.showAddSegment',
-    {
-      id: 'default.showAddSegment',
-      showAddSegment: true,
-    }
+  const disableEditing = customizationService.getCustomization('panelSegmentation.disableEditing');
+  const showAddSegment = customizationService.getCustomization('panelSegmentation.showAddSegment');
+  const CustomDropdownMenuContent = customizationService.getCustomization(
+    'panelSegmentation.customDropdownMenuContent'
   );
 
   const exportOptions = segmentationsWithRepresentations.map(({ segmentation }) => {
@@ -170,13 +147,15 @@ export default function PanelSegmentation({
       };
     }
 
-    const { SOPInstanceUID, SeriesInstanceUID } = instance;
+    const SOPInstanceUID = instance.SOPInstanceUID || instance.SopInstanceUID;
+    const SeriesInstanceUID = instance.SeriesInstanceUID;
 
     const displaySet = displaySetService.getDisplaySetForSOPInstanceUID(
       SOPInstanceUID,
       SeriesInstanceUID
     );
-    const isExportable = displaySet.isReconstructable;
+
+    const isExportable = displaySet?.isReconstructable;
 
     return {
       segmentationId,
@@ -189,7 +168,7 @@ export default function PanelSegmentation({
       <SegmentationTable
         disabled={disabled}
         data={segmentationsWithRepresentations}
-        mode={SegmentationTableMode}
+        mode={segmentationTableMode}
         title="Segmentations"
         exportOptions={exportOptions}
         disableEditing={disableEditing}
@@ -225,15 +204,19 @@ export default function PanelSegmentation({
         <SegmentationTable.Config />
         <SegmentationTable.AddSegmentationRow />
 
-        {SegmentationTableMode === 'collapsed' ? (
+        {segmentationTableMode === 'collapsed' ? (
           <SegmentationTable.Collapsed>
-            <SegmentationTable.SelectorHeader />
+            <SegmentationTable.SelectorHeader>
+              <CustomDropdownMenuContent />
+            </SegmentationTable.SelectorHeader>
             <SegmentationTable.AddSegmentRow />
             <SegmentationTable.Segments />
           </SegmentationTable.Collapsed>
         ) : (
           <SegmentationTable.Expanded>
-            <SegmentationTable.Header />
+            <SegmentationTable.Header>
+              <CustomDropdownMenuContent />
+            </SegmentationTable.Header>
             {/* <SegmentationTable.AddSegmentRow /> */}
             <SegmentationTable.Segments />
           </SegmentationTable.Expanded>

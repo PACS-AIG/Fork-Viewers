@@ -35,7 +35,8 @@ class UIDialogService extends PubSubService {
     preservePosition = true,
     isDraggable = true,
     showOverlay = false,
-    defaultPosition = { x: 0, y: 0 },
+    defaultPosition,
+    onClickOutside,
   }) {
     return this.serviceImplementation._create({
       id,
@@ -49,6 +50,7 @@ class UIDialogService extends PubSubService {
       isDraggable,
       showOverlay,
       defaultPosition,
+      onClickOutside,
     });
   }
 
