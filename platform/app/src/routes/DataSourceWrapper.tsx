@@ -92,7 +92,11 @@ function DataSourceWrapper(props: withAppTypes) {
     const dataSourceName = getInitialDataSourceName();
 
     if (!dataSourceName) {
-      return extensionManager.getActiveDataSource()[0];
+      const ds = extensionManager.getActiveDataSource();
+      if (!ds) {
+        throw new Error(`No data source found for ${dataSourceName}`);
+      }
+      return ds[0];
     }
 
     const dataSource = extensionManager.getDataSources(dataSourceName)?.[0];
