@@ -37,11 +37,24 @@ describe('baseRelevance', () => {
     expect(baseRelevance({ current: cxr, prior: ctAbd })).toBe(40);
   });
 
-  it('returns 0 for unrelated anatomy and missing metadata', () => {
+  it('returns 0 for unrelated anatomy with known body parts', () => {
     const ctHead = study({ Modality: 'CT', StudyDescription: 'CT Head' });
     const mrKnee = study({ Modality: 'MR', StudyDescription: 'MR Knee' });
     expect(baseRelevance({ current: ctHead, prior: mrKnee })).toBe(0);
-    expect(baseRelevance({ current: study({}), prior: study({}) })).toBe(0);
+  });
+
+  it('recognizes abbreviated descriptions (ABD PEL)', () => {
+    const current = study({ Modality: 'CT', StudyDescription: 'ABD PEL W 5.00 Br40 ax' });
+    const prior = study({ Modality: 'CT', StudyDescription: 'ABD PELVIS WITH 5.00 Br40 ax' });
+    expect(baseRelevance({ current, prior })).toBe(100);
+  });
+
+  it('falls back to modality when body part is unknown (never drops same-modality priors)', () => {
+    const a = study({ Modality: 'CT', StudyDescription: 'unparseable 123' });
+    const b = study({ Modality: 'CT', StudyDescription: 'xyz protocol' });
+    const c = study({ Modality: 'MR', StudyDescription: 'xyz protocol' });
+    expect(baseRelevance({ current: a, prior: b })).toBe(60);
+    expect(baseRelevance({ current: a, prior: c })).toBe(20);
   });
 });
 

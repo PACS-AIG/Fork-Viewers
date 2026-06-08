@@ -29,6 +29,10 @@ import type { StudyLike } from './types';
 // Guards against concurrent re-entry for the same active study.
 const inFlight = new Set<string>();
 
+// Temporary verbose logging to debug prior selection. Set to false to silence.
+const DEBUG = true;
+const log = (...args: unknown[]) => DEBUG && console.log('[pacsai-hp]', ...args);
+
 export async function loadRelevantPriors({ servicesManager, extensionManager }: withAppTypes) {
   const { hangingProtocolService, displaySetService, customizationService, uiNotificationService } =
     servicesManager?.services ?? {};
@@ -38,15 +42,17 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
   }
 
   const { protocol } = hangingProtocolService.getActiveProtocol() ?? {};
+  log('loadRelevantPriors invoked. active protocol =', protocol?.id);
   if (!protocol?.id) {
     return;
   }
 
   const policy = getPriorPolicy(protocol.id, customizationService);
   if (!policy) {
-    // Active protocol does not auto-load priors.
+    log('no prior policy for active protocol — skipping (not a comparison protocol)');
     return;
   }
+  log('policy', { minScore: policy.minScore, maxPriors: policy.maxPriors });
 
   const currentStudyUID = hangingProtocolService.getState()?.activeStudyUID;
   if (!currentStudyUID || inFlight.has(currentStudyUID)) {
@@ -68,6 +74,13 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       return;
     }
     const current = qidoForStudyUID[0] as StudyLike;
+    log('current study', {
+      uid: current.StudyInstanceUID,
+      Modality: current.Modality,
+      ModalitiesInStudy: current.ModalitiesInStudy,
+      StudyDescription: current.StudyDescription,
+      mrn: (current as Record<string, unknown>).mrn ?? current.PatientID,
+    });
 
     let patientStudies: StudyLike[];
     try {
@@ -76,13 +89,29 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       console.warn('[pacsai-hp] Failed to query patient studies for priors', error);
       return;
     }
+    log(`patient query returned ${patientStudies.length} studies`);
 
-    const ranked = patientStudies
+    const scored = patientStudies
       .filter(study => study?.StudyInstanceUID && study.StudyInstanceUID !== currentStudyUID)
-      .map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }))
+      .map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }));
+
+    log(
+      'candidate priors with scores',
+      scored.map(({ prior, score }) => ({
+        uid: prior.StudyInstanceUID,
+        score,
+        StudyDescription: prior.StudyDescription,
+        StudyDate: prior.StudyDate,
+        ModalitiesInStudy: prior.ModalitiesInStudy,
+      }))
+    );
+
+    const ranked = scored
       .filter(({ score }) => score >= policy.minScore)
       .sort((a, b) => b.score - a.score)
       .slice(0, policy.maxPriors);
+
+    log(`${ranked.length} prior(s) passed minScore=${policy.minScore}`);
 
     if (!ranked.length) {
       // No qualifying priors — the current-only fallback stage already hangs.
@@ -109,6 +138,12 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     ].filter(Boolean);
 
     const activeStudy = orderedStudies[0];
+    log(
+      're-hanging',
+      protocol.id,
+      'with studies',
+      orderedStudies.map(s => s?.StudyInstanceUID)
+    );
     hangingProtocolService.run(
       {
         studies: orderedStudies,

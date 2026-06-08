@@ -17,6 +17,9 @@ import { getBodyPart, getModality } from '../metadata';
 
 const SAME_MODALITY_SAME_BODY_PART = 100;
 const SAME_BODY_PART_DIFFERENT_MODALITY_DEFAULT = 70;
+// Fallbacks when a body part can't be parsed from the description/metadata.
+const SAME_MODALITY_UNKNOWN_BODY_PART = 60;
+const DIFFERENT_MODALITY_UNKNOWN_BODY_PART = 20;
 
 /** Treat projection radiography modalities as one family. */
 function modalityFamily(modality?: string): string | undefined {
@@ -77,7 +80,15 @@ export const baseRelevance: PriorScorer = ({ current, prior }: PriorContext): nu
     return SAME_BODY_PART_MODALITY_PAIR[key] ?? SAME_BODY_PART_DIFFERENT_MODALITY_DEFAULT;
   }
 
-  // Different (or unknown) body part — fall back to cross-anatomy overlap table.
+  // If we couldn't parse a body part for one/both studies, don't assume they're
+  // unrelated — lean on modality so a same-modality prior still qualifies. This
+  // keeps the primary goal (compare against the obvious prior) working even with
+  // cryptic study descriptions.
+  if (curBp === 'unknown' || priBp === 'unknown') {
+    return sameModality ? SAME_MODALITY_UNKNOWN_BODY_PART : DIFFERENT_MODALITY_UNKNOWN_BODY_PART;
+  }
+
+  // Both body parts known and different — use the cross-anatomy overlap table.
   const crossKey = `${curBp}>${priBp}`;
   return CROSS_BODY_PART[crossKey] ?? 0;
 };

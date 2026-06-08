@@ -35,16 +35,22 @@ export function getModality(study: StudyLike): string | undefined {
   return undefined;
 }
 
-/** Keyword → body-part mapping applied to BodyPartExamined / StudyDescription. */
+/**
+ * Keyword → body-part mapping applied to BodyPartExamined / StudyDescription.
+ * Includes common radiology abbreviations (ABD, PEL, CXR, C-SPINE, ...) since
+ * real-world descriptions rarely spell anatomy out in full.
+ * Order matters: the first match wins (e.g. an "ABD PEL" study resolves to
+ * abdomen, which is fine as long as current and prior resolve consistently).
+ */
 const BODY_PART_KEYWORDS: Array<[RegExp, BodyPart]> = [
-  [/\b(brain|head|skull|cranial)\b/i, 'head'],
-  [/\b(neck|cervical|carotid)\b/i, 'neck'],
-  [/\b(chest|thorax|thoracic|lung|cxr|pulmonary)\b/i, 'chest'],
+  [/\b(brain|head|skull|cranial|hd)\b/i, 'head'],
+  [/\b(neck|cervical|carotid|c-?spine)\b/i, 'neck'],
+  [/\b(chest|thorax|thoracic|lung|cxr|cx|pulmonary|thx)\b/i, 'chest'],
   [/\b(cardiac|heart|coronary|echo)\b/i, 'cardiac'],
-  [/\b(abdomen|abdominal|liver|kidney|renal|pancrea)\b/i, 'abdomen'],
-  [/\b(spine|spinal|lumbar|thoracic spine|vertebr)\b/i, 'spine'],
-  [/\b(pelvis|pelvic|hip|bladder|prostate)\b/i, 'pelvis'],
-  [/\b(breast|mammo)\b/i, 'breast'],
+  [/\b(abdomen|abdominal|abdo|abd|liver|kidney|renal|pancrea)\b/i, 'abdomen'],
+  [/\b(spine|spinal|lumbar|l-?spine|t-?spine|vertebr)\b/i, 'spine'],
+  [/\b(pelvis|pelvic|pelv|pel|hip|bladder|prostate)\b/i, 'pelvis'],
+  [/\b(breast|mammo|mg)\b/i, 'breast'],
   [/\b(arm|leg|knee|shoulder|ankle|wrist|elbow|femur|tibia|hand|foot|extremity)\b/i, 'extremity'],
 ];
 
