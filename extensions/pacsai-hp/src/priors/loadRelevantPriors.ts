@@ -29,6 +29,23 @@ import type { StudyLike } from './types';
 // Guards against concurrent re-entry for the same active study.
 const inFlight = new Set<string>();
 
+/**
+ * Normalize an OHIF QIDO study-summary object (see DicomWebDataSource/qido.js:
+ * `{ studyInstanceUid, date, description, modalities, mrn, ... }`) into the
+ * StudyLike shape the scorers expect. The QIDO result does NOT use DICOM
+ * keyword casing, so we remap explicitly.
+ */
+function toStudyLike(qido: Record<string, unknown> = {}): StudyLike {
+  return {
+    StudyInstanceUID: (qido.studyInstanceUid ?? qido.StudyInstanceUID) as string,
+    StudyDate: (qido.date ?? qido.StudyDate) as string,
+    StudyDescription: (qido.description ?? qido.StudyDescription) as string,
+    // `modalities` is a (possibly backslash-delimited) string; getModality handles it.
+    ModalitiesInStudy: (qido.modalities ?? qido.ModalitiesInStudy) as string,
+    PatientID: (qido.mrn ?? qido.PatientID) as string,
+  };
+}
+
 // Temporary verbose logging to debug prior selection. Set to false to silence.
 const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log('[pacsai-hp]', ...args);
@@ -73,16 +90,10 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     if (!qidoForStudyUID?.length) {
       return;
     }
-    const current = qidoForStudyUID[0] as StudyLike;
-    log('current study', {
-      uid: current.StudyInstanceUID,
-      Modality: current.Modality,
-      ModalitiesInStudy: current.ModalitiesInStudy,
-      StudyDescription: current.StudyDescription,
-      mrn: (current as Record<string, unknown>).mrn ?? current.PatientID,
-    });
+    const current = toStudyLike(qidoForStudyUID[0]);
+    log('current study', current);
 
-    let patientStudies: StudyLike[];
+    let patientStudies: Array<Record<string, unknown>>;
     try {
       patientStudies = (await getStudiesForPatientByMRN(dataSource, qidoForStudyUID)) ?? [];
     } catch (error) {
@@ -92,7 +103,8 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     log(`patient query returned ${patientStudies.length} studies`);
 
     const scored = patientStudies
-      .filter(study => study?.StudyInstanceUID && study.StudyInstanceUID !== currentStudyUID)
+      .map(toStudyLike)
+      .filter(study => study.StudyInstanceUID && study.StudyInstanceUID !== currentStudyUID)
       .map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }));
 
     log(
