@@ -1,0 +1,42 @@
+{
+  "name": "@ohif/extension-pacsai-hp",
+  "version": "3.10.0-beta.84",
+  "description": "PACS-AI hanging protocols: modality-aware layouts with auto-loaded relevant priors",
+  "author": "PACS-AI",
+  "license": "MIT",
+  "repository": "OHIF/Viewers",
+  "main": "dist/ohif-extension-pacsai-hp.umd.js",
+  "module": "src/index.tsx",
+  "engines": {
+    "node": ">=14",
+    "npm": ">=6",
+    "yarn": ">=1.16.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ohif-extension"
+  ],
+  "scripts": {
+    "clean": "shx rm -rf dist",
+    "clean:deep": "yarn run clean && shx rm -rf node_modules",
+    "dev": "cross-env NODE_ENV=development webpack --config .webpack/webpack.dev.js --watch --output-pathinfo",
+    "build": "cross-env NODE_ENV=production webpack --config .webpack/webpack.prod.js",
+    "build:package-1": "yarn run build",
+    "start": "yarn run dev",
+    "test:unit": "jest --watchAll",
+    "test:unit:ci": "jest --ci --runInBand --collectCoverage --passWithNoTests"
+  },
+  "peerDependencies": {
+    "@ohif/core": "3.10.0-beta.84",
+    "@ohif/extension-default": "3.10.0-beta.84"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.20.13"
+  }
+}

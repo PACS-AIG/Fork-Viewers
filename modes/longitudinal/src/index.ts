@@ -70,6 +70,7 @@ const extensionDependencies = {
   '@ohif/extension-cornerstone-dicom-rt': '^3.0.0',
   '@ohif/extension-dicom-pdf': '^3.0.1',
   '@ohif/extension-dicom-video': '^3.0.1',
+  '@ohif/extension-pacsai-hp': '^3.0.0',
 };
 
 function modeFactory({ modeConfiguration }) {
@@ -132,6 +133,12 @@ function modeFactory({ modeConfiguration }) {
       //   ),
       //   true,
       // ];
+    },
+    onSetupRouteComplete: ({ commandsManager }: withAppTypes) => {
+      // Runs after the initial hanging protocol has been matched/applied. If the
+      // active protocol is a comparison protocol, this fetches the relevant
+      // prior(s) and re-hangs current-vs-prior side by side. No-op otherwise.
+      commandsManager.run('loadRelevantPriors');
     },
     onModeExit: ({ servicesManager }: withAppTypes) => {
       const {
@@ -221,8 +228,16 @@ function modeFactory({ modeConfiguration }) {
       },
     ],
     extensions: extensionDependencies,
-    // Default protocol gets self-registered by default in the init
-    hangingProtocol: 'default',
+    // Modality-aware comparison protocols are listed first so the hanging
+    // protocol service auto-matches by the current study's modality; `default`
+    // is the fallback when none match. onSetupRouteComplete then auto-loads the
+    // relevant prior(s) and re-hangs current-vs-prior side by side.
+    hangingProtocol: [
+      '@pacsai/compareCT',
+      '@pacsai/compareMR',
+      '@pacsai/compareCR',
+      'default',
+    ],
     // Order is important in sop class handlers when two handlers both use
     // the same sop class under different situations.  In that case, the more
     // general handler needs to come last.  For this case, the dicomvideo must
