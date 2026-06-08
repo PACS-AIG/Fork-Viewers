@@ -8,14 +8,21 @@ and re-hangs current-vs-prior side by side.
 
 ## What it provides
 
-- **Comparison protocols** (`getHangingProtocolModule`):
-  - `@pacsai/compareCT` — CT, current + up to 2 priors
-  - `@pacsai/compareMR` — MR, current + up to 2 priors
-  - `@pacsai/compareCR` — CR/DX/XR, current + 1 prior
+- **Comparison protocols** (`getHangingProtocolModule`), current beside prior:
+  - Generic per-modality (fallbacks): `@pacsai/compareCT`, `@pacsai/compareMR`
+    (axial/coronal/sagittal), `@pacsai/compareCR` (single image).
+  - Exam-specific (higher weight, win when the exam matches):
+    - `@pacsai/compareCTSpine` / `@pacsai/compareMRSpine` — **sagittal-first**.
+    - `@pacsai/compareCTChest` — axial **lung/soft/bone windows** + coronal.
+    - `@pacsai/compareCTHead` — axial **brain/bone windows**.
+    - `@pacsai/compareMRBrain` — **by sequence** (T1/T2/FLAIR/DWI).
 
-  Each matches on the current study's modality only (not on prior presence) and
-  has stages that degrade from densest (current + N priors) to current-only via
-  `stageActivation.minViewportsMatched`.
+  Exam protocols match on modality + `StudyDescription` (body part); generic ones
+  match modality only. `ProtocolEngine` picks the highest-weight match, so the
+  exam protocol wins when it applies and falls back to the generic one otherwise.
+  All match on the current study only (not on prior presence): stages with a
+  prior viewport stay disabled (via `minViewportsMatched`) until the loader hangs
+  a prior. Series matching requires real image counts and excludes scouts/topograms.
 
 - **`loadRelevantPriors` command** (`getCommandsModule`): finds, scores, loads,
   and re-hangs the relevant priors. No-op for non-comparison protocols, data

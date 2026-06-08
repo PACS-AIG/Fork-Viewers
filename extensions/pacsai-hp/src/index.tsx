@@ -3,6 +3,7 @@ import { Types } from '@ohif/core';
 import { id } from './id';
 import getHangingProtocolModule from './getHangingProtocolModule';
 import getCommandsModule from './getCommandsModule';
+import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from './overlays/priorOverlayItem';
 
 /**
  * PACS-AI hanging protocols extension.
@@ -18,3 +19,4 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
 };
 
 export default pacsaiHpExtension;
+export { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID };

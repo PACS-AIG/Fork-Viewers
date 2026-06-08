@@ -1,15 +1,21 @@
-import buildCompareProtocol from './buildCompareProtocol';
+import buildCompareProtocol, { PLANE_SELECTORS } from './buildCompareProtocol';
 
 /**
- * CT current-vs-prior comparison. Hangs the current CT next to up to 2 relevant
- * prior CTs (degrading to current+1 / current-only when fewer are available).
+ * Generic CT current-vs-prior comparison: axial / coronal / sagittal, current
+ * beside prior. Used for any CT exam that doesn't have a more specific protocol
+ * (spine, chest, head).
  */
 export const hpCompareCT = buildCompareProtocol({
   id: '@pacsai/compareCT',
   name: 'CT Compare',
-  description: 'Current vs prior CT, side by side',
+  description: 'Current vs prior CT — axial/coronal/sagittal, side by side',
   modalities: ['CT'],
-  maxPriors: 2,
+  selectors: PLANE_SELECTORS,
+  stages: [
+    { name: 'Axial (current/prior)', selector: 'ax' },
+    { name: 'Coronal (current/prior)', selector: 'cor' },
+    { name: 'Sagittal (current/prior)', selector: 'sag' },
+  ],
 });
 
 export default hpCompareCT;

@@ -1,5 +1,6 @@
 import { hotkeys } from '@ohif/core';
 import i18n from 'i18next';
+import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
 import toolbarButtons from './toolbarButtons';
@@ -85,9 +86,19 @@ function modeFactory({ modeConfiguration }) {
      * Lifecycle hooks
      */
     onModeEnter: function ({ servicesManager, extensionManager, commandsManager }: withAppTypes) {
-      const { measurementService, toolbarService, toolGroupService } = servicesManager.services;
+      const { measurementService, toolbarService, toolGroupService, customizationService } =
+        servicesManager.services;
 
       measurementService.clearMeasurements();
+
+      // Add the yellow "PRIOR" badge to the top-right viewport overlay. Idempotent
+      // so re-entering the mode doesn't duplicate it.
+      const topRight = customizationService.getCustomization('viewportOverlay.topRight') || [];
+      if (!topRight.some((item: { id?: string }) => item?.id === PRIOR_OVERLAY_ITEM_ID)) {
+        customizationService.setCustomizations({
+          'viewportOverlay.topRight': { $set: [...topRight, priorOverlayItem] },
+        });
+      }
 
       // Init Default and SR ToolGroups
       initToolGroups(extensionManager, toolGroupService, commandsManager, this.labelConfig);
@@ -233,6 +244,13 @@ function modeFactory({ modeConfiguration }) {
     // is the fallback when none match. onSetupRouteComplete then auto-loads the
     // relevant prior(s) and re-hangs current-vs-prior side by side.
     hangingProtocol: [
+      // Exam-specific (higher weight; win when the exam matches)
+      '@pacsai/compareCTSpine',
+      '@pacsai/compareMRSpine',
+      '@pacsai/compareCTChest',
+      '@pacsai/compareCTHead',
+      '@pacsai/compareMRBrain',
+      // Generic per-modality fallbacks
       '@pacsai/compareCT',
       '@pacsai/compareMR',
       '@pacsai/compareCR',

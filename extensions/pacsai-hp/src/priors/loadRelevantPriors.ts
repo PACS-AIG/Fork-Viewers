@@ -46,7 +46,7 @@ function toStudyLike(qido: Record<string, unknown> = {}): StudyLike {
   };
 }
 
-// Temporary verbose logging to debug prior selection. Set to false to silence.
+// Verbose logging to debug prior selection. Flip to true when troubleshooting.
 const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log('[pacsai-hp]', ...args);
 

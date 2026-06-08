@@ -11,11 +11,16 @@ import indication from './scorers/indication';
  */
 const DEFAULT_SCORERS = [baseRelevance, recency, indication];
 
-const DEFAULT_POLICIES: Record<string, PriorPolicy> = {
-  '@pacsai/compareCT': { scorers: DEFAULT_SCORERS, minScore: 30, maxPriors: 2 },
-  '@pacsai/compareMR': { scorers: DEFAULT_SCORERS, minScore: 30, maxPriors: 2 },
-  '@pacsai/compareCR': { scorers: DEFAULT_SCORERS, minScore: 30, maxPriors: 1 },
-};
+// All pacsai compare protocols hang current vs a single most-relevant prior, so
+// they share one default policy. A protocol-specific entry here overrides it.
+const COMPARE_DEFAULT: PriorPolicy = { scorers: DEFAULT_SCORERS, minScore: 30, maxPriors: 1 };
+
+const DEFAULT_POLICIES: Record<string, PriorPolicy> = {};
+
+/** Returns true for any pacsai comparison protocol id. */
+function isCompareProtocol(protocolId: string): boolean {
+  return protocolId.startsWith('@pacsai/compare');
+}
 
 export const PRIOR_POLICY_CUSTOMIZATION_KEY = 'pacsai.priorPolicy';
 
@@ -30,7 +35,8 @@ export function getPriorPolicy(
   protocolId: string,
   customizationService?: { getCustomization?: (key: string) => unknown }
 ): PriorPolicy | undefined {
-  const base = DEFAULT_POLICIES[protocolId];
+  const base =
+    DEFAULT_POLICIES[protocolId] ?? (isCompareProtocol(protocolId) ? COMPARE_DEFAULT : undefined);
   if (!base) {
     return undefined;
   }
