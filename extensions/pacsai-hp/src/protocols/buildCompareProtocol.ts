@@ -151,7 +151,10 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     viewportOptions: {
       ...compareViewportOptions,
       syncGroups: [
-        { type: 'imageslice', id: `${id}-scroll-${selectorKey}`, source: true, target: true },
+        // Cross-study relative scroll sync (registered by the extension as
+        // 'pacsaiscroll'); the built-in 'imageslice' sync is position-based and
+        // does not work across different studies / frames of reference.
+        { type: 'pacsaiscroll', id: `${id}-scroll-${selectorKey}`, source: true, target: true },
       ],
     },
     displaySets: [{ id: `${role}-${selectorKey}`, ...(voi ? { options: { voi } } : {}) }],

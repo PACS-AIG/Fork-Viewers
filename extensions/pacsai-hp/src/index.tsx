@@ -4,6 +4,10 @@ import { id } from './id';
 import getHangingProtocolModule from './getHangingProtocolModule';
 import getCommandsModule from './getCommandsModule';
 import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from './overlays/priorOverlayItem';
+import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
+
+/** Sync type registered for cross-study (current vs prior) relative scroll sync. */
+export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
 
 /**
  * PACS-AI hanging protocols extension.
@@ -14,6 +18,13 @@ import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from './overlays/priorOverlay
  */
 const pacsaiHpExtension: Types.Extensions.Extension = {
   id,
+
+  /** Register the cross-study relative scroll synchronizer used by the protocols. */
+  preRegistration: ({ servicesManager }: Types.Extensions.ExtensionParams) => {
+    const { syncGroupService } = servicesManager.services;
+    syncGroupService?.addSynchronizerType?.(SCROLL_SYNC_TYPE, createScrollSyncSynchronizer);
+  },
+
   getHangingProtocolModule,
   getCommandsModule,
 };
