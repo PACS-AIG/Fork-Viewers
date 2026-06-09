@@ -143,8 +143,17 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   });
 
+  // Scroll-sync current vs prior. The sync id is scoped per selector (plane /
+  // sequence) so the axial pair scrolls together but the "Current (3 planes)"
+  // fallback doesn't cross-sync different planes. `imageslice` syncs the scrolled
+  // slice and works across studies (different frames of reference).
   const viewport = (role: Role, selectorKey: string, voi?: VOI) => ({
-    viewportOptions: compareViewportOptions,
+    viewportOptions: {
+      ...compareViewportOptions,
+      syncGroups: [
+        { type: 'imageslice', id: `${id}-scroll-${selectorKey}`, source: true, target: true },
+      ],
+    },
     displaySets: [{ id: `${role}-${selectorKey}`, ...(voi ? { options: { voi } } : {}) }],
   });
 

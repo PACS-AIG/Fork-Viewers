@@ -209,7 +209,7 @@ const toolbarButtons: Button[] = [
     id: 'PreviousStage',
     uiType: 'ohif.toolButton',
     props: {
-      icon: 'chevron-left',
+      icon: 'prev-arrow',
       label: 'Previous Stage',
       tooltip: 'Previous hanging protocol stage',
       commands: 'previousStage',
@@ -220,7 +220,7 @@ const toolbarButtons: Button[] = [
     id: 'NextStage',
     uiType: 'ohif.toolButton',
     props: {
-      icon: 'chevron-right',
+      icon: 'next-arrow',
       label: 'Next Stage',
       tooltip: 'Next hanging protocol stage',
       commands: 'nextStage',
