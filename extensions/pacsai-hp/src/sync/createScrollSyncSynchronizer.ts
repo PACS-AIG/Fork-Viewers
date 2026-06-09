@@ -1,4 +1,8 @@
-import { getEnabledElementByViewportId, Enums as CoreEnums } from '@cornerstonejs/core';
+import {
+  getEnabledElementByViewportId,
+  Enums as CoreEnums,
+  utilities as csUtils,
+} from '@cornerstonejs/core';
 import { SynchronizerManager, Synchronizer } from '@cornerstonejs/tools';
 
 const { createSynchronizer } = SynchronizerManager;
@@ -34,12 +38,13 @@ export default function createScrollSyncSynchronizer(
     const source = getEnabledElementByViewportId(sourceViewport.viewportId)?.viewport as any;
     const target = getEnabledElementByViewportId(targetViewport.viewportId)?.viewport as any;
 
-    // Stack viewports only — needs index getters/setters.
+    // Stack viewports only — needs index getters and an element to scroll.
     if (
       !source?.getCurrentImageIdIndex ||
       !source?.getImageIds ||
-      !target?.setImageIdIndex ||
-      !target?.getImageIds
+      !target?.getCurrentImageIdIndex ||
+      !target?.getImageIds ||
+      !target?.element
     ) {
       return;
     }
@@ -55,14 +60,17 @@ export default function createScrollSyncSynchronizer(
     const frac = srcCount > 1 ? srcIdx / (srcCount - 1) : 0;
     const tgtIdx = Math.min(tgtCount - 1, Math.max(0, Math.round(frac * (tgtCount - 1))));
 
+    // Idempotent: if the target is already there, do nothing (also stops ping-pong).
     if (tgtIdx === target.getCurrentImageIdIndex()) {
       return;
     }
 
     updating = true;
     try {
-      target.setImageIdIndex(tgtIdx);
-      target.render();
+      // Use jumpToSlice (the same call the scrollbar uses) so it fires
+      // STACK_VIEWPORT_SCROLL — this keeps the scrollbar and instance-number
+      // overlay in sync, which a raw setImageIdIndex does not.
+      csUtils.jumpToSlice(target.element, { imageIndex: tgtIdx, debounceLoading: true });
     } finally {
       updating = false;
     }
