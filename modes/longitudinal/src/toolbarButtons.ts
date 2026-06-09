@@ -205,6 +205,28 @@ const toolbarButtons: Button[] = [
       },
     },
   },
+  {
+    id: 'PreviousStage',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'chevron-left',
+      label: 'Previous Stage',
+      tooltip: 'Previous hanging protocol stage',
+      commands: 'previousStage',
+      evaluate: 'evaluate.action',
+    },
+  },
+  {
+    id: 'NextStage',
+    uiType: 'ohif.toolButton',
+    props: {
+      icon: 'chevron-right',
+      label: 'Next Stage',
+      tooltip: 'Next hanging protocol stage',
+      commands: 'nextStage',
+      evaluate: 'evaluate.action',
+    },
+  },
 ];
 
 export default toolbarButtons;

@@ -112,6 +112,8 @@ function modeFactory({ modeConfiguration }) {
         'WindowLevel',
         'Capture',
         'Layout',
+        'PreviousStage',
+        'NextStage',
         'Crosshairs',
         'MoreTools',
       ]);
