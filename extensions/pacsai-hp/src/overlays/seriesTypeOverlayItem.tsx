@@ -38,7 +38,7 @@ export const seriesTypeOverlayItem = {
   id: SERIES_TYPE_OVERLAY_ITEM_ID,
   title: 'Series type',
   contentF: (props: Record<string, any>) => {
-    const { displaySet } = props ?? {};
+    const { displaySet, servicesManager } = props ?? {};
     if (!displaySet) {
       return null;
     }
@@ -47,7 +47,13 @@ export const seriesTypeOverlayItem = {
     const modality = getModality(displaySet);
     const parts: string[] = [];
 
-    const plane = getImagePlane(displaySet);
+    // Coronal/sagittal of oblique reformats are disambiguated against the study's
+    // axial reformat, so pass same-study siblings (matches the HP matcher's plane).
+    const displaySetService = servicesManager?.services?.displaySetService;
+    const siblings = displaySetService
+      ?.getActiveDisplaySets?.()
+      ?.filter((d: any) => d?.StudyInstanceUID === displaySet?.StudyInstanceUID);
+    const plane = getImagePlane(displaySet, siblings);
     if (plane) {
       parts.push(plane.toUpperCase());
     }

@@ -170,7 +170,10 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
             : 'none';
           log(
             `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
-              `mod=${d?.Modality} | plane=${getImagePlane(d)} | kernel=${getImageKernel(d)} | ` +
+              `mod=${d?.Modality} | plane=${getImagePlane(
+              d,
+              activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
+            )} | kernel=${getImageKernel(d)} | ` +
               `IOP=[${iopStr}]`
           );
         });
