@@ -40,6 +40,12 @@ type SelectorDef = {
    */
   plane?: 'axial' | 'coronal' | 'sagittal';
   /**
+   * Prefer (but do not require) a plane — adds weight so that, when multiple
+   * planes of a series exist, this one wins; but a series in another plane still
+   * matches (e.g. a 3D sagittal-acquired MR sequence when no axial exists).
+   */
+  preferPlane?: 'axial' | 'coronal' | 'sagittal';
+  /**
    * Match the reconstruction kernel class via the `pacsaiKernel` custom attribute
    * ('soft' = smooth kernel, 'lung' / 'bone' = sharp kernels). Robust to
    * descriptions that omit the kernel (classified from ConvolutionKernel, with
@@ -139,6 +145,10 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     if (sel.plane) {
       // Match the computed plane (orientation-based) rather than the description.
       rules.push({ attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: sel.plane } } });
+    }
+    if (sel.preferPlane) {
+      // Weighted, NOT required: prefers this plane but still matches others.
+      rules.push({ attribute: 'pacsaiPlane', weight: 10, constraint: { equals: { value: sel.preferPlane } } });
     }
     if (sel.kernel) {
       // Match the computed kernel class (soft/bone) from ConvolutionKernel.

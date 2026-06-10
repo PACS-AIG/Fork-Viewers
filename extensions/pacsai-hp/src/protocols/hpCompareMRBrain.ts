@@ -3,39 +3,65 @@ import buildCompareProtocol from './buildCompareProtocol';
 /**
  * MR brain comparison.
  *
- * Brain MR is read by SEQUENCE, and comparison is same-sequence AND same-plane
- * (axial is the primary review plane). So each stage constrains to axial (via the
- * computed plane) and a specific sequence, with keyword exclusions so lookalikes
- * don't cross-match (e.g. "T2* GRE" must not satisfy plain T2; "T2 FLAIR" is FLAIR,
- * not T2).
+ * Brain MR is read by SEQUENCE. Axial is the usual review plane, but T1 is often
+ * a 3D sagittal-acquired MPRAGE (no separate axial), so plane is a *preference*
+ * (preferPlane), not a hard requirement — axial wins when present, otherwise the
+ * available plane still matches.
  *
- * Stages, each current beside prior: T1, T2, T2-star/SWI, FLAIR, DWI. Any sequence
- * the study lacks degrades (its stage shows current-only, or is skipped if absent).
+ * Sequence keywords handle vendor naming, especially Siemens:
+ *  - FLAIR is often "dark-fluid" / "tirm" (not the literal word "flair").
+ *  - T2 must exclude FLAIR (dark-fluid), SWI/GRE and MIPs.
+ *  - SWI/GRE is the susceptibility stage (exclude MIP overlays).
+ *  - DWI is the trace image (exclude ADC / derived maps).
+ *
+ * Stages, each current beside prior: T1, T2, FLAIR, SWI/GRE, DWI.
  */
+const FLAIR_WORDS = ['flair', 'dark-fluid', 'dark_fluid', 'darkfluid', 'tirm'];
+const SHARP_WORDS = ['swi', 'gre', 't2*', 'star', 'susc', 'hemo'];
+
 export const hpCompareMRBrain = buildCompareProtocol({
   id: '@pacsai/compareMRBrain',
   name: 'MR Brain Compare',
-  description: 'Current vs prior MR brain — axial by sequence (T1/T2/T2*/FLAIR/DWI)',
+  description: 'Current vs prior MR brain — by sequence (T1/T2/FLAIR/SWI/DWI)',
   modalities: ['MR'],
   bodyPartKeywords: ['brain', 'head'],
   selectors: [
-    { key: 't1', plane: 'axial', keywords: ['t1', 'mprage'], excludeKeywords: ['flair'] },
+    {
+      key: 't1',
+      preferPlane: 'axial',
+      keywords: ['t1', 'mprage', 'bravo', 'spgr', 'tfl', 'vibe'],
+      excludeKeywords: [...FLAIR_WORDS, ...SHARP_WORDS, 'mip'],
+    },
     {
       key: 't2',
-      plane: 'axial',
-      keywords: ['t2'],
-      // Keep plain T2 only: exclude FLAIR and susceptibility-weighted lookalikes.
-      excludeKeywords: ['flair', 'gre', 'swi', 'star', 't2*', '*', 'hemo'],
+      preferPlane: 'axial',
+      keywords: ['t2', 'haste', 'tse', 'frfse'],
+      excludeKeywords: [...FLAIR_WORDS, ...SHARP_WORDS, 'mip', 'fl3d'],
     },
-    { key: 'gre', plane: 'axial', keywords: ['gre', 'swi', 't2*', 'susc', 'hemo'] },
-    { key: 'flair', plane: 'axial', keywords: ['flair'] },
-    { key: 'dwi', plane: 'axial', keywords: ['dwi', 'diff', 'trace'], excludeKeywords: ['adc'] },
+    {
+      key: 'flair',
+      preferPlane: 'axial',
+      keywords: FLAIR_WORDS,
+      excludeKeywords: ['mip'],
+    },
+    {
+      key: 'swi',
+      preferPlane: 'axial',
+      keywords: SHARP_WORDS,
+      excludeKeywords: ['mip'], // exclude SWI mIP overlays
+    },
+    {
+      key: 'dwi',
+      preferPlane: 'axial',
+      keywords: ['dwi', 'diff', 'trace', 'tracew'],
+      excludeKeywords: ['adc', 'exp', '_fa', 'mip'], // exclude ADC / derived maps
+    },
   ],
   stages: [
     { name: 'T1 (current/prior)', selector: 't1' },
     { name: 'T2 (current/prior)', selector: 't2' },
-    { name: 'T2*/SWI (current/prior)', selector: 'gre' },
     { name: 'FLAIR (current/prior)', selector: 'flair' },
+    { name: 'SWI/GRE (current/prior)', selector: 'swi' },
     { name: 'DWI (current/prior)', selector: 'dwi' },
   ],
 });
