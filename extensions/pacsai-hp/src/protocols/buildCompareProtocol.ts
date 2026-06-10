@@ -185,12 +185,14 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   const cpStages = stages.map((st, i) => ({
     id: `${st.selector}-${i}-cp`,
     name: st.name,
-    // Require BOTH viewports (current + prior) to fill. `passive` also at 2 means
-    // a stage that can't match both becomes 'disabled' (skipped on next/previous)
-    // rather than a navigable empty stage that errors.
+    // enabled (auto-selected, fully side-by-side) requires both current + prior.
+    // passive (navigable via next/previous) requires at least the current — so a
+    // plane present only in the current study still gets its own stage (prior
+    // viewport empty) instead of being hidden. 0 matched => disabled => skipped,
+    // which avoids navigating into a truly empty stage.
     stageActivation: {
       enabled: { minViewportsMatched: 2 },
-      passive: { minViewportsMatched: 2 },
+      passive: { minViewportsMatched: 1 },
     },
     viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
     viewports: [viewport('current', st.selector, st.voi), viewport('prior', st.selector, st.voi)],
