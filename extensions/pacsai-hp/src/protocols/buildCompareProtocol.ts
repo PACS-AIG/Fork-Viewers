@@ -168,11 +168,10 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // throws "Can't find applicable stage" when the specific selectors don't fit.
   displaySetSelectors['anyCurrent'] = {
     studyMatchingRules: [studyRule('current')],
+    // Broadest possible: any image series in the current study. No floor / scout
+    // exclusion so it matches even partially-loaded or scout-only studies.
     seriesMatchingRules: [
-      { attribute: 'numImageFrames', required: true, constraint: { greaterThan: { value: seriesFloor } } },
-      ...(excludeScouts
-        ? [{ attribute: 'SeriesDescription', constraint: { doesNotContainI: SCOUT_WORDS } }]
-        : []),
+      { attribute: 'numImageFrames', required: true, constraint: { greaterThan: { value: 0 } } },
     ],
   };
 
@@ -226,14 +225,16 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     viewports: distinctSelectors.map(key => viewport('current', key)),
   };
 
-  // Guaranteed-matchable last resort: shows the current study's primary image
-  // series when nothing else applies (so the protocol never fails to hang).
+  // Guaranteed last-resort stage so the protocol NEVER fails to hang.
+  // `passive: minViewportsMatched 0` means it is never 'disabled' (matches how
+  // the stock `default` protocol stays applicable even with 0 matched viewports),
+  // so _setProtocol can always find an applicable stage.
   const safetyStage = {
     id: 'current-any',
     name: 'Current',
     stageActivation: {
       enabled: { minViewportsMatched: 1 },
-      passive: { minViewportsMatched: 1 },
+      passive: { minViewportsMatched: 0 },
     },
     viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 1 } },
     viewports: [
