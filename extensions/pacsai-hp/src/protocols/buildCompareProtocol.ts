@@ -41,10 +41,11 @@ type SelectorDef = {
   plane?: 'axial' | 'coronal' | 'sagittal';
   /**
    * Match the reconstruction kernel class via the `pacsaiKernel` custom attribute
-   * ('soft' = smooth/brain kernel, 'bone' = sharp kernel). Robust to descriptions
-   * that omit "bone" (classified from ConvolutionKernel, description as fallback).
+   * ('soft' = smooth kernel, 'lung' / 'bone' = sharp kernels). Robust to
+   * descriptions that omit the kernel (classified from ConvolutionKernel, with
+   * description as fallback).
    */
-  kernel?: 'soft' | 'bone';
+  kernel?: 'soft' | 'lung' | 'bone';
   /** SeriesDescription must contain ANY of these (case-insensitive). Omit for "any image series". */
   keywords?: string[];
   /** SeriesDescription must NOT contain any of these (e.g. exclude FLAIR from a T2 selector). */
