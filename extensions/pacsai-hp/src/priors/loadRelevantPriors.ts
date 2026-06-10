@@ -142,28 +142,55 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       )
     );
 
-    // Build an explicit, ordered studies array: current first (index 0), then
-    // priors by descending relevance. Never rely on implicit date sorting.
-    const orderedStudies = [
-      DicomMetadataStore.getStudy(currentStudyUID),
-      ...ranked.map(({ prior }) => DicomMetadataStore.getStudy(prior.StudyInstanceUID)),
-    ].filter(Boolean);
+    const priorUIDs = ranked.map(({ prior }) => prior.StudyInstanceUID);
 
-    const activeStudy = orderedStudies[0];
-    log(
-      're-hanging',
-      protocol.id,
-      'with studies',
-      orderedStudies.map(s => s?.StudyInstanceUID)
-    );
-    hangingProtocolService.run(
-      {
-        studies: orderedStudies,
-        displaySets: displaySetService.getActiveDisplaySets(),
-        activeStudy,
-      },
-      protocol.id
-    );
+    // Re-hang with current (index 0) + priors, ordered. Always rebuild from the
+    // latest study/display-set state so late-loading series are picked up.
+    const reHang = () => {
+      const orderedStudies = [
+        DicomMetadataStore.getStudy(currentStudyUID),
+        ...priorUIDs.map(uid => DicomMetadataStore.getStudy(uid)),
+      ].filter(Boolean);
+      if (!orderedStudies.length) {
+        return;
+      }
+      hangingProtocolService.run(
+        {
+          studies: orderedStudies,
+          displaySets: displaySetService.getActiveDisplaySets(),
+          activeStudy: orderedStudies[0],
+        },
+        protocol.id
+      );
+    };
+
+    // The current study's series may still be loading (numImageFrames not yet
+    // populated), so a single re-hang can find the prior but not the current.
+    // Re-hang as display sets arrive until the current study has a usable series,
+    // then stop. A timeout guards against listening forever.
+    const currentReady = () =>
+      displaySetService
+        .getActiveDisplaySets()
+        .some(ds => ds?.StudyInstanceUID === currentStudyUID && ds?.numImageFrames > 0);
+
+    log('re-hanging', protocol.id, 'with studies', [currentStudyUID, ...priorUIDs]);
+    reHang();
+
+    if (!currentReady()) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const subscription = displaySetService.subscribe(
+        displaySetService.EVENTS.DISPLAY_SETS_ADDED,
+        () => {
+          reHang();
+          if (currentReady()) {
+            clearTimeout(timer);
+            subscription?.unsubscribe?.();
+          }
+        }
+      );
+      // Stop listening after a while regardless (current study may have no usable series).
+      timer = setTimeout(() => subscription?.unsubscribe?.(), 30000);
+    }
   } catch (error) {
     console.warn('[pacsai-hp] loadRelevantPriors failed', error);
     uiNotificationService?.show?.({
