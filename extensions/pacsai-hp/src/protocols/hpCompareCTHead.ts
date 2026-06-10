@@ -20,10 +20,11 @@ export const hpCompareCTHead = buildCompareProtocol({
   modalities: ['CT'],
   bodyPartKeywords: ['head', 'brain'],
   selectors: [
-    { key: 'ax', keywords: ['ax'], excludeKeywords: ['bone'] }, // brain/soft-kernel axial
-    { key: 'axbone', keywords: ['bone'] }, // bone-kernel axial recon
-    { key: 'cor', keywords: ['cor'], excludeKeywords: ['bone'] },
-    { key: 'sag', keywords: ['sag'], excludeKeywords: ['bone'] },
+    // Plane via computed orientation; soft/bone via computed ConvolutionKernel class.
+    { key: 'ax', plane: 'axial', kernel: 'soft' }, // brain/soft-kernel axial
+    { key: 'axbone', plane: 'axial', kernel: 'bone' }, // bone-kernel axial recon
+    { key: 'cor', plane: 'coronal', kernel: 'soft' },
+    { key: 'sag', plane: 'sagittal', kernel: 'soft' },
   ],
   stages: [
     { name: 'Axial Brain (current/prior)', selector: 'ax', voi: WINDOW.brain },

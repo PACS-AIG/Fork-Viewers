@@ -34,6 +34,17 @@ type VOI = { windowWidth: number; windowCenter: number };
 type SelectorDef = {
   /** Short key, e.g. 'ax', 't2'. */
   key: string;
+  /**
+   * Match a computed image plane (axial/coronal/sagittal) via the `pacsaiPlane`
+   * custom attribute — robust to MPR reformats whose description omits the plane.
+   */
+  plane?: 'axial' | 'coronal' | 'sagittal';
+  /**
+   * Match the reconstruction kernel class via the `pacsaiKernel` custom attribute
+   * ('soft' = smooth/brain kernel, 'bone' = sharp kernel). Robust to descriptions
+   * that omit "bone" (classified from ConvolutionKernel, description as fallback).
+   */
+  kernel?: 'soft' | 'bone';
   /** SeriesDescription must contain ANY of these (case-insensitive). Omit for "any image series". */
   keywords?: string[];
   /** SeriesDescription must NOT contain any of these (e.g. exclude FLAIR from a T2 selector). */
@@ -124,6 +135,14 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     if (excludeScouts) {
       rules.push({ attribute: 'SeriesDescription', constraint: { doesNotContainI: SCOUT_WORDS } });
     }
+    if (sel.plane) {
+      // Match the computed plane (orientation-based) rather than the description.
+      rules.push({ attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: sel.plane } } });
+    }
+    if (sel.kernel) {
+      // Match the computed kernel class (soft/bone) from ConvolutionKernel.
+      rules.push({ attribute: 'pacsaiKernel', required: true, constraint: { equals: { value: sel.kernel } } });
+    }
     if (sel.keywords?.length) {
       rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: sel.keywords } });
     }
@@ -165,7 +184,13 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   const cpStages = stages.map((st, i) => ({
     id: `${st.selector}-${i}-cp`,
     name: st.name,
-    stageActivation: { enabled: { minViewportsMatched: 2 } },
+    // Require BOTH viewports (current + prior) to fill. `passive` also at 2 means
+    // a stage that can't match both becomes 'disabled' (skipped on next/previous)
+    // rather than a navigable empty stage that errors.
+    stageActivation: {
+      enabled: { minViewportsMatched: 2 },
+      passive: { minViewportsMatched: 2 },
+    },
     viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
     viewports: [viewport('current', st.selector, st.voi), viewport('prior', st.selector, st.voi)],
   }));
@@ -174,7 +199,10 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   const fallbackStage = {
     id: 'current-only',
     name: 'Current',
-    stageActivation: { enabled: { minViewportsMatched: 1 } },
+    stageActivation: {
+      enabled: { minViewportsMatched: 1 },
+      passive: { minViewportsMatched: 1 },
+    },
     viewportStructure: {
       layoutType: 'grid',
       properties: { rows: 1, columns: distinctSelectors.length },
@@ -217,11 +245,13 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   } as Types.HangingProtocol.Protocol;
 }
 
-// Common selector sets reused across protocols.
+// Common selector sets reused across protocols. Plane is matched via the
+// computed `pacsaiPlane` attribute (orientation-based), so these work even when
+// the SeriesDescription omits the plane.
 export const PLANE_SELECTORS: SelectorDef[] = [
-  { key: 'ax', keywords: ['ax'] }, // matches "ax", "axial"
-  { key: 'cor', keywords: ['cor'] }, // matches "cor", "coronal"
-  { key: 'sag', keywords: ['sag'] }, // matches "sag", "sagittal"
+  { key: 'ax', plane: 'axial' },
+  { key: 'cor', plane: 'coronal' },
+  { key: 'sag', plane: 'sagittal' },
 ];
 
 export default buildCompareProtocol;

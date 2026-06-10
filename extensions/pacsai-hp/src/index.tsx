@@ -5,9 +5,17 @@ import getHangingProtocolModule from './getHangingProtocolModule';
 import getCommandsModule from './getCommandsModule';
 import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from './overlays/priorOverlayItem';
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
+import getImagePlane from './utils/getImagePlane';
+import getImageKernel from './utils/getImageKernel';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
+
+/** Custom HP attribute id: computed image plane (axial/coronal/sagittal). */
+export const PLANE_ATTRIBUTE = 'pacsaiPlane';
+
+/** Custom HP attribute id: reconstruction kernel class (soft/bone). */
+export const KERNEL_ATTRIBUTE = 'pacsaiKernel';
 
 /**
  * PACS-AI hanging protocols extension.
@@ -19,10 +27,27 @@ export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
 const pacsaiHpExtension: Types.Extensions.Extension = {
   id,
 
-  /** Register the cross-study relative scroll synchronizer used by the protocols. */
   preRegistration: ({ servicesManager }: Types.Extensions.ExtensionParams) => {
-    const { syncGroupService } = servicesManager.services;
+    const { syncGroupService, hangingProtocolService } = servicesManager.services;
+
+    // Cross-study relative scroll synchronizer used by the protocols.
     syncGroupService?.addSynchronizerType?.(SCROLL_SYNC_TYPE, createScrollSyncSynchronizer);
+
+    // Computed image-plane attribute so plane selectors work even when the
+    // SeriesDescription omits ax/cor/sag (e.g. MPR reformats).
+    hangingProtocolService?.addCustomAttribute?.(
+      PLANE_ATTRIBUTE,
+      'Computed image plane (axial/coronal/sagittal)',
+      getImagePlane
+    );
+
+    // Reconstruction kernel class (soft/bone) from ConvolutionKernel, so the
+    // bone stage can find a bone recon even when the description omits "bone".
+    hangingProtocolService?.addCustomAttribute?.(
+      KERNEL_ATTRIBUTE,
+      'Reconstruction kernel class (soft/bone)',
+      getImageKernel
+    );
   },
 
   getHangingProtocolModule,
