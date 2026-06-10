@@ -158,29 +158,23 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       }
       const activeDisplaySets = displaySetService.getActiveDisplaySets();
       if (DEBUG) {
-        log(
-          'display sets at re-hang',
-          activeDisplaySets.map((d: any) => {
-            const inst = d?.instances?.[0] ?? d?.images?.[0] ?? d;
-            const iop = (inst?.ImageOrientationPatient ?? d?.ImageOrientationPatient) as
-              | number[]
-              | undefined;
-            return {
-              role: d?.StudyInstanceUID === currentStudyUID ? 'CURRENT(0)' : 'prior',
-              SeriesDescription: d?.SeriesDescription,
-              numImageFrames: d?.numImageFrames,
-              Modality: d?.Modality,
-              pacsaiPlane: getImagePlane(d),
-              pacsaiKernel: getImageKernel(d),
-              ConvolutionKernel: inst?.ConvolutionKernel ?? d?.ConvolutionKernel,
-              IOP: Array.isArray(iop) ? iop.map(n => Number(n).toFixed(2)).join(',') : undefined,
-            };
-          })
-        );
-        log(
-          'ordered studies for run()',
-          orderedStudies.map((s: any) => s?.StudyInstanceUID)
-        );
+        activeDisplaySets.forEach((d: any) => {
+          const inst = d?.instances?.[Math.floor((d?.instances?.length ?? 1) / 2)] ??
+            d?.instances?.[0] ?? d?.images?.[0] ?? d;
+          const iop = (inst?.ImageOrientationPatient ?? d?.ImageOrientationPatient) as
+            | number[]
+            | undefined;
+          const role = d?.StudyInstanceUID === currentStudyUID ? 'CUR' : 'PRI';
+          const iopStr = Array.isArray(iop)
+            ? iop.map(n => Number(n).toFixed(3)).join(',')
+            : 'none';
+          log(
+            `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
+              `mod=${d?.Modality} | plane=${getImagePlane(d)} | kernel=${getImageKernel(d)} | ` +
+              `IOP=[${iopStr}]`
+          );
+        });
+        log('ordered studies for run()', [currentStudyUID, ...priorUIDs]);
       }
       hangingProtocolService.run(
         {
