@@ -4,6 +4,10 @@ import { id } from './id';
 import getHangingProtocolModule from './getHangingProtocolModule';
 import getCommandsModule from './getCommandsModule';
 import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from './overlays/priorOverlayItem';
+import {
+  seriesTypeOverlayItem,
+  SERIES_TYPE_OVERLAY_ITEM_ID,
+} from './overlays/seriesTypeOverlayItem';
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
@@ -55,4 +59,9 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
 };
 
 export default pacsaiHpExtension;
-export { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID };
+export {
+  priorOverlayItem,
+  PRIOR_OVERLAY_ITEM_ID,
+  seriesTypeOverlayItem,
+  SERIES_TYPE_OVERLAY_ITEM_ID,
+};

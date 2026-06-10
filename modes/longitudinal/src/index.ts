@@ -1,6 +1,6 @@
 import { hotkeys } from '@ohif/core';
 import i18n from 'i18next';
-import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from '@ohif/extension-pacsai-hp';
+import { priorOverlayItem, seriesTypeOverlayItem } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
 import toolbarButtons from './toolbarButtons';
@@ -91,12 +91,17 @@ function modeFactory({ modeConfiguration }) {
 
       measurementService.clearMeasurements();
 
-      // Add the yellow "PRIOR" badge to the top-right viewport overlay. Idempotent
-      // so re-entering the mode doesn't duplicate it.
+      // Add the top-right viewport overlay badges: yellow "PRIOR" (on prior
+      // viewports) and a cyan series-type tag (AXIAL/CORONAL/SAGITTAL · SOFT/BONE).
+      // Idempotent so re-entering the mode doesn't duplicate them.
       const topRight = customizationService.getCustomization('viewportOverlay.topRight') || [];
-      if (!topRight.some((item: { id?: string }) => item?.id === PRIOR_OVERLAY_ITEM_ID)) {
+      const existingIds = new Set(topRight.map((item: { id?: string }) => item?.id));
+      const toAdd = [priorOverlayItem, seriesTypeOverlayItem].filter(
+        item => !existingIds.has(item.id)
+      );
+      if (toAdd.length) {
         customizationService.setCustomizations({
-          'viewportOverlay.topRight': { $set: [...topRight, priorOverlayItem] },
+          'viewportOverlay.topRight': { $set: [...topRight, ...toAdd] },
         });
       }
 
