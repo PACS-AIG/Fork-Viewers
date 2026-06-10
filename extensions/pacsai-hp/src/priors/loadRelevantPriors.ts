@@ -7,6 +7,8 @@ import {
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
 import type { StudyLike } from './types';
+import getImagePlane from '../utils/getImagePlane';
+import getImageKernel from '../utils/getImageKernel';
 
 /**
  * Auto-loads the most relevant prior study/studies for the active study and
@@ -154,10 +156,36 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       if (!orderedStudies.length) {
         return;
       }
+      const activeDisplaySets = displaySetService.getActiveDisplaySets();
+      if (DEBUG) {
+        log(
+          'display sets at re-hang',
+          activeDisplaySets.map((d: any) => {
+            const inst = d?.instances?.[0] ?? d?.images?.[0] ?? d;
+            const iop = (inst?.ImageOrientationPatient ?? d?.ImageOrientationPatient) as
+              | number[]
+              | undefined;
+            return {
+              role: d?.StudyInstanceUID === currentStudyUID ? 'CURRENT(0)' : 'prior',
+              SeriesDescription: d?.SeriesDescription,
+              numImageFrames: d?.numImageFrames,
+              Modality: d?.Modality,
+              pacsaiPlane: getImagePlane(d),
+              pacsaiKernel: getImageKernel(d),
+              ConvolutionKernel: inst?.ConvolutionKernel ?? d?.ConvolutionKernel,
+              IOP: Array.isArray(iop) ? iop.map(n => Number(n).toFixed(2)).join(',') : undefined,
+            };
+          })
+        );
+        log(
+          'ordered studies for run()',
+          orderedStudies.map((s: any) => s?.StudyInstanceUID)
+        );
+      }
       hangingProtocolService.run(
         {
           studies: orderedStudies,
-          displaySets: displaySetService.getActiveDisplaySets(),
+          displaySets: activeDisplaySets,
           activeStudy: orderedStudies[0],
         },
         protocol.id
