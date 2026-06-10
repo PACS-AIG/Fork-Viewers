@@ -163,6 +163,19 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   });
 
+  // Generic catch-all selector for the current study: any non-scout image series.
+  // Guarantees the protocol always has at least one matchable stage so it never
+  // throws "Can't find applicable stage" when the specific selectors don't fit.
+  displaySetSelectors['anyCurrent'] = {
+    studyMatchingRules: [studyRule('current')],
+    seriesMatchingRules: [
+      { attribute: 'numImageFrames', required: true, constraint: { greaterThan: { value: seriesFloor } } },
+      ...(excludeScouts
+        ? [{ attribute: 'SeriesDescription', constraint: { doesNotContainI: SCOUT_WORDS } }]
+        : []),
+    ],
+  };
+
   // Scroll-sync current vs prior. The sync id is scoped per selector (plane /
   // sequence) so the axial pair scrolls together but the "Current (3 planes)"
   // fallback doesn't cross-sync different planes. `imageslice` syncs the scrolled
@@ -213,6 +226,21 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     viewports: distinctSelectors.map(key => viewport('current', key)),
   };
 
+  // Guaranteed-matchable last resort: shows the current study's primary image
+  // series when nothing else applies (so the protocol never fails to hang).
+  const safetyStage = {
+    id: 'current-any',
+    name: 'Current',
+    stageActivation: {
+      enabled: { minViewportsMatched: 1 },
+      passive: { minViewportsMatched: 1 },
+    },
+    viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 1 } },
+    viewports: [
+      { viewportOptions: compareViewportOptions, displaySets: [{ id: 'anyCurrent' }] },
+    ],
+  };
+
   const protocolMatchingRules: Rule[] = [
     {
       id: `${id}-modality`,
@@ -244,7 +272,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       viewportOptions: { viewportType: 'stack', toolGroupId: 'default', allowUnmatchedView: true },
       displaySets: [{ id: `current-${selectors[0].key}`, matchedDisplaySetsIndex: -1 }],
     },
-    stages: [...cpStages, fallbackStage],
+    stages: [...cpStages, fallbackStage, safetyStage],
   } as Types.HangingProtocol.Protocol;
 }
 
