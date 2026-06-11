@@ -1,13 +1,17 @@
 import React from 'react';
+import { getStudyRole } from '../priors/roleRegistry';
 
 /**
  * Viewport overlay item that renders a yellow "PRIOR" badge on any viewport
- * whose study is NOT the active (current) study — i.e. the auto-loaded prior.
+ * showing the auto-loaded comparison prior.
  *
  * Registered into `viewportOverlay.topRight` (see the longitudinal mode). The
  * overlay framework only passes `servicesManager` to `contentF` (not to
- * `condition`), so the current-vs-prior check lives in `contentF`, returning
- * null when the viewport is showing the current study.
+ * `condition`), so the role check lives in `contentF`, returning null otherwise.
+ *
+ * We badge ONLY studies whose comparison role is `prior` (via the role registry),
+ * NOT every non-active study — same-session siblings tiled in the whole-spine
+ * overview are not priors and must not be mislabeled "PRIOR".
  */
 export const PRIOR_OVERLAY_ITEM_ID = 'pacsai-prior-indicator';
 
@@ -19,8 +23,8 @@ export const priorOverlayItem = {
     const activeStudyUID =
       servicesManager?.services?.hangingProtocolService?.getState?.()?.activeStudyUID;
 
-    // Only label viewports showing a different study than the active/current one.
-    if (!displaySet || !activeStudyUID || displaySet.StudyInstanceUID === activeStudyUID) {
+    // Only label viewports whose study is the designated comparison prior.
+    if (!displaySet || getStudyRole(displaySet.StudyInstanceUID, activeStudyUID) !== 'prior') {
       return null;
     }
 

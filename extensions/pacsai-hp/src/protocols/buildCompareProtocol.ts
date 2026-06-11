@@ -12,7 +12,8 @@ import type { Types } from '@ohif/core';
  *
  * - `selectors` define how to pick series for the current and prior study
  *   (e.g. axial recon, T2 sequence). Each becomes `current-<key>` / `prior-<key>`
- *   display-set selectors keyed on `studyInstanceUIDsIndex` (0 = current, 1 = prior).
+ *   display-set selectors keyed on the `pacsaiRole` attribute (current/prior),
+ *   so matching is independent of study load order (see roleRegistry).
  * - `stages` define the current|prior layouts you cycle with next/previous stage,
  *   each referencing a selector and optionally applying a window (VOI) preset.
  *
@@ -89,6 +90,27 @@ export type CompareConfig = {
   currentView?: string[];
   selectors: SelectorDef[];
   stages: StageDef[];
+  /**
+   * Optional whole-region overview that tiles the SAME-SESSION sibling exams of a
+   * multi-part study (e.g. the cervical/thoracic/lumbar spine acquired together)
+   * side by side. Unlike the current/prior stages, overview viewports are
+   * region-addressable (matched by `pacsaiSpineRegion` + plane across ALL loaded
+   * studies, regardless of role/order), so each region's series lands in its own
+   * pane. The overview hangs as the lead stage tiling WHATEVER regions are loaded
+   * (all configured, or any 2-region subset); a single region produces no overview
+   * and falls through to the per-region compare / current-only stages. Requires
+   * the prior loader to fetch the same-session sibling studies.
+   */
+  overview?: {
+    /** Stage name shown in the UI (e.g. "Whole spine (sagittal)"). */
+    name: string;
+    /** Regions to tile, in anatomical order. */
+    regions: Array<{ key: string; region: 'cervical' | 'thoracic' | 'lumbar' }>;
+    /** Plane to show for each region (default 'sagittal'). */
+    plane?: 'axial' | 'coronal' | 'sagittal';
+    /** SeriesDescription must contain ANY of these (e.g. ['t2'] to prefer T2). */
+    keywords?: string[];
+  };
 };
 
 // The HP matcher reads a `from` source on rules; core's MatchingRule omits it.
@@ -117,15 +139,39 @@ const compareViewportOptions = {
 const SCOUT_WORDS = ['topogram', 'scout', 'localizer'];
 const ROLES = ['current', 'prior'] as const;
 type Role = (typeof ROLES)[number];
-const ROLE_INDEX: Record<Role, number> = { current: 0, prior: 1 };
 
-function studyRule(role: Role): Rule {
-  return {
-    attribute: 'studyInstanceUIDsIndex',
-    from: 'options',
-    required: true,
-    constraint: { equals: { value: ROLE_INDEX[role] } },
+// Series are matched by comparison ROLE (current/prior/sibling) via the
+// `pacsaiRole` custom attribute, NOT by study order (studyInstanceUIDsIndex).
+// Order-based matching breaks once same-session siblings are loaded (a sibling
+// would occupy index 1 and be matched by the `prior` selector); roles decouple
+// matching from load order. This is a series-level rule because the attribute is
+// computed from the display set's study.
+function roleRule(role: string): Rule {
+  return { attribute: 'pacsaiRole', required: true, constraint: { equals: { value: role } } };
+}
+
+/** All order-preserving subsets of `arr` with exactly `k` elements. */
+function combinationsOf<T>(arr: T[], k: number): T[][] {
+  if (k <= 0) {
+    return [[]];
+  }
+  if (k > arr.length) {
+    return [];
+  }
+  const result: T[][] = [];
+  const walk = (start: number, combo: T[]) => {
+    if (combo.length === k) {
+      result.push(combo.slice());
+      return;
+    }
+    for (let i = start; i < arr.length; i++) {
+      combo.push(arr[i]);
+      walk(i + 1, combo);
+      combo.pop();
+    }
   };
+  walk(0, []);
+  return result;
 }
 
 export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.Protocol {
@@ -141,6 +187,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     currentView,
     selectors,
     stages,
+    overview,
   } = cfg;
 
   const seriesRulesFor = (sel: SelectorDef): Rule[] => {
@@ -175,24 +222,47 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     return rules;
   };
 
+  // studyMatchingRules are empty: the matcher then scans ALL loaded studies and
+  // the `pacsaiRole`/`pacsaiSpineRegion` series rules pick the right one(s).
   const displaySetSelectors: Record<string, any> = {};
   selectors.forEach(sel => {
     ROLES.forEach(role => {
       displaySetSelectors[`${role}-${sel.key}`] = {
-        studyMatchingRules: [studyRule(role)],
-        seriesMatchingRules: seriesRulesFor(sel),
+        studyMatchingRules: [],
+        seriesMatchingRules: [roleRule(role), ...seriesRulesFor(sel)],
       };
     });
   });
 
-  // Generic catch-all selector for the current study: ANY series in the current
-  // study, with NO series rules at all. Guarantees the protocol always hangs
-  // something (never blank, never "Can't find applicable stage") even for
-  // enhanced/multiframe series whose numImageFrames can't be matched.
+  // Generic catch-all selector for the current study: ANY current-study series,
+  // with only the role rule. Guarantees the protocol always hangs something
+  // (never blank, never "Can't find applicable stage") even for enhanced/
+  // multiframe series whose numImageFrames can't be matched.
   displaySetSelectors['anyCurrent'] = {
-    studyMatchingRules: [studyRule('current')],
-    seriesMatchingRules: [],
+    studyMatchingRules: [],
+    seriesMatchingRules: [roleRule('current')],
   };
+
+  // Region-addressable overview selectors: match a series by spine region + plane
+  // across ANY loaded study (no role rule), so the current study and its loaded
+  // same-session siblings each tile into their own region pane.
+  const overviewPlane = overview?.plane ?? 'sagittal';
+  (overview?.regions ?? []).forEach(r => {
+    const rules: Rule[] = [
+      { attribute: 'pacsaiSpineRegion', required: true, constraint: { equals: { value: r.region } } },
+      { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: overviewPlane } } },
+    ];
+    if (excludeScouts) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
+    }
+    if (overview?.keywords?.length) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: overview.keywords } });
+    }
+    displaySetSelectors[`overview-${r.key}`] = {
+      studyMatchingRules: [],
+      seriesMatchingRules: rules,
+    };
+  });
 
   // Scroll-sync current vs prior. The sync id is scoped per selector (plane /
   // sequence) so the axial pair scrolls together but the "Current (3 planes)"
@@ -271,6 +341,36 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     ],
   };
 
+  // Whole-region overview as the LEAD stage. We emit one stage per region SUBSET
+  // of size >= 2 (largest first), each requiring all of its panes matched
+  // (minViewportsMatched = subset size), so the engine auto-picks the largest
+  // overview whose every region is actually loaded — tiling whatever is available
+  // (3 regions, or any 2-region combo) with no empty panes. A single region never
+  // produces an overview (no size-1 subset), so it falls through to the per-region
+  // compare / current-only stages below. Requires the prior loader to fetch the
+  // same-session sibling studies.
+  const overviewStages = [];
+  if (overview?.regions?.length) {
+    const regions = overview.regions;
+    for (let k = regions.length; k >= 2; k--) {
+      for (const combo of combinationsOf(regions, k)) {
+        overviewStages.push({
+          id: `overview-${combo.map(r => r.key).join('')}`,
+          name: overview.name,
+          stageActivation: {
+            enabled: { minViewportsMatched: k },
+            passive: { minViewportsMatched: k },
+          },
+          viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: k } },
+          viewports: combo.map(r => ({
+            viewportOptions: compareViewportOptions,
+            displaySets: [{ id: `overview-${r.key}` }],
+          })),
+        });
+      }
+    }
+  }
+
   const protocolMatchingRules: Rule[] = [
     {
       id: `${id}-modality`,
@@ -302,7 +402,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       viewportOptions: { viewportType: 'stack', toolGroupId: 'default', allowUnmatchedView: true },
       displaySets: [{ id: `current-${selectors[0].key}`, matchedDisplaySetsIndex: -1 }],
     },
-    stages: [...cpStages, ...fallbackStages, safetyStage],
+    stages: [...overviewStages, ...cpStages, ...fallbackStages, safetyStage],
   } as Types.HangingProtocol.Protocol;
 }
 

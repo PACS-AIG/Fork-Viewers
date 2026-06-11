@@ -2,6 +2,7 @@ import type { PriorPolicy } from './types';
 import baseRelevance from './scorers/baseRelevance';
 import recency from './scorers/recency';
 import indication from './scorers/indication';
+import spineRegionGate from './scorers/spineRegion';
 
 /**
  * Per-protocol prior-selection policies, keyed by hanging-protocol id. These are
@@ -9,7 +10,9 @@ import indication from './scorers/indication';
  * extend the map for additional protocols) via the customization service under
  * the `pacsai.priorPolicy` key.
  */
-const DEFAULT_SCORERS = [baseRelevance, recency, indication];
+// spineRegionGate first so a cross-region spine sibling is hard-disqualified
+// regardless of any recency/indication bonus the other scorers would add.
+const DEFAULT_SCORERS = [spineRegionGate, baseRelevance, recency, indication];
 
 // All pacsai compare protocols hang current vs a single most-relevant prior, so
 // they share one default policy. A protocol-specific entry here overrides it.

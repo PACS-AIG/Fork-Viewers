@@ -15,10 +15,46 @@ export type BodyPart =
   | 'cardiac'
   | 'abdomen'
   | 'spine'
+  | 'spine-cervical'
+  | 'spine-thoracic'
+  | 'spine-lumbar'
   | 'pelvis'
   | 'extremity'
   | 'breast'
   | 'unknown';
+
+/** True for any spine body part (generic or a specific cervical/thoracic/lumbar region). */
+export function isSpine(part: BodyPart): boolean {
+  return part === 'spine' || part.startsWith('spine-');
+}
+
+/**
+ * Resolve the spine region of a description, or undefined if it is not a spine
+ * study. Runs BEFORE the generic body-part table because cervical/thoracic spine
+ * descriptions would otherwise be mis-classified as 'neck'/'chest' (the keyword
+ * table lists those regions first, and "cervical"/"thoracic" match them).
+ *
+ *  - "lumbar" / "L-spine" is unambiguously spine on its own.
+ *  - "cervical"/"thoracic" only count as spine when clearly spinal (with "spine"
+ *    or the C-/T-spine abbreviation), so soft-tissue NECK and CHEST/THORAX exams
+ *    are left to the generic table.
+ *  - a bare "spine"/"spinal"/"vertebr"/"myelogram" (no region) stays generic 'spine'.
+ */
+export function getSpineRegion(text: string): BodyPart | undefined {
+  if (/\b(lumbar|lumbosacral|l[-\s]?spine|ls[-\s]?spine)\b/i.test(text)) {
+    return 'spine-lumbar';
+  }
+  if (/\bthoracic\s+spine\b|\bt[-\s]?spine\b|\bdorsal\s+spine\b/i.test(text)) {
+    return 'spine-thoracic';
+  }
+  if (/\bcervical\s+spine\b|\bc[-\s]?spine\b/i.test(text)) {
+    return 'spine-cervical';
+  }
+  if (/\b(spine|spinal|vertebr|myelogram)\b/i.test(text)) {
+    return 'spine';
+  }
+  return undefined;
+}
 
 export function getModality(study: StudyLike): string | undefined {
   if (study.Modality) {
@@ -60,8 +96,15 @@ export function getBodyPart(study: StudyLike): BodyPart {
     if (!source) {
       continue;
     }
+    const str = String(source);
+    // Spine (incl. cervical/thoracic/lumbar regions) is resolved first — see
+    // getSpineRegion — so "cervical/thoracic spine" don't fall into neck/chest.
+    const spine = getSpineRegion(str);
+    if (spine) {
+      return spine;
+    }
     for (const [re, part] of BODY_PART_KEYWORDS) {
-      if (re.test(String(source))) {
+      if (re.test(str)) {
         return part;
       }
     }

@@ -6,6 +6,8 @@ import {
 
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
+import { setComparisonRoles } from './roleRegistry';
+import { getBodyPart, getSpineRegion, isSpine, parseStudyDate } from './metadata';
 import type { StudyLike } from './types';
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
@@ -19,9 +21,11 @@ import getImageKernel from '../utils/getImageKernel';
  *   1. The active protocol must be a pacsai compare protocol with a prior policy.
  *   2. QIDO the patient's studies, score each candidate prior, keep those above
  *      `minScore`, sort descending, take the top `maxPriors`.
- *   3. Load display sets for the chosen priors.
- *   4. Re-run the protocol with an explicit `[current, ...priorsByScore]` study
- *      order — the order maps to `studyInstanceUIDsIndex` used by the selectors.
+ *   3. For a multi-part study (spine), also pick same-session sibling regions for
+ *      the whole-spine overview.
+ *   4. Register comparison roles (prior/sibling) and load their display sets.
+ *   5. Re-run the protocol. Matching is role-/region-based (`pacsaiRole`,
+ *      `pacsaiSpineRegion`), so it is independent of the study order passed to run().
  *
  * Safe to call once per study open from `onSetupRouteComplete`; it no-ops for
  * non-comparison protocols, data sources without patient query, and patients
@@ -136,11 +140,45 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       .filter(({ score }) => score >= policy.minScore)
       .sort((a, b) => b.score - a.score)
       .slice(0, policy.maxPriors);
+    const priorUIDs = ranked.map(({ prior }) => prior.StudyInstanceUID);
 
     log(`${ranked.length} prior(s) passed minScore=${policy.minScore}`);
 
-    if (!ranked.length) {
-      // No qualifying priors — the current-only fallback stage already hangs.
+    // Same-session sibling spine regions for the whole-spine overview: when the
+    // current study is a specific spine region, pull the OTHER same-day spine
+    // regions (e.g. open lumbar -> also load cervical + thoracic). These are NOT
+    // priors (region-match-only disqualifies them as priors) — they tile into the
+    // region-addressable overview stage. Excludes anything already chosen as a prior.
+    const curBody = getBodyPart(current);
+    const curDate = parseStudyDate(current);
+    let siblingUIDs: string[] = [];
+    if (isSpine(curBody) && curBody !== 'spine') {
+      siblingUIDs = patientStudies
+        .map(toStudyLike)
+        .filter(s => s.StudyInstanceUID && s.StudyInstanceUID !== currentStudyUID)
+        .filter(s => !priorUIDs.includes(s.StudyInstanceUID))
+        .filter(s => {
+          const b = getBodyPart(s);
+          const d = parseStudyDate(s);
+          return (
+            isSpine(b) &&
+            b !== 'spine' &&
+            b !== curBody &&
+            curDate !== undefined &&
+            d === curDate
+          );
+        })
+        .map(s => s.StudyInstanceUID);
+    }
+
+    // Register roles BEFORE any (re)hang so the role-based current/prior selectors
+    // and the sibling overview selectors resolve correctly.
+    setComparisonRoles({ priors: priorUIDs, siblings: siblingUIDs });
+
+    log(`${priorUIDs.length} prior(s), ${siblingUIDs.length} sibling region(s) to load`);
+
+    if (!priorUIDs.length && !siblingUIDs.length) {
+      // Nothing extra to load — the current-only fallback stage already hangs.
       return;
     }
 
@@ -151,40 +189,53 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       autoClose: false,
     });
 
-    // Ensure full display-set creation for BOTH the current study and each chosen
-    // prior (short-circuits if already loaded). Awaiting the current study makes it
+    // Studies to add beside the current one: chosen prior(s) then sibling regions.
+    const extraUIDs = [...priorUIDs, ...siblingUIDs];
+
+    // Ensure full display-set creation for the current study and each extra study
+    // (short-circuits if already loaded). Awaiting the current study makes it
     // matchable deterministically — without this it can still be a half-loaded
     // "shell" when we re-hang, which is what the poll below otherwise waits out.
     await Promise.all(
-      [currentStudyUID, ...ranked.map(({ prior }) => prior.StudyInstanceUID)].map(uid =>
+      [currentStudyUID, ...extraUIDs].map(uid =>
         requestDisplaySetCreationForStudy(dataSource, displaySetService, uid, true)
       )
     );
 
-    const priorUIDs = ranked.map(({ prior }) => prior.StudyInstanceUID);
-
-    // Re-hang with current (index 0) + priors, ordered. Always rebuild from the
-    // latest study/display-set state so late-loading series are picked up.
+    // Re-hang with current (index 0) + priors + sibling regions, ordered. Matching
+    // is role-/region-based (not order-based), so order only affects the prior
+    // overlay's "current first" assumption. Always rebuild from the latest study/
+    // display-set state so late-loading series are picked up.
     const reHang = () => {
       const orderedStudies = [
         DicomMetadataStore.getStudy(currentStudyUID),
-        ...priorUIDs.map(uid => DicomMetadataStore.getStudy(uid)),
+        ...extraUIDs.map(uid => DicomMetadataStore.getStudy(uid)),
       ].filter(Boolean);
       if (!orderedStudies.length) {
         return;
       }
       const activeDisplaySets = displaySetService.getActiveDisplaySets();
       if (DEBUG) {
+        const priorSet = new Set(priorUIDs);
         activeDisplaySets.forEach((d: any) => {
           const inst = d?.instances?.[Math.floor((d?.instances?.length ?? 1) / 2)] ??
             d?.instances?.[0] ?? d?.images?.[0] ?? d;
           const iop = (inst?.ImageOrientationPatient ?? d?.ImageOrientationPatient) as
             | number[]
             | undefined;
-          const role = d?.StudyInstanceUID === currentStudyUID ? 'CUR' : 'PRI';
+          const role =
+            d?.StudyInstanceUID === currentStudyUID
+              ? 'CUR'
+              : priorSet.has(d?.StudyInstanceUID)
+                ? 'PRI'
+                : 'SIB';
           const iopStr = Array.isArray(iop)
             ? iop.map(n => Number(n).toFixed(3)).join(',')
             : 'none';
+          // StudyDescription/region drive the overview selectors — surface them so
+          // a missing StudyDescription (→ no region → no overview) is diagnosable.
+          const studyDesc = inst?.StudyDescription ?? d?.StudyDescription ?? '';
+          const region = getSpineRegion(String(studyDesc));
           log(
             `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
               `mod=${d?.Modality} | unsupported=${!!d?.unsupported} | imageIds=${
@@ -192,10 +243,10 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
               } | plane=${getImagePlane(
                 d,
                 activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
-              )} | kernel=${getImageKernel(d)} | IOP=[${iopStr}]`
+              )} | kernel=${getImageKernel(d)} | region=${region ?? '-'} | studyDesc="${studyDesc}" | IOP=[${iopStr}]`
           );
         });
-        log('ordered studies for run()', [currentStudyUID, ...priorUIDs]);
+        log('ordered studies for run()', [currentStudyUID, ...extraUIDs]);
       }
       hangingProtocolService.run(
         {
@@ -224,7 +275,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
             ds?.numImageFrames > 0
         );
 
-    log('re-hanging', protocol.id, 'with studies', [currentStudyUID, ...priorUIDs]);
+    log('re-hanging', protocol.id, 'with studies', [currentStudyUID, ...extraUIDs]);
     reHang();
 
     // Awaiting creation above usually makes the current study matchable right away,

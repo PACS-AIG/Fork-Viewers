@@ -11,6 +11,8 @@ import {
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
+import { getStudyRole } from './priors/roleRegistry';
+import { getSpineRegion } from './priors/metadata';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -20,6 +22,19 @@ export const PLANE_ATTRIBUTE = 'pacsaiPlane';
 
 /** Custom HP attribute id: reconstruction kernel class (soft/bone). */
 export const KERNEL_ATTRIBUTE = 'pacsaiKernel';
+
+/** Custom HP attribute id: comparison role (current/prior/sibling). */
+export const ROLE_ATTRIBUTE = 'pacsaiRole';
+
+/** Custom HP attribute id: spine region (cervical/thoracic/lumbar). */
+export const SPINE_REGION_ATTRIBUTE = 'pacsaiSpineRegion';
+
+/** Read the study description off a display set (StudyDescription lives on instances). */
+function studyDescriptionOf(displaySet: any): string {
+  return String(
+    displaySet?.instances?.[0]?.StudyDescription ?? displaySet?.StudyDescription ?? ''
+  );
+}
 
 /**
  * PACS-AI hanging protocols extension.
@@ -60,6 +75,33 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       KERNEL_ATTRIBUTE,
       'Reconstruction kernel class (soft/bone)',
       getImageKernel
+    );
+
+    // Comparison role (current/prior/sibling). Current is derived from the live
+    // activeStudyUID so the current viewport always matches — even on the first
+    // hang, before any prior/sibling is loaded; prior/sibling come from the role
+    // registry, populated by loadRelevantPriors just before it re-hangs.
+    const roleForDisplaySet = (displaySet: any) => {
+      const activeStudyUID = hangingProtocolService?.getState?.()?.activeStudyUID;
+      return getStudyRole(displaySet?.StudyInstanceUID, activeStudyUID);
+    };
+    hangingProtocolService?.addCustomAttribute?.(
+      ROLE_ATTRIBUTE,
+      'Comparison role (current/prior/sibling)',
+      roleForDisplaySet
+    );
+
+    // Spine region (cervical/thoracic/lumbar) from the study description, used by
+    // the region-addressable whole-spine overview selectors. Generic 'spine'
+    // (no region) and non-spine return undefined (won't tile into a region pane).
+    const spineRegionForDisplaySet = (displaySet: any) => {
+      const region = getSpineRegion(studyDescriptionOf(displaySet));
+      return region && region.startsWith('spine-') ? region.slice('spine-'.length) : undefined;
+    };
+    hangingProtocolService?.addCustomAttribute?.(
+      SPINE_REGION_ATTRIBUTE,
+      'Spine region (cervical/thoracic/lumbar)',
+      spineRegionForDisplaySet
     );
   },
 

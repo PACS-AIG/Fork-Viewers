@@ -1,7 +1,9 @@
 import baseRelevance from './scorers/baseRelevance';
 import recency from './scorers/recency';
 import indication from './scorers/indication';
+import spineRegionGate, { DISQUALIFY } from './scorers/spineRegion';
 import scorePrior from './scorePrior';
+import { getBodyPart } from './metadata';
 import { StudyLike } from './types';
 
 const study = (overrides: Partial<StudyLike>): StudyLike => ({
@@ -98,6 +100,61 @@ describe('indication', () => {
       })
     ).toBe(0);
     expect(indication({ current: study({}), prior: study({}) })).toBe(0);
+  });
+});
+
+describe('getBodyPart spine subregions', () => {
+  it('classifies cervical/thoracic/lumbar spine as distinct spine regions', () => {
+    expect(getBodyPart(study({ StudyDescription: 'MR CERVICAL SPINE WO AND W CONTRAST' }))).toBe(
+      'spine-cervical'
+    );
+    expect(getBodyPart(study({ StudyDescription: 'MR THORACIC SPINE WO AND W CONTRAST' }))).toBe(
+      'spine-thoracic'
+    );
+    expect(getBodyPart(study({ StudyDescription: 'MR LUMBAR SPINE WO AND W CONTRAST' }))).toBe(
+      'spine-lumbar'
+    );
+    expect(getBodyPart(study({ StudyDescription: 'CT L-SPINE' }))).toBe('spine-lumbar');
+    expect(getBodyPart(study({ StudyDescription: 'MRI SPINE SURVEY' }))).toBe('spine');
+  });
+
+  it('does not steal soft-tissue neck or chest/thorax exams', () => {
+    expect(getBodyPart(study({ StudyDescription: 'MR SOFT TISSUE NECK' }))).toBe('neck');
+    expect(getBodyPart(study({ StudyDescription: 'CT CHEST' }))).toBe('chest');
+    expect(getBodyPart(study({ StudyDescription: 'MR THORAX' }))).toBe('chest');
+  });
+});
+
+describe('spineRegionGate', () => {
+  const at = (desc: string) => study({ Modality: 'MR', StudyDescription: desc, StudyDate: '20260528' });
+
+  it('disqualifies a different-region spine sibling', () => {
+    expect(
+      spineRegionGate({ current: at('MR LUMBAR SPINE'), prior: at('MR CERVICAL SPINE') })
+    ).toBe(DISQUALIFY);
+    expect(
+      spineRegionGate({ current: at('MR LUMBAR SPINE'), prior: at('MR THORACIC SPINE') })
+    ).toBe(DISQUALIFY);
+  });
+
+  it('does not disqualify the same spine region or a generic spine study', () => {
+    expect(spineRegionGate({ current: at('MR LUMBAR SPINE'), prior: at('MR LUMBAR SPINE') })).toBe(0);
+    expect(spineRegionGate({ current: at('MR LUMBAR SPINE'), prior: at('MRI SPINE') })).toBe(0);
+  });
+
+  it('keeps the full pipeline from picking a same-day sibling region as a prior', () => {
+    const scorers = [spineRegionGate, baseRelevance, recency, indication];
+    const lumbar = at('MR LUMBAR SPINE WO AND W CONTRAST');
+    const cervical = at('MR CERVICAL SPINE WO AND W CONTRAST');
+    const priorLumbar = study({
+      Modality: 'MR',
+      StudyDescription: 'MR LUMBAR SPINE WO',
+      StudyDate: '20250101',
+    });
+    // Sibling region is driven negative (well below any minScore) ...
+    expect(scorePrior({ current: lumbar, prior: cervical }, scorers)).toBeLessThan(0);
+    // ... while a genuine prior of the SAME region still scores high.
+    expect(scorePrior({ current: lumbar, prior: priorLumbar }, scorers)).toBeGreaterThanOrEqual(100);
   });
 });
 
