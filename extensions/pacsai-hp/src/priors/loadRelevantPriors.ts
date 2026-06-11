@@ -84,6 +84,18 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     return;
   }
 
+  // Persistent "setting up" indicator, shown once we commit to loading a prior
+  // and dismissed when the comparison finishes settling (or on timeout/error).
+  // `let` (not const) so the async poll's closure can clear it after this
+  // function has already returned.
+  let loadingId: string | undefined;
+  const dismissLoading = () => {
+    if (loadingId) {
+      uiNotificationService?.hide?.(loadingId);
+      loadingId = undefined;
+    }
+  };
+
   inFlight.add(currentStudyUID);
   try {
     const qidoForStudyUID = await dataSource.query.studies.search({
@@ -132,15 +144,20 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       return;
     }
 
-    // Load display sets for each chosen prior (short-circuits if already loaded).
+    loadingId = uiNotificationService?.show?.({
+      title: 'Comparison',
+      message: 'Setting up hanging protocol…',
+      type: 'info',
+      autoClose: false,
+    });
+
+    // Ensure full display-set creation for BOTH the current study and each chosen
+    // prior (short-circuits if already loaded). Awaiting the current study makes it
+    // matchable deterministically — without this it can still be a half-loaded
+    // "shell" when we re-hang, which is what the poll below otherwise waits out.
     await Promise.all(
-      ranked.map(({ prior }) =>
-        requestDisplaySetCreationForStudy(
-          dataSource,
-          displaySetService,
-          prior.StudyInstanceUID,
-          true
-        )
+      [currentStudyUID, ...ranked.map(({ prior }) => prior.StudyInstanceUID)].map(uid =>
+        requestDisplaySetCreationForStudy(dataSource, displaySetService, uid, true)
       )
     );
 
@@ -170,11 +187,12 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
             : 'none';
           log(
             `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
-              `mod=${d?.Modality} | plane=${getImagePlane(
-              d,
-              activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
-            )} | kernel=${getImageKernel(d)} | ` +
-              `IOP=[${iopStr}]`
+              `mod=${d?.Modality} | unsupported=${!!d?.unsupported} | imageIds=${
+                d?.imageIds?.length ?? d?.images?.length ?? 0
+              } | plane=${getImagePlane(
+                d,
+                activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
+              )} | kernel=${getImageKernel(d)} | IOP=[${iopStr}]`
           );
         });
         log('ordered studies for run()', [currentStudyUID, ...priorUIDs]);
@@ -189,34 +207,51 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       );
     };
 
-    // The current study's series may still be loading (numImageFrames not yet
-    // populated), so a single re-hang can find the prior but not the current.
-    // Re-hang as display sets arrive until the current study has a usable series,
-    // then stop. A timeout guards against listening forever.
+    // The current study's display sets can still be half-loaded "shell" sets when
+    // we first re-hang: they carry SeriesDescription + numImageFrames but instance
+    // metadata hasn't arrived, so they're flagged `unsupported` and the matcher
+    // skips them (HangingProtocolService._matchImages filters `!unsupported`) —
+    // leaving a blank viewport. Re-hang as display sets arrive/update until the
+    // current study has a MATCHABLE series (supported + numImageFrames), mirroring
+    // exactly what the matcher needs. A timeout guards against listening forever.
     const currentReady = () =>
       displaySetService
         .getActiveDisplaySets()
-        .some(ds => ds?.StudyInstanceUID === currentStudyUID && ds?.numImageFrames > 0);
+        .some(
+          ds =>
+            ds?.StudyInstanceUID === currentStudyUID &&
+            !ds?.unsupported &&
+            ds?.numImageFrames > 0
+        );
 
     log('re-hanging', protocol.id, 'with studies', [currentStudyUID, ...priorUIDs]);
     reHang();
 
-    if (!currentReady()) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const subscription = displaySetService.subscribe(
-        displaySetService.EVENTS.DISPLAY_SETS_ADDED,
-        () => {
+    // Awaiting creation above usually makes the current study matchable right away,
+    // so this normally dismisses immediately. The poll is a fallback for the case
+    // where display sets are still finalizing after creation resolves (large MR can
+    // keep streaming); re-hang once it becomes matchable, up to 60s.
+    if (currentReady()) {
+      dismissLoading();
+    } else {
+      let elapsed = 0;
+      const intervalMs = 750;
+      const interval = setInterval(() => {
+        elapsed += intervalMs;
+        if (currentReady()) {
+          clearInterval(interval);
+          log('current study became matchable — re-hanging');
           reHang();
-          if (currentReady()) {
-            clearTimeout(timer);
-            subscription?.unsubscribe?.();
-          }
+          dismissLoading();
+        } else if (elapsed >= 60000) {
+          clearInterval(interval);
+          log('current study never became matchable within 60s');
+          dismissLoading();
         }
-      );
-      // Stop listening after a while regardless (current study may have no usable series).
-      timer = setTimeout(() => subscription?.unsubscribe?.(), 30000);
+      }, intervalMs);
     }
   } catch (error) {
+    dismissLoading();
     console.warn('[pacsai-hp] loadRelevantPriors failed', error);
     uiNotificationService?.show?.({
       title: 'Relevant priors',
