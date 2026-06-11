@@ -144,8 +144,12 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   } = cfg;
 
   const seriesRulesFor = (sel: SelectorDef): Rule[] => {
+    // numImageFrames is a soft (scored, NOT required) filter: enhanced/multiframe
+    // series (one multiframe object, instance-level frame metadata) can read as
+    // unsatisfied here and would be wrongly disqualified if required. Scouts are
+    // excluded by the SCOUT_WORDS description rule below instead of by frame count.
     const rules: Rule[] = [
-      { attribute: 'numImageFrames', required: true, constraint: { greaterThan: { value: seriesFloor } } },
+      { attribute: 'numImageFrames', constraint: { greaterThan: { value: seriesFloor } } },
     ];
     if (excludeScouts) {
       rules.push({ attribute: 'SeriesDescription', constraint: { doesNotContainI: SCOUT_WORDS } });
@@ -181,16 +185,13 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   });
 
-  // Generic catch-all selector for the current study: any non-scout image series.
-  // Guarantees the protocol always has at least one matchable stage so it never
-  // throws "Can't find applicable stage" when the specific selectors don't fit.
+  // Generic catch-all selector for the current study: ANY series in the current
+  // study, with NO series rules at all. Guarantees the protocol always hangs
+  // something (never blank, never "Can't find applicable stage") even for
+  // enhanced/multiframe series whose numImageFrames can't be matched.
   displaySetSelectors['anyCurrent'] = {
     studyMatchingRules: [studyRule('current')],
-    // Broadest possible: any image series in the current study. No floor / scout
-    // exclusion so it matches even partially-loaded or scout-only studies.
-    seriesMatchingRules: [
-      { attribute: 'numImageFrames', required: true, constraint: { greaterThan: { value: 0 } } },
-    ],
+    seriesMatchingRules: [],
   };
 
   // Scroll-sync current vs prior. The sync id is scoped per selector (plane /
