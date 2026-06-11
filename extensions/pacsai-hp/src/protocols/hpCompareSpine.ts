@@ -39,6 +39,21 @@ const spineCTSagViews = [
   { key: 'sag', name: 'Whole spine (sagittal)', plane: 'sagittal' as const },
 ];
 
+// Per-region drill-down, one stage per sequence (axials, which aren't tiled across
+// regions). Applied to every loaded region. Keywords disambiguate: the straight
+// axial T2 excludes the disc-angled obliques (msma/LSP) and the post-contrast run;
+// the obliques are keyed by 'msma'; the post-contrast axial by 'post'.
+const spineMRDetailViews = [
+  { key: 'axt2', name: 'axial T2', plane: 'axial' as const, keywords: ['t2'], excludeKeywords: ['stir', 'msma', 'post'] },
+  { key: 'axobl', name: 'axial T2 (disc)', plane: 'axial' as const, keywords: ['msma'] },
+  { key: 'axt1post', name: 'axial T1 +C', plane: 'axial' as const, keywords: ['post'] },
+];
+
+// CT per-region drill: straight axial.
+const spineCTDetailViews = [
+  { key: 'ax', name: 'axial', plane: 'axial' as const },
+];
+
 export const hpCompareCTSpine = buildCompareProtocol({
   id: '@pacsai/compareCTSpine',
   name: 'CT Spine Compare',
@@ -48,6 +63,7 @@ export const hpCompareCTSpine = buildCompareProtocol({
   selectors: PLANE_SELECTORS,
   stages: spineStages,
   overview: { regions: spineOverviewRegions, views: spineCTSagViews },
+  detail: { views: spineCTDetailViews },
 });
 
 export const hpCompareMRSpine = buildCompareProtocol({
@@ -59,6 +75,7 @@ export const hpCompareMRSpine = buildCompareProtocol({
   selectors: PLANE_SELECTORS,
   stages: spineStages,
   overview: { regions: spineOverviewRegions, views: spineMRSagViews },
+  detail: { views: spineMRDetailViews },
 });
 
 export default hpCompareCTSpine;

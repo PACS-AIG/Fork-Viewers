@@ -124,6 +124,25 @@ export type CompareConfig = {
       excludeKeywords?: string[];
     }>;
   };
+  /**
+   * Optional per-region DETAIL stages for drilling each loaded region one sequence
+   * at a time (typically the axials, which — unlike sagittals — aren't tiled across
+   * regions). Emits one single-viewport, region-addressable stage per (region,
+   * view), region-major (cervical's views, then thoracic's, then lumbar's), so you
+   * step through every loaded region's sequences. Reuses `overview.regions`. When
+   * set, it REPLACES the generic current-only fallback for this protocol.
+   */
+  detail?: {
+    views: Array<{
+      key: string;
+      /** Short label appended after the region (e.g. "axial T2" -> "Lumbar axial T2"). */
+      name: string;
+      /** Plane (default 'axial'). */
+      plane?: 'axial' | 'coronal' | 'sagittal';
+      keywords?: string[];
+      excludeKeywords?: string[];
+    }>;
+  };
 };
 
 // The HP matcher reads a `from` source on rules; core's MatchingRule omits it.
@@ -177,7 +196,33 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     selectors,
     stages,
     overview,
+    detail,
   } = cfg;
+
+  // Region-addressable series rules (region + plane + sequence keywords), matched
+  // across ANY loaded study (no role rule). Shared by the overview and the
+  // per-region detail selectors.
+  const regionViewRules = (
+    region: string,
+    plane: string,
+    keywords?: string[],
+    excludeKeywords?: string[]
+  ): Rule[] => {
+    const rules: Rule[] = [
+      { attribute: 'pacsaiSpineRegion', required: true, constraint: { equals: { value: region } } },
+      { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: plane } } },
+    ];
+    if (excludeScouts) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
+    }
+    if (keywords?.length) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: keywords } });
+    }
+    if (excludeKeywords?.length) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: excludeKeywords } });
+    }
+    return rules;
+  };
 
   const seriesRulesFor = (sel: SelectorDef): Rule[] => {
     // numImageFrames is a soft (scored, NOT required) filter: enhanced/multiframe
@@ -236,25 +281,24 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // by spine region + plane + sequence keywords across ANY loaded study (no role
   // rule), so the current study and its loaded same-session siblings each tile
   // into their own region pane.
+  const overviewRegions = overview?.regions ?? [];
   (overview?.views ?? []).forEach(view => {
     const plane = view.plane ?? 'sagittal';
-    (overview?.regions ?? []).forEach(r => {
-      const rules: Rule[] = [
-        { attribute: 'pacsaiSpineRegion', required: true, constraint: { equals: { value: r.region } } },
-        { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: plane } } },
-      ];
-      if (excludeScouts) {
-        rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
-      }
-      if (view.keywords?.length) {
-        rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: view.keywords } });
-      }
-      if (view.excludeKeywords?.length) {
-        rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: view.excludeKeywords } });
-      }
+    overviewRegions.forEach(r => {
       displaySetSelectors[`overview-${view.key}-${r.key}`] = {
         studyMatchingRules: [],
-        seriesMatchingRules: rules,
+        seriesMatchingRules: regionViewRules(r.region, plane, view.keywords, view.excludeKeywords),
+      };
+    });
+  });
+
+  // Per-region detail selectors (one per view x region), region-addressable.
+  (detail?.views ?? []).forEach(view => {
+    const plane = view.plane ?? 'axial';
+    overviewRegions.forEach(r => {
+      displaySetSelectors[`detail-${view.key}-${r.key}`] = {
+        studyMatchingRules: [],
+        seriesMatchingRules: regionViewRules(r.region, plane, view.keywords, view.excludeKeywords),
       };
     });
   });
@@ -365,6 +409,39 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   }
 
+  // Per-region detail stages: one single-viewport, region-addressable stage per
+  // (region, view), region-major (all of cervical's views, then thoracic's, then
+  // lumbar's). Lets you step through every loaded region's sequences (typically
+  // the axials). Each enabled when its one series matches. When present, these
+  // REPLACE the generic current-only fallback (which otherwise re-shows the
+  // sagittal already covered by the overview).
+  const detailStages = [];
+  if (detail?.views?.length && overviewRegions.length) {
+    const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+    overviewRegions.forEach(r => {
+      detail.views.forEach(view => {
+        detailStages.push({
+          id: `detail-${r.key}-${view.key}`,
+          name: `${cap(r.region)} ${view.name}`,
+          stageActivation: {
+            enabled: { minViewportsMatched: 1 },
+            passive: { minViewportsMatched: 1 },
+          },
+          viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 1 } },
+          viewports: [
+            {
+              viewportOptions: compareViewportOptions,
+              displaySets: [{ id: `detail-${view.key}-${r.key}` }],
+            },
+          ],
+        });
+      });
+    });
+  }
+
+  // Detail stages replace the generic current-only fallback when configured.
+  const postCompareStages = detailStages.length ? detailStages : fallbackStages;
+
   const protocolMatchingRules: Rule[] = [
     {
       id: `${id}-modality`,
@@ -396,7 +473,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       viewportOptions: { viewportType: 'stack', toolGroupId: 'default', allowUnmatchedView: true },
       displaySets: [{ id: `current-${selectors[0].key}`, matchedDisplaySetsIndex: -1 }],
     },
-    stages: [...overviewStages, ...cpStages, ...fallbackStages, safetyStage],
+    stages: [...overviewStages, ...cpStages, ...postCompareStages, safetyStage],
   } as Types.HangingProtocol.Protocol;
 }
 

@@ -12,6 +12,7 @@ import {
   studyDescriptionOverlayItem,
   STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
 } from './overlays/studyDescriptionOverlayItem';
+import { patientInfoOverlayItems } from './overlays/patientInfoOverlayItems';
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
@@ -121,4 +122,5 @@ export {
   SERIES_TYPE_OVERLAY_ITEM_ID,
   studyDescriptionOverlayItem,
   STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
+  patientInfoOverlayItems,
 };

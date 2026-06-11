@@ -4,6 +4,7 @@ import {
   priorOverlayItem,
   seriesTypeOverlayItem,
   studyDescriptionOverlayItem,
+  patientInfoOverlayItems,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
@@ -115,6 +116,16 @@ function modeFactory({ modeConfiguration }) {
       if (!topLeft.some((item: { id?: string }) => item?.id === studyDescriptionOverlayItem.id)) {
         customizationService.setCustomizations({
           'viewportOverlay.topLeft': { $set: [...topLeft, studyDescriptionOverlayItem] },
+        });
+      }
+
+      // Add patient identification (name, then MRN · sex · DOB) to the bottom-left
+      // overlay, ahead of the window-level / zoom readouts. Idempotent.
+      const bottomLeft = customizationService.getCustomization('viewportOverlay.bottomLeft') || [];
+      const patientIds = new Set(patientInfoOverlayItems.map(item => item.id));
+      if (!bottomLeft.some((item: { id?: string }) => item?.id && patientIds.has(item.id))) {
+        customizationService.setCustomizations({
+          'viewportOverlay.bottomLeft': { $set: [...patientInfoOverlayItems, ...bottomLeft] },
         });
       }
 
