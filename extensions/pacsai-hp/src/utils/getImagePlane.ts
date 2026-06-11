@@ -21,15 +21,23 @@
  */
 export type ImagePlane = 'axial' | 'coronal' | 'sagittal';
 
-// Word-boundary keywords so "coronary" !== coronal, "max" !== axial, etc.
+// Letter-boundary keywords so "coronary" !== coronal, "max" !== axial, etc.
+// We treat any NON-LETTER (underscore, hyphen, digit, space, start/end) as a token
+// boundary rather than using \b: scanner descriptions delimit with underscores
+// (e.g. "t1_mprage_sag_p2_iso_fs", "t2_haste_fs_tra_p2"), and \b never fires at
+// "_sag_" because underscore is a word character — so \bsag\b would miss it.
+function letterBounded(words: string): RegExp {
+  return new RegExp(`(?<![a-z])(?:${words})(?![a-z])`, 'i');
+}
+
 function planeFromText(text: string): ImagePlane | undefined {
-  if (/\bsag\b|sagittal/i.test(text)) {
+  if (letterBounded('sag|sagittal').test(text)) {
     return 'sagittal';
   }
-  if (/\bcor\b|\bcoro\b|coronal/i.test(text)) {
+  if (letterBounded('cor|coro|coronal').test(text)) {
     return 'coronal';
   }
-  if (/\bax\b|axial|\btra\b|transverse/i.test(text)) {
+  if (letterBounded('ax|axial|tra|transverse').test(text)) {
     return 'axial';
   }
   return undefined;
