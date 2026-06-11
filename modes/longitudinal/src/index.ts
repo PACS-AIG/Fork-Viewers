@@ -1,6 +1,10 @@
 import { hotkeys } from '@ohif/core';
 import i18n from 'i18next';
-import { priorOverlayItem, seriesTypeOverlayItem } from '@ohif/extension-pacsai-hp';
+import {
+  priorOverlayItem,
+  seriesTypeOverlayItem,
+  studyDescriptionOverlayItem,
+} from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
 import toolbarButtons from './toolbarButtons';
@@ -102,6 +106,15 @@ function modeFactory({ modeConfiguration }) {
       if (toAdd.length) {
         customizationService.setCustomizations({
           'viewportOverlay.topRight': { $set: [...topRight, ...toAdd] },
+        });
+      }
+
+      // Add a StudyDescription line to the top-left overlay, beneath the stock
+      // series description (so each whole-spine pane names its region). Idempotent.
+      const topLeft = customizationService.getCustomization('viewportOverlay.topLeft') || [];
+      if (!topLeft.some((item: { id?: string }) => item?.id === studyDescriptionOverlayItem.id)) {
+        customizationService.setCustomizations({
+          'viewportOverlay.topLeft': { $set: [...topLeft, studyDescriptionOverlayItem] },
         });
       }
 

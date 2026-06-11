@@ -14,13 +14,29 @@ const spineStages = [
   { name: 'Coronal (current/prior)', selector: 'cor' },
 ];
 
-// Whole-spine sagittal survey of a same-session C/T/L set, tiled cranio-caudally.
-// Hangs as the lead stage when all three regions are loaded (see loadRelevantPriors,
-// which fetches the same-day sibling spine studies). `region` order = display order.
+// Whole-spine survey of a same-session C/T/L set, tiled cranio-caudally (see
+// loadRelevantPriors, which fetches the same-day sibling spine studies). `region`
+// order = display order (cervical -> thoracic -> lumbar).
 const spineOverviewRegions = [
   { key: 'c', region: 'cervical' as const },
   { key: 't', region: 'thoracic' as const },
   { key: 'l', region: 'lumbar' as const },
+];
+
+// The radiologist reads the whole spine sequence-by-sequence; each sagittal
+// sequence is its own 3-up stage, in review order. Keywords disambiguate the
+// (often overlapping) descriptions: STIR series also carry "t2", and the
+// post-contrast T1 carries "post" — hence the excludes.
+const spineMRSagViews = [
+  { key: 't2', name: 'Whole spine T2 sag', plane: 'sagittal' as const, keywords: ['t2'], excludeKeywords: ['stir'] },
+  { key: 'stir', name: 'Whole spine STIR sag', plane: 'sagittal' as const, keywords: ['stir'] },
+  { key: 't1', name: 'Whole spine T1 sag', plane: 'sagittal' as const, keywords: ['t1'], excludeKeywords: ['post'] },
+  { key: 't1post', name: 'Whole spine T1 sag +C', plane: 'sagittal' as const, keywords: ['post'] },
+];
+
+// CT has no T2/STIR/T1 — a single sagittal (bone/soft reformat) whole-spine view.
+const spineCTSagViews = [
+  { key: 'sag', name: 'Whole spine (sagittal)', plane: 'sagittal' as const },
 ];
 
 export const hpCompareCTSpine = buildCompareProtocol({
@@ -31,7 +47,7 @@ export const hpCompareCTSpine = buildCompareProtocol({
   bodyPartKeywords: SPINE_KEYWORDS,
   selectors: PLANE_SELECTORS,
   stages: spineStages,
-  overview: { name: 'Whole spine (sagittal)', regions: spineOverviewRegions, plane: 'sagittal' },
+  overview: { regions: spineOverviewRegions, views: spineCTSagViews },
 });
 
 export const hpCompareMRSpine = buildCompareProtocol({
@@ -42,13 +58,7 @@ export const hpCompareMRSpine = buildCompareProtocol({
   bodyPartKeywords: SPINE_KEYWORDS,
   selectors: PLANE_SELECTORS,
   stages: spineStages,
-  // T2 / STIR sagittal are the conventional whole-spine survey sequences.
-  overview: {
-    name: 'Whole spine (T2 sagittal)',
-    regions: spineOverviewRegions,
-    plane: 'sagittal',
-    keywords: ['t2', 'stir'],
-  },
+  overview: { regions: spineOverviewRegions, views: spineMRSagViews },
 });
 
 export default hpCompareCTSpine;

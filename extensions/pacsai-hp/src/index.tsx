@@ -8,6 +8,10 @@ import {
   seriesTypeOverlayItem,
   SERIES_TYPE_OVERLAY_ITEM_ID,
 } from './overlays/seriesTypeOverlayItem';
+import {
+  studyDescriptionOverlayItem,
+  STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
+} from './overlays/studyDescriptionOverlayItem';
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
@@ -115,4 +119,6 @@ export {
   PRIOR_OVERLAY_ITEM_ID,
   seriesTypeOverlayItem,
   SERIES_TYPE_OVERLAY_ITEM_ID,
+  studyDescriptionOverlayItem,
+  STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
 };

@@ -96,20 +96,33 @@ export type CompareConfig = {
    * side by side. Unlike the current/prior stages, overview viewports are
    * region-addressable (matched by `pacsaiSpineRegion` + plane across ALL loaded
    * studies, regardless of role/order), so each region's series lands in its own
-   * pane. The overview hangs as the lead stage tiling WHATEVER regions are loaded
-   * (all configured, or any 2-region subset); a single region produces no overview
-   * and falls through to the per-region compare / current-only stages. Requires
-   * the prior loader to fetch the same-session sibling studies.
+   * pane.
+   *
+   * Emits ONE whole-spine stage per `view` (e.g. T2 sag, STIR sag, T1 sag,
+   * T1 sag +C), in order — the radiologist works down the sequence list, each
+   * tiled across the spine. A stage tiles WHATEVER regions are loaded (panes use
+   * allowUnmatchedView, so an absent region/sequence just renders empty) and
+   * activates only when >= 2 regions have that view; a single region falls through
+   * to the per-region compare / current-only stages. Axials are intentionally NOT
+   * tiled here — they are reviewed per region via those later stages. Requires the
+   * prior loader to fetch the same-session sibling studies.
    */
   overview?: {
-    /** Stage name shown in the UI (e.g. "Whole spine (sagittal)"). */
-    name: string;
-    /** Regions to tile, in anatomical order. */
+    /** Regions to tile, in anatomical (display) order. */
     regions: Array<{ key: string; region: 'cervical' | 'thoracic' | 'lumbar' }>;
-    /** Plane to show for each region (default 'sagittal'). */
-    plane?: 'axial' | 'coronal' | 'sagittal';
-    /** SeriesDescription must contain ANY of these (e.g. ['t2'] to prefer T2). */
-    keywords?: string[];
+    /** One whole-spine stage per view (sequence/plane), in display order. */
+    views: Array<{
+      /** Short key, e.g. 't2','stir','t1','t1post'. Used in selector/stage ids. */
+      key: string;
+      /** Stage name shown in the UI (e.g. "Whole spine T2 sag"). */
+      name: string;
+      /** Plane to show for each region (default 'sagittal'). */
+      plane?: 'axial' | 'coronal' | 'sagittal';
+      /** SeriesDescription must contain ANY of these (e.g. ['t2']). */
+      keywords?: string[];
+      /** SeriesDescription must NOT contain any of these (e.g. exclude 'stir' from T2). */
+      excludeKeywords?: string[];
+    }>;
   };
 };
 
@@ -148,30 +161,6 @@ type Role = (typeof ROLES)[number];
 // computed from the display set's study.
 function roleRule(role: string): Rule {
   return { attribute: 'pacsaiRole', required: true, constraint: { equals: { value: role } } };
-}
-
-/** All order-preserving subsets of `arr` with exactly `k` elements. */
-function combinationsOf<T>(arr: T[], k: number): T[][] {
-  if (k <= 0) {
-    return [[]];
-  }
-  if (k > arr.length) {
-    return [];
-  }
-  const result: T[][] = [];
-  const walk = (start: number, combo: T[]) => {
-    if (combo.length === k) {
-      result.push(combo.slice());
-      return;
-    }
-    for (let i = start; i < arr.length; i++) {
-      combo.push(arr[i]);
-      walk(i + 1, combo);
-      combo.pop();
-    }
-  };
-  walk(0, []);
-  return result;
 }
 
 export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.Protocol {
@@ -243,25 +232,31 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     seriesMatchingRules: [roleRule('current')],
   };
 
-  // Region-addressable overview selectors: match a series by spine region + plane
-  // across ANY loaded study (no role rule), so the current study and its loaded
-  // same-session siblings each tile into their own region pane.
-  const overviewPlane = overview?.plane ?? 'sagittal';
-  (overview?.regions ?? []).forEach(r => {
-    const rules: Rule[] = [
-      { attribute: 'pacsaiSpineRegion', required: true, constraint: { equals: { value: r.region } } },
-      { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: overviewPlane } } },
-    ];
-    if (excludeScouts) {
-      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
-    }
-    if (overview?.keywords?.length) {
-      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: overview.keywords } });
-    }
-    displaySetSelectors[`overview-${r.key}`] = {
-      studyMatchingRules: [],
-      seriesMatchingRules: rules,
-    };
+  // Region-addressable overview selectors, one per (view, region): match a series
+  // by spine region + plane + sequence keywords across ANY loaded study (no role
+  // rule), so the current study and its loaded same-session siblings each tile
+  // into their own region pane.
+  (overview?.views ?? []).forEach(view => {
+    const plane = view.plane ?? 'sagittal';
+    (overview?.regions ?? []).forEach(r => {
+      const rules: Rule[] = [
+        { attribute: 'pacsaiSpineRegion', required: true, constraint: { equals: { value: r.region } } },
+        { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: plane } } },
+      ];
+      if (excludeScouts) {
+        rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
+      }
+      if (view.keywords?.length) {
+        rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: view.keywords } });
+      }
+      if (view.excludeKeywords?.length) {
+        rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: view.excludeKeywords } });
+      }
+      displaySetSelectors[`overview-${view.key}-${r.key}`] = {
+        studyMatchingRules: [],
+        seriesMatchingRules: rules,
+      };
+    });
   });
 
   // Scroll-sync current vs prior. The sync id is scoped per selector (plane /
@@ -341,34 +336,33 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     ],
   };
 
-  // Whole-region overview as the LEAD stage. We emit one stage per region SUBSET
-  // of size >= 2 (largest first), each requiring all of its panes matched
-  // (minViewportsMatched = subset size), so the engine auto-picks the largest
-  // overview whose every region is actually loaded — tiling whatever is available
-  // (3 regions, or any 2-region combo) with no empty panes. A single region never
-  // produces an overview (no size-1 subset), so it falls through to the per-region
-  // compare / current-only stages below. Requires the prior loader to fetch the
-  // same-session sibling studies.
+  // Whole-region overview: one LEAD stage per view (sequence), in order — the
+  // radiologist works down the sequence list (T2 sag, STIR sag, T1 sag, T1 +C),
+  // each tiled across the spine. Panes use `allowUnmatchedView`, so an absent
+  // region/sequence renders empty rather than spawning subset stages (which would
+  // clutter next/prev navigation). Each stage activates when >= 2 regions have
+  // that view (enabled & passive minViewportsMatched = 2): 3 regions -> 3 filled;
+  // 2 -> 2 filled + 1 empty; a single region falls through to the per-region
+  // compare / current-only stages. Requires the prior loader to fetch the siblings.
   const overviewStages = [];
-  if (overview?.regions?.length) {
+  if (overview?.regions?.length && overview?.views?.length) {
     const regions = overview.regions;
-    for (let k = regions.length; k >= 2; k--) {
-      for (const combo of combinationsOf(regions, k)) {
-        overviewStages.push({
-          id: `overview-${combo.map(r => r.key).join('')}`,
-          name: overview.name,
-          stageActivation: {
-            enabled: { minViewportsMatched: k },
-            passive: { minViewportsMatched: k },
-          },
-          viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: k } },
-          viewports: combo.map(r => ({
-            viewportOptions: compareViewportOptions,
-            displaySets: [{ id: `overview-${r.key}` }],
-          })),
-        });
-      }
-    }
+    const minRegions = Math.min(2, regions.length);
+    overview.views.forEach(view => {
+      overviewStages.push({
+        id: `overview-${view.key}`,
+        name: view.name,
+        stageActivation: {
+          enabled: { minViewportsMatched: minRegions },
+          passive: { minViewportsMatched: minRegions },
+        },
+        viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: regions.length } },
+        viewports: regions.map(r => ({
+          viewportOptions: compareViewportOptions,
+          displaySets: [{ id: `overview-${view.key}-${r.key}`, matchedDisplaySetsIndex: -1 }],
+        })),
+      });
+    });
   }
 
   const protocolMatchingRules: Rule[] = [
