@@ -18,6 +18,8 @@ export const hpCompareCTChest = buildCompareProtocol({
   description: 'Current vs prior CT chest — lung & soft-tissue axial + coronal/sagittal',
   modalities: ['CT'],
   bodyPartKeywords: ['chest', 'thorax', 'lung'],
+  // No-prior multi-view: axial lung + axial soft-tissue + coronal.
+  currentView: ['axlung', 'axsoft', 'cor'],
   selectors: [
     { key: 'axlung', plane: 'axial', kernel: 'lung', excludeKeywords: ['mip'] },
     { key: 'axsoft', plane: 'axial', kernel: 'soft', excludeKeywords: ['mip'] },

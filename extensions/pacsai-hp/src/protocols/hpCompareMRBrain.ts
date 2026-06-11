@@ -25,6 +25,8 @@ export const hpCompareMRBrain = buildCompareProtocol({
   description: 'Current vs prior MR brain — by sequence (T1/T2/FLAIR/SWI/DWI)',
   modalities: ['MR'],
   bodyPartKeywords: ['brain', 'head'],
+  // No-prior multi-view: the core sequences (T1/T2/FLAIR/DWI) tiled 1×4.
+  currentView: ['t1', 't2', 'flair', 'dwi'],
   selectors: [
     {
       key: 't1',

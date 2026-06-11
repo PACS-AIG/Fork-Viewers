@@ -80,6 +80,13 @@ export type CompareConfig = {
   seriesFloor?: number;
   /** Exclude topogram/scout/localizer by description (default true). */
   excludeScouts?: boolean;
+  /**
+   * Selector keys to tile in the current study when NO prior is available, most
+   * important first (e.g. ['ax','cor','sag']). The builder emits descending-density
+   * stages so the engine auto-picks the densest layout whose every pane matched —
+   * no empty panes when a view is absent. Defaults to the distinct stage selectors.
+   */
+  currentView?: string[];
   selectors: SelectorDef[];
   stages: StageDef[];
 };
@@ -131,6 +138,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     matchWeight = 100,
     seriesFloor = 5,
     excludeScouts = true,
+    currentView,
     selectors,
     stages,
   } = cfg;
@@ -202,38 +210,48 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     displaySets: [{ id: `${role}-${selectorKey}`, ...(voi ? { options: { voi } } : {}) }],
   });
 
-  // Current|prior stages (min 2 matched → only active once a prior is loaded),
-  // in the configured order, followed by a current-only fallback (min 1).
+  // Current|prior stages — require BOTH current and prior matched (enabled and
+  // passive minViewportsMatched = 2). A comparison stage therefore exists only
+  // when there is a real pair to compare; it never renders an empty prior half.
+  // Current-only content (no prior, or a series the prior lacks) is shown by the
+  // multi-view current-only stages below instead.
   const cpStages = stages.map((st, i) => ({
     id: `${st.selector}-${i}-cp`,
     name: st.name,
-    // enabled (auto-selected, fully side-by-side) requires both current + prior.
-    // passive (navigable via next/previous) requires at least the current — so a
-    // plane present only in the current study still gets its own stage (prior
-    // viewport empty) instead of being hidden. 0 matched => disabled => skipped,
-    // which avoids navigating into a truly empty stage.
     stageActivation: {
       enabled: { minViewportsMatched: 2 },
-      passive: { minViewportsMatched: 1 },
+      passive: { minViewportsMatched: 2 },
     },
     viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
     viewports: [viewport('current', st.selector, st.voi), viewport('prior', st.selector, st.voi)],
   }));
 
   const distinctSelectors = [...new Set(stages.map(s => s.selector))];
-  const fallbackStage = {
-    id: 'current-only',
-    name: 'Current',
-    stageActivation: {
-      enabled: { minViewportsMatched: 1 },
-      passive: { minViewportsMatched: 1 },
-    },
-    viewportStructure: {
-      layoutType: 'grid',
-      properties: { rows: 1, columns: distinctSelectors.length },
-    },
-    viewports: distinctSelectors.map(key => viewport('current', key)),
-  };
+
+  // Current-only multi-view (used when no prior is available). Validate the
+  // configured keys against actual selectors; default to the distinct stage
+  // selectors. Most-important key first — stages drop from the end.
+  const currentViewKeys = (currentView?.length ? currentView : distinctSelectors).filter(key =>
+    selectors.some(s => s.key === key)
+  );
+
+  // Descending-density stages: [k..1] panes. Each requires all its panes matched
+  // (enabled & passive minViewportsMatched = k), so the engine auto-selects the
+  // densest layout whose every current view is present — never an empty pane.
+  const fallbackStages = [];
+  for (let k = currentViewKeys.length; k >= 1; k--) {
+    const keys = currentViewKeys.slice(0, k);
+    fallbackStages.push({
+      id: `current-only-${k}`,
+      name: 'Current',
+      stageActivation: {
+        enabled: { minViewportsMatched: k },
+        passive: { minViewportsMatched: k },
+      },
+      viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: k } },
+      viewports: keys.map(key => viewport('current', key)),
+    });
+  }
 
   // Guaranteed last-resort stage so the protocol NEVER fails to hang.
   // `passive: minViewportsMatched 0` means it is never 'disabled' (matches how
@@ -283,7 +301,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       viewportOptions: { viewportType: 'stack', toolGroupId: 'default', allowUnmatchedView: true },
       displaySets: [{ id: `current-${selectors[0].key}`, matchedDisplaySetsIndex: -1 }],
     },
-    stages: [...cpStages, fallbackStage, safetyStage],
+    stages: [...cpStages, ...fallbackStages, safetyStage],
   } as Types.HangingProtocol.Protocol;
 }
 

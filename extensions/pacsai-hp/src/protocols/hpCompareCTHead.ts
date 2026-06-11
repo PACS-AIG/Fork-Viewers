@@ -19,6 +19,9 @@ export const hpCompareCTHead = buildCompareProtocol({
   description: 'Current vs prior CT head — brain/bone axial + coronal/sagittal',
   modalities: ['CT'],
   bodyPartKeywords: ['head', 'brain'],
+  // No-prior multi-view: brain axial + coronal + sagittal (bone recon excluded —
+  // often absent, and would otherwise force the engine to a smaller layout).
+  currentView: ['ax', 'cor', 'sag'],
   selectors: [
     // Plane via computed orientation; soft/bone via computed ConvolutionKernel class.
     { key: 'ax', plane: 'axial', kernel: 'soft' }, // brain/soft-kernel axial
