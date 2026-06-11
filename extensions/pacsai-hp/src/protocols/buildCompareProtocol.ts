@@ -359,7 +359,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
         viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: regions.length } },
         viewports: regions.map(r => ({
           viewportOptions: compareViewportOptions,
-          displaySets: [{ id: `overview-${view.key}-${r.key}`, matchedDisplaySetsIndex: -1 }],
+          displaySets: [{ id: `overview-${view.key}-${r.key}` }],
         })),
       });
     });
