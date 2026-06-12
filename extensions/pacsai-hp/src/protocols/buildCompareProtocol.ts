@@ -57,6 +57,13 @@ type SelectorDef = {
   keywords?: string[];
   /** SeriesDescription must NOT contain any of these (e.g. exclude FLAIR from a T2 selector). */
   excludeKeywords?: string[];
+  /**
+   * Prefer (but do not require) series whose ImageType contains ANY of these
+   * (e.g. 'ORIGINAL' to favor the primary acquisition over derived reformats when
+   * both share a plane). Weighted, not required — falls back gracefully when
+   * ImageType is absent or only reformats exist.
+   */
+  preferImageType?: string | string[];
 };
 
 type StageDef = {
@@ -270,6 +277,12 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     if (sel.preferPlane) {
       // Weighted, NOT required: prefers this plane but still matches others.
       rules.push({ attribute: 'pacsaiPlane', weight: 10, constraint: { equals: { value: sel.preferPlane } } });
+    }
+    if (sel.preferImageType) {
+      // Weighted, NOT required: prefers e.g. ORIGINAL (primary acquisition) over
+      // derived reformats when both share the plane/kernel. ImageType is an array
+      // (e.g. ['ORIGINAL','PRIMARY','AXIAL']); containsI matches membership.
+      rules.push({ attribute: 'ImageType', weight: 15, constraint: { containsI: sel.preferImageType } });
     }
     if (sel.kernel) {
       // Match the computed kernel class (soft/bone) from ConvolutionKernel.

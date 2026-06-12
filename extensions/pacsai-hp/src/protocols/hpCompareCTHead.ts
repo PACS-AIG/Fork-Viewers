@@ -24,7 +24,10 @@ export const hpCompareCTHead = buildCompareProtocol({
   currentView: ['ax', 'cor', 'sag'],
   selectors: [
     // Plane via computed orientation; soft/bone via computed ConvolutionKernel class.
-    { key: 'ax', plane: 'axial', kernel: 'soft' }, // brain/soft-kernel axial
+    // ax prefers ORIGINAL ImageType so the primary axial acquisition wins over an
+    // oblique/derived axial REFORMATS when both are present (head-specific — spine
+    // intentionally relies on reformats).
+    { key: 'ax', plane: 'axial', kernel: 'soft', preferImageType: 'ORIGINAL' }, // brain/soft-kernel axial
     { key: 'axbone', plane: 'axial', kernel: 'bone' }, // bone-kernel axial recon
     { key: 'cor', plane: 'coronal', kernel: 'soft' },
     { key: 'sag', plane: 'sagittal', kernel: 'soft' },

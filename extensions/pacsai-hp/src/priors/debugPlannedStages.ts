@@ -79,29 +79,37 @@ function rulePasses(value: unknown, constraint: Record<string, any> = {}): boole
 
 /**
  * Series matching ALL required series-rules of a selector (and not unsupported),
- * ordered so the FIRST is the series the matcher most likely hangs. The matcher
- * picks the highest-scoring candidate; the dominant soft tiebreak for the compare
- * selectors is `numImageFrames > floor`, so we approximate by sorting frame count
- * descending (a real recon beats a 1-image scout). Not authoritative for every
- * weighting, but matches the common cases.
+ * ordered so the FIRST is the series the matcher most likely hangs. Approximates the
+ * matcher's score: sum the weights of the SOFT (non-required) rules a series passes
+ * (e.g. preferImageType ORIGINAL = +15, numImageFrames > floor), with frame count as
+ * the final tiebreak. Not authoritative for every weighting, but reflects the
+ * configured preferences (so e.g. the primary axial outranks a derived reformat).
  */
 function matchesForSelector(
   selector: any,
   displaySets: AnyDS[],
   activeStudyUID: string | undefined
 ): AnyDS[] {
-  const rules = (selector?.seriesMatchingRules ?? []).filter((r: any) => r.required);
+  const allRules = selector?.seriesMatchingRules ?? [];
+  const requiredRules = allRules.filter((r: any) => r.required);
+  const softRules = allRules.filter((r: any) => !r.required);
+  const siblingsOf = (d: AnyDS) => displaySets.filter(s => s?.StudyInstanceUID === d?.StudyInstanceUID);
+  const softScore = (d: AnyDS) =>
+    softRules.reduce(
+      (sum: number, r: any) =>
+        sum + (rulePasses(attrValue(d, r.attribute, activeStudyUID, siblingsOf(d)), r.constraint) ? (r.weight ?? 1) : 0),
+      0
+    );
   return displaySets
     .filter(d => {
       if (d?.unsupported) {
         return false;
       }
-      const siblings = displaySets.filter(s => s?.StudyInstanceUID === d?.StudyInstanceUID);
-      return rules.every((r: any) =>
-        rulePasses(attrValue(d, r.attribute, activeStudyUID, siblings), r.constraint)
+      return requiredRules.every((r: any) =>
+        rulePasses(attrValue(d, r.attribute, activeStudyUID, siblingsOf(d)), r.constraint)
       );
     })
-    .sort((a, b) => (b?.numImageFrames ?? 0) - (a?.numImageFrames ?? 0));
+    .sort((a, b) => softScore(b) - softScore(a) || (b?.numImageFrames ?? 0) - (a?.numImageFrames ?? 0));
 }
 
 export function logPlannedStages(
