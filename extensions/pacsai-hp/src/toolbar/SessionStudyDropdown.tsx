@@ -46,6 +46,11 @@ function SessionStudyDropdown({ commandsManager, servicesManager }: Record<strin
     }
   };
 
+  // Truncate long study descriptions so the selected text never runs under the
+  // native dropdown arrow (the box also reserves right padding for it).
+  const truncate = (text: string, max = 24) =>
+    text && text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
   return (
     <select
       data-cy="pacsai-session-switcher"
@@ -53,19 +58,28 @@ function SessionStudyDropdown({ commandsManager, servicesManager }: Record<strin
       value={activeUID ?? ''}
       onChange={onChange}
       style={{
+        boxSizing: 'border-box',
+        height: 36,
+        alignSelf: 'center',
+        verticalAlign: 'middle',
+        maxWidth: 200,
+        // Extra right padding leaves room for the native arrow; ellipsis clips the rest.
+        padding: '0 22px 0 8px',
+        margin: '0 6px',
         background: '#041c4a',
         color: '#e6f1ff',
         border: '1px solid #155bb5',
         borderRadius: 4,
-        padding: '2px 6px',
-        margin: '0 6px',
-        maxWidth: 220,
-        height: 28,
+        fontSize: 13,
+        lineHeight: '34px',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
       }}
     >
       {studies.map(s => (
-        <option key={s.uid} value={s.uid}>
-          {s.label}
+        <option key={s.uid} value={s.uid} title={s.label}>
+          {truncate(s.label)}
         </option>
       ))}
     </select>
