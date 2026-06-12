@@ -282,6 +282,11 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           // a missing StudyDescription (→ no region → no overview) is diagnosable.
           const studyDesc = inst?.StudyDescription ?? d?.StudyDescription ?? '';
           const region = getSpineRegion(String(studyDesc));
+          // Color/RGB series (SamplesPerPixel>1) are the ones that trip cornerstone's
+          // "size not a multiple of numberOfComponents" on thumbnail/viewport render.
+          const photometric =
+            inst?.PhotometricInterpretation ?? d?.PhotometricInterpretation ?? '?';
+          const spp = inst?.SamplesPerPixel ?? d?.SamplesPerPixel ?? '?';
           log(
             `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
               `mod=${d?.Modality} | unsupported=${!!d?.unsupported} | imageIds=${
@@ -289,7 +294,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
               } | plane=${getImagePlane(
                 d,
                 activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
-              )} | kernel=${getImageKernel(d)} | region=${region ?? '-'} | studyDesc="${studyDesc}" | IOP=[${iopStr}]`
+              )} | kernel=${getImageKernel(d)} | region=${region ?? '-'} | photometric=${photometric} | spp=${spp} | studyDesc="${studyDesc}" | IOP=[${iopStr}]`
           );
         });
         log('ordered studies for run()', [currentStudyUID, ...extraUIDs]);
