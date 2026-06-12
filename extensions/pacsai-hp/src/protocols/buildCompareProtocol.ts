@@ -204,7 +204,10 @@ const compareViewportOptions = {
   allowUnmatchedView: true,
 };
 
-const SCOUT_WORDS = ['topogram', 'scout', 'localizer'];
+// Substring (case-insensitive) match. 'topo' covers both the full 'TOPOGRAM' and the
+// abbreviated 'Topo PA' / 'Topo LAT' that some scanners (e.g. Siemens auto-protocols)
+// emit — these are scouts and must never hang in a diagnostic stage.
+const SCOUT_WORDS = ['topo', 'scout', 'localizer'];
 const ROLES = ['current', 'prior'] as const;
 type Role = (typeof ROLES)[number];
 
