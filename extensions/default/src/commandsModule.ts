@@ -554,7 +554,26 @@ const commandsModule = ({
         return;
       }
 
-      thumbnail.scrollIntoView({ behavior: 'smooth' });
+      // Scroll ONLY the panel's own scroll container, never the document.
+      // `scrollIntoView` aligns the element in *every* scrollable ancestor —
+      // including <html>, the document scroller — so on a long thumbnail list it
+      // drags the whole viewer up (the "page bump"). Scrolling the container
+      // directly with scrollBy stays contained: it never chains to ancestors.
+      const scroller =
+        (thumbnail.closest('[data-cy="studyBrowser-panel"]') as HTMLElement | null) ??
+        (thumbnailList.parentElement as HTMLElement | null);
+
+      if (scroller) {
+        const scrollerBounds = scroller.getBoundingClientRect();
+        const delta =
+          thumbnailBounds.top < scrollerBounds.top
+            ? thumbnailBounds.top - scrollerBounds.top
+            : thumbnailBounds.bottom - scrollerBounds.bottom;
+        scroller.scrollBy({ top: delta, behavior: 'smooth' });
+      } else {
+        // Fallback: block:'nearest' minimizes (but doesn't guarantee zero) document scroll.
+        thumbnail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     },
 
     updateViewportDisplaySet: ({

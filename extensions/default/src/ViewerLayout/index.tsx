@@ -63,16 +63,9 @@ function ViewerLayout({
   useEffect(() => {
     document.body.classList.add('bg-black');
     document.body.classList.add('overflow-hidden');
-    // Also lock the <html> element: it is the scrolling element, and stray
-    // portal/absolutely-positioned nodes (dialogs, Radix menus) can extend its
-    // scroll height past the viewport. Without this, focusing an element (e.g.
-    // clicking a study accordion) lets the browser scroll <html> to reveal it,
-    // bumping the whole viewer up. Body's overflow-hidden alone doesn't cover this.
-    document.documentElement.classList.add('overflow-hidden');
     return () => {
       document.body.classList.remove('bg-black');
       document.body.classList.remove('overflow-hidden');
-      document.documentElement.classList.remove('overflow-hidden');
     };
   }, []);
 

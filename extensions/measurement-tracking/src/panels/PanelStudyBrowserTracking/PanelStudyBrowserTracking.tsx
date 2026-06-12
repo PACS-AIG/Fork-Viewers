@@ -393,9 +393,24 @@ export default function PanelStudyBrowserTracking({
       const displaySetInstanceUID = jumpToDisplaySet;
       const element = document.getElementById(`thumbnail-${displaySetInstanceUID}`);
 
-      if (element && typeof element.scrollIntoView === 'function') {
-        // TODO: Any way to support IE here?
-        element.scrollIntoView({ behavior: 'smooth' });
+      if (element) {
+        // Scroll ONLY the panel's own scroll container, never the document.
+        // `scrollIntoView` aligns the element in *every* scrollable ancestor —
+        // including <html>, the document scroller — so on a long thumbnail list it
+        // drags the whole viewer up (the "page bump"). scrollBy on the container
+        // itself stays contained: it never chains to ancestors.
+        const scroller = element.closest('[data-cy="studyBrowser-panel"]') as HTMLElement | null;
+        if (scroller) {
+          const eRect = element.getBoundingClientRect();
+          const sRect = scroller.getBoundingClientRect();
+          if (eRect.top < sRect.top || eRect.bottom > sRect.bottom) {
+            const delta =
+              eRect.top < sRect.top ? eRect.top - sRect.top : eRect.bottom - sRect.bottom;
+            scroller.scrollBy({ top: delta, behavior: 'smooth' });
+          }
+        } else if (typeof element.scrollIntoView === 'function') {
+          element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
 
         setJumpToDisplaySet(null);
       }
