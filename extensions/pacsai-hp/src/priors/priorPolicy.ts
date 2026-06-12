@@ -3,6 +3,7 @@ import baseRelevance from './scorers/baseRelevance';
 import recency from './scorers/recency';
 import indication from './scorers/indication';
 import spineRegionGate from './scorers/spineRegion';
+import sameDayDifferentRegionGate from './scorers/sameDayRegion';
 
 /**
  * Per-protocol prior-selection policies, keyed by hanging-protocol id. These are
@@ -10,9 +11,15 @@ import spineRegionGate from './scorers/spineRegion';
  * extend the map for additional protocols) via the customization service under
  * the `pacsai.priorPolicy` key.
  */
-// spineRegionGate first so a cross-region spine sibling is hard-disqualified
-// regardless of any recency/indication bonus the other scorers would add.
-const DEFAULT_SCORERS = [spineRegionGate, baseRelevance, recency, indication];
+// Region gates first so a sibling (cross-region spine, or any same-day different-
+// region concurrent exam) is hard-disqualified regardless of recency/indication.
+const DEFAULT_SCORERS = [
+  spineRegionGate,
+  sameDayDifferentRegionGate,
+  baseRelevance,
+  recency,
+  indication,
+];
 
 // All pacsai compare protocols hang current vs a single most-relevant prior, so
 // they share one default policy. A protocol-specific entry here overrides it.
