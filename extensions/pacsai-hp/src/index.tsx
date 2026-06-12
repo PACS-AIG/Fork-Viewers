@@ -3,6 +3,7 @@ import { Types } from '@ohif/core';
 import { id } from './id';
 import getHangingProtocolModule from './getHangingProtocolModule';
 import getCommandsModule from './getCommandsModule';
+import getToolbarModule from './getToolbarModule';
 import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from './overlays/priorOverlayItem';
 import {
   seriesTypeOverlayItem,
@@ -128,6 +129,7 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
 
   getHangingProtocolModule,
   getCommandsModule,
+  getToolbarModule,
 };
 
 export default pacsaiHpExtension;

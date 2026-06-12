@@ -19,9 +19,11 @@ export const hpCompareCTHead = buildCompareProtocol({
   description: 'Current vs prior CT head — brain/bone axial + coronal/sagittal',
   modalities: ['CT'],
   bodyPartKeywords: ['head', 'brain'],
-  // No-prior multi-view: brain axial + coronal + sagittal (bone recon excluded —
-  // often absent, and would otherwise force the engine to a smaller layout).
-  currentView: ['ax', 'cor', 'sag'],
+  // No-prior multi-view, most-important first. `axbone` is LAST so the descending
+  // fallback adds a 4-up (brain ax + cor + sag + bone ax) when a bone recon exists,
+  // and gracefully drops to the 3-up (ax/cor/sag) when it's absent — so the bone
+  // window is always reachable without a prior, with no regression for no-bone studies.
+  currentView: ['ax', 'cor', 'sag', 'axbone'],
   selectors: [
     // Plane via computed orientation; soft/bone via computed ConvolutionKernel class.
     // ax prefers ORIGINAL ImageType so the primary axial acquisition wins over an

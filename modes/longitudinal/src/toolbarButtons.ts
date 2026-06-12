@@ -227,6 +227,14 @@ const toolbarButtons: Button[] = [
       evaluate: 'evaluate.action',
     },
   },
+  {
+    // Same-session study switcher (pacsai-hp). Dropdown of the co-loaded studies
+    // (current + siblings); selecting one re-hangs it with its dedicated protocol.
+    // Self-hides unless there is more than one session study.
+    id: 'SessionStudies',
+    uiType: 'pacsai.sessionSwitcher',
+    props: {},
+  },
 ];
 
 export default toolbarButtons;

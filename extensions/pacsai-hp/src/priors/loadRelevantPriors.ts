@@ -6,7 +6,7 @@ import {
 
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
-import { setComparisonRoles } from './roleRegistry';
+import { setComparisonRoles, setSessionStudies } from './roleRegistry';
 import { getBodyPart, getModality, getSpineRegion, isSpine, parseStudyDate } from './metadata';
 import logPlannedStages from './debugPlannedStages';
 import type { StudyLike } from './types';
@@ -138,6 +138,17 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         ? []
         : candidates.filter(s => parseStudyDate(s) === curDate && getModality(s) === curMod);
     const siblingUIDs = siblingStudies.map(s => s.StudyInstanceUID);
+
+    // Publish the same-session studies (opened + siblings) for the toolbar study
+    // switcher, so the user can re-focus any of them (each re-hangs with its own
+    // dedicated protocol). A single study yields a one-entry list (switcher hides).
+    setSessionStudies([
+      { uid: currentStudyUID, label: current.StudyDescription || 'Current study' },
+      ...siblingStudies.map(s => ({
+        uid: s.StudyInstanceUID,
+        label: s.StudyDescription || s.StudyInstanceUID,
+      })),
+    ]);
 
     // A prior is a STRICTLY EARLIER study (temporal comparison). Same-day studies are
     // siblings, never priors — so a same-day CTA / repeat / other-region exam can't be

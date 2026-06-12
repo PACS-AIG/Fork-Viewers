@@ -19,8 +19,15 @@
  */
 export type StudyRole = 'current' | 'prior' | 'sibling';
 
+/** A same-session study the user can quickly switch focus to (current + siblings). */
+export type SessionStudy = { uid: string; label: string };
+
 let priorUIDs: Set<string> = new Set();
 let siblingUIDs: Set<string> = new Set();
+
+// The same-session studies (opened + its siblings), for the toolbar study switcher.
+let sessionStudies: SessionStudy[] = [];
+const sessionListeners = new Set<() => void>();
 
 /** Replace the prior/sibling sets (called once per re-hang). */
 export function setComparisonRoles(opts: { priors?: string[]; siblings?: string[] } = {}): void {
@@ -28,10 +35,30 @@ export function setComparisonRoles(opts: { priors?: string[]; siblings?: string[
   siblingUIDs = new Set((opts.siblings ?? []).filter(Boolean));
 }
 
-/** Clear all registered roles (e.g. when leaving a study). */
+/** Replace the session-study list and notify subscribers (the toolbar switcher). */
+export function setSessionStudies(list: SessionStudy[]): void {
+  sessionStudies = (list ?? []).filter(s => s?.uid);
+  sessionListeners.forEach(cb => cb());
+}
+
+/** The same-session studies (current + siblings), in display order. */
+export function getSessionStudies(): SessionStudy[] {
+  return sessionStudies;
+}
+
+/** Subscribe to session-study changes; returns an unsubscribe fn. */
+export function subscribeSessionStudies(cb: () => void): () => void {
+  sessionListeners.add(cb);
+  return () => {
+    sessionListeners.delete(cb);
+  };
+}
+
+/** Clear all registered roles + session studies (e.g. when leaving a study). */
 export function clearComparisonRoles(): void {
   priorUIDs = new Set();
   siblingUIDs = new Set();
+  setSessionStudies([]);
 }
 
 /**
