@@ -40,17 +40,24 @@ export function isSpine(part: BodyPart): boolean {
  *    are left to the generic table.
  *  - a bare "spine"/"spinal"/"vertebr"/"myelogram" (no region) stays generic 'spine'.
  */
+// Treat any NON-LETTER (underscore, hyphen, digit, space, start/end) as a token
+// boundary instead of \b. Scanner / auto-protocol names delimit with underscores
+// (e.g. "Spine^001_Cspine (Adult)"), and \b never fires at "_Cspine" because
+// underscore is a word character — so \bc[-\s]?spine\b would miss it and the study
+// would fall through to a generic 'spine'. Mirrors getImagePlane's letterBounded.
+const spineBounded = (body: string): RegExp => new RegExp(`(?<![a-z])(?:${body})(?![a-z])`, 'i');
+
 export function getSpineRegion(text: string): BodyPart | undefined {
-  if (/\b(lumbar|lumbosacral|l[-\s]?spine|ls[-\s]?spine)\b/i.test(text)) {
+  if (spineBounded('lumbar|lumbosacral|l[-_\\s]?spine|ls[-_\\s]?spine').test(text)) {
     return 'spine-lumbar';
   }
-  if (/\bthoracic\s+spine\b|\bt[-\s]?spine\b|\bdorsal\s+spine\b/i.test(text)) {
+  if (spineBounded('thoracic\\s+spine|t[-_\\s]?spine|dorsal\\s+spine').test(text)) {
     return 'spine-thoracic';
   }
-  if (/\bcervical\s+spine\b|\bc[-\s]?spine\b/i.test(text)) {
+  if (spineBounded('cervical\\s+spine|c[-_\\s]?spine').test(text)) {
     return 'spine-cervical';
   }
-  if (/\b(spine|spinal|vertebr|myelogram)\b/i.test(text)) {
+  if (spineBounded('spine|spinal|vertebr|myelogram').test(text)) {
     return 'spine';
   }
   return undefined;
