@@ -96,6 +96,17 @@ export type CompareConfig = {
    * no empty panes when a view is absent. Defaults to the distinct stage selectors.
    */
   currentView?: string[];
+  /**
+   * Optional pageable CURRENT-ONLY stages, each tiling 1–N selectors side by side,
+   * for studies that typically have NO prior (e.g. stroke CTA). Each entry becomes
+   * its own stage you can page through (e.g. source axials, then MIPs, then CPR).
+   * A group is auto-eligible only when ALL its selectors match (no empty pane on
+   * auto-hang) but stays manually reachable when at least one matches. Placed after
+   * the current/prior compare stages (which lead when a prior exists) and before the
+   * descending-density `currentView` fallback. Distinct from `currentView`, which is
+   * a single front-anchored stack that degrades by dropping panes.
+   */
+  currentStages?: Array<{ name: string; selectors: string[]; voi?: VOI }>;
   selectors: SelectorDef[];
   stages: StageDef[];
   /**
@@ -218,6 +229,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     seriesFloor = 5,
     excludeScouts = true,
     currentView,
+    currentStages,
     selectors,
     stages,
     overview,
@@ -423,6 +435,31 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   }
 
+  // Pageable current-only group stages (e.g. CTA with no prior): each tiles a
+  // small set of selectors side by side. Auto-eligible only when ALL its panes
+  // match (enabled minViewportsMatched = N, so an auto-hang never shows an empty
+  // pane); still manually reachable when at least one matches (passive = 1). These
+  // sit AFTER the current/prior stages (which lead when a prior exists) and BEFORE
+  // the descending currentView fallback.
+  const currentGroupStages = (currentStages ?? [])
+    .map((cs, i) => {
+      const keys = cs.selectors.filter(key => selectors.some(s => s.key === key));
+      if (!keys.length) {
+        return null;
+      }
+      return {
+        id: `current-group-${i}`,
+        name: cs.name,
+        stageActivation: {
+          enabled: { minViewportsMatched: keys.length },
+          passive: { minViewportsMatched: 1 },
+        },
+        viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: keys.length } },
+        viewports: keys.map(key => viewport('current', key, cs.voi ?? voiBySelector.get(key))),
+      };
+    })
+    .filter(Boolean);
+
   // Guaranteed last-resort stage so the protocol NEVER fails to hang.
   // `passive: minViewportsMatched 0` means it is never 'disabled' (matches how
   // the stock `default` protocol stays applicable even with 0 matched viewports),
@@ -520,7 +557,10 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // single region and would mis-pair across regions). Otherwise keep them.
   const hasRegionCompare = regionCompareStages.length > 0;
   const comparisonStages = hasRegionCompare ? regionCompareStages : cpStages;
-  const postCompareStages = hasRegionCompare ? [] : fallbackStages;
+  // No-prior path: pageable current-only groups first (auto-hang the first whose
+  // panes all match), then the descending currentView fallback. Region-compare
+  // protocols manage their own current-only views, so groups don't apply there.
+  const postCompareStages = hasRegionCompare ? [] : [...currentGroupStages, ...fallbackStages];
 
   const protocolMatchingRules: Rule[] = [
     {
