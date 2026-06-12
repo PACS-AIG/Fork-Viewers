@@ -280,6 +280,7 @@ function modeFactory({ modeConfiguration }) {
       '@pacsai/compareCTSpine',
       '@pacsai/compareMRSpine',
       '@pacsai/compareCTChest',
+      '@pacsai/compareCTA',
       '@pacsai/compareCTHead',
       '@pacsai/compareMRBrain',
       // Generic per-modality fallbacks

@@ -4,6 +4,7 @@ import hpCompareCR from './protocols/hpCompareCR';
 import { hpCompareCTSpine, hpCompareMRSpine } from './protocols/hpCompareSpine';
 import hpCompareCTChest from './protocols/hpCompareCTChest';
 import hpCompareCTHead from './protocols/hpCompareCTHead';
+import hpCompareCTA from './protocols/hpCompareCTA';
 import hpCompareMRBrain from './protocols/hpCompareMRBrain';
 
 const protocols = [
@@ -16,6 +17,8 @@ const protocols = [
   hpCompareMRSpine,
   hpCompareCTChest,
   hpCompareCTHead,
+  // CTA out-weights compareCTHead for angio studies (both match "head").
+  hpCompareCTA,
   hpCompareMRBrain,
 ];
 
