@@ -56,12 +56,16 @@ const spineMRCompareViews = [
   { key: 't1', name: 'T1 sag', plane: 'sagittal' as const, keywords: ['t1'], excludeKeywords: ['post'] },
   { key: 't1post', name: 'T1 sag +C', plane: 'sagittal' as const, keywords: ['post'] },
   ...spineMRAxialViews,
+  // Coronal (uncommon in spine MR — e.g. STIR for scoliosis/plexus); a single
+  // plane-only catch-all so any coronal still hangs against its prior.
+  { key: 'cor', name: 'coronal', plane: 'coronal' as const },
 ];
 
-// CT per-region compare: sagittal + straight axial.
+// CT per-region compare: sagittal + axial + coronal (spine reads sag → ax → cor).
 const spineCTCompareViews = [
   { key: 'sag', name: 'sagittal', plane: 'sagittal' as const },
   { key: 'ax', name: 'axial', plane: 'axial' as const },
+  { key: 'cor', name: 'coronal', plane: 'coronal' as const },
 ];
 
 export const hpCompareCTSpine = buildCompareProtocol({
