@@ -31,8 +31,13 @@ export const KERNEL_ATTRIBUTE = 'pacsaiKernel';
 /** Custom HP attribute id: comparison role (current/prior/sibling). */
 export const ROLE_ATTRIBUTE = 'pacsaiRole';
 
-/** Custom HP attribute id: spine region (cervical/thoracic/lumbar). */
-export const SPINE_REGION_ATTRIBUTE = 'pacsaiSpineRegion';
+/**
+ * Custom HP attribute id: spine region + timepoint, e.g. `lumbar-session`,
+ * `cervical-prior`. `session` = current/sibling (same acquisition session);
+ * `prior` = a loaded comparison prior of that region. Drives both the whole-spine
+ * survey (region-session panes) and the per-region current-vs-prior compare.
+ */
+export const REGION_TIMEPOINT_ATTRIBUTE = 'pacsaiRegionTimepoint';
 
 /** Read the study description off a display set (StudyDescription lives on instances). */
 function studyDescriptionOf(displaySet: any): string {
@@ -96,17 +101,28 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       roleForDisplaySet
     );
 
-    // Spine region (cervical/thoracic/lumbar) from the study description, used by
-    // the region-addressable whole-spine overview selectors. Generic 'spine'
-    // (no region) and non-spine return undefined (won't tile into a region pane).
-    const spineRegionForDisplaySet = (displaySet: any) => {
+    // Spine region + timepoint (e.g. 'lumbar-session', 'cervical-prior'), used by
+    // the region-addressable whole-spine survey (region-session panes) and the
+    // per-region current-vs-prior compare. session = current/sibling, prior = a
+    // loaded comparison prior. Generic 'spine' / non-spine / unknown -> undefined.
+    const regionTimepointForDisplaySet = (displaySet: any) => {
+      const activeStudyUID = hangingProtocolService?.getState?.()?.activeStudyUID;
+      const role = getStudyRole(displaySet?.StudyInstanceUID, activeStudyUID);
+      const timepoint =
+        role === 'current' || role === 'sibling' ? 'session' : role === 'prior' ? 'prior' : undefined;
+      if (!timepoint) {
+        return undefined;
+      }
       const region = getSpineRegion(studyDescriptionOf(displaySet));
-      return region && region.startsWith('spine-') ? region.slice('spine-'.length) : undefined;
+      if (!region || !region.startsWith('spine-')) {
+        return undefined;
+      }
+      return `${region.slice('spine-'.length)}-${timepoint}`;
     };
     hangingProtocolService?.addCustomAttribute?.(
-      SPINE_REGION_ATTRIBUTE,
-      'Spine region (cervical/thoracic/lumbar)',
-      spineRegionForDisplaySet
+      REGION_TIMEPOINT_ATTRIBUTE,
+      'Spine region + timepoint (session/prior)',
+      regionTimepointForDisplaySet
     );
   },
 

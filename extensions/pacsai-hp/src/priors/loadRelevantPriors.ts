@@ -120,59 +120,75 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     }
     log(`patient query returned ${patientStudies.length} studies`);
 
-    const scored = patientStudies
+    const candidates = patientStudies
       .map(toStudyLike)
-      .filter(study => study.StudyInstanceUID && study.StudyInstanceUID !== currentStudyUID)
-      .map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }));
+      .filter(study => study.StudyInstanceUID && study.StudyInstanceUID !== currentStudyUID);
 
-    log(
-      'candidate priors with scores',
-      scored.map(({ prior, score }) => ({
-        uid: prior.StudyInstanceUID,
-        score,
-        StudyDescription: prior.StudyDescription,
-        StudyDate: prior.StudyDate,
-        ModalitiesInStudy: prior.ModalitiesInStudy,
-      }))
-    );
-
-    const ranked = scored
-      .filter(({ score }) => score >= policy.minScore)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, policy.maxPriors);
-    const priorUIDs = ranked.map(({ prior }) => prior.StudyInstanceUID);
-
-    log(`${ranked.length} prior(s) passed minScore=${policy.minScore}`);
-
-    // Same-session sibling spine regions for the whole-spine overview: when the
-    // current study is a specific spine region, pull the OTHER same-day spine
-    // regions (e.g. open lumbar -> also load cervical + thoracic). These are NOT
-    // priors (region-match-only disqualifies them as priors) — they tile into the
-    // region-addressable overview stage. Excludes anything already chosen as a prior.
     const curBody = getBodyPart(current);
     const curDate = parseStudyDate(current);
+    const isSpineRegionStudy = isSpine(curBody) && curBody !== 'spine';
+
+    let priorUIDs: string[] = [];
     let siblingUIDs: string[] = [];
-    if (isSpine(curBody) && curBody !== 'spine') {
-      siblingUIDs = patientStudies
-        .map(toStudyLike)
-        .filter(s => s.StudyInstanceUID && s.StudyInstanceUID !== currentStudyUID)
-        .filter(s => !priorUIDs.includes(s.StudyInstanceUID))
-        .filter(s => {
-          const b = getBodyPart(s);
-          const d = parseStudyDate(s);
-          return (
-            isSpine(b) &&
-            b !== 'spine' &&
-            b !== curBody &&
-            curDate !== undefined &&
-            d === curDate
-          );
-        })
-        .map(s => s.StudyInstanceUID);
+
+    if (isSpineRegionStudy) {
+      // Multi-region spine session: each region (the opened one + same-day sibling
+      // regions) is compared to ITS OWN prior. Siblings = same-day, different-region
+      // spine studies; per-region priors = best same-region prior for each session
+      // region (scored against THAT region's session study so recency/region match).
+      const siblingStudies = candidates.filter(s => {
+        const b = getBodyPart(s);
+        return (
+          isSpine(b) && b !== 'spine' && b !== curBody && curDate !== undefined && parseStudyDate(s) === curDate
+        );
+      });
+      siblingUIDs = siblingStudies.map(s => s.StudyInstanceUID);
+
+      // One session study per region (opened study wins for its region).
+      const sessionByRegion = new Map<string, StudyLike>([[curBody, current]]);
+      siblingStudies.forEach(s => {
+        const b = getBodyPart(s);
+        if (!sessionByRegion.has(b)) {
+          sessionByRegion.set(b, s);
+        }
+      });
+      const sessionUIDs = new Set<string>([currentStudyUID, ...siblingUIDs]);
+
+      for (const [region, sessionStudy] of sessionByRegion) {
+        const ranked = candidates
+          .filter(s => !sessionUIDs.has(s.StudyInstanceUID) && getBodyPart(s) === region)
+          .map(prior => ({ prior, score: scorePrior({ current: sessionStudy, prior }, policy.scorers) }))
+          .filter(({ score }) => score >= policy.minScore)
+          .sort((a, b) => b.score - a.score);
+        log(
+          `region ${region}: ${ranked.length} prior candidate(s)`,
+          ranked.map(({ prior, score }) => ({ score, desc: prior.StudyDescription, date: prior.StudyDate }))
+        );
+        if (ranked.length) {
+          priorUIDs.push(ranked[0].prior.StudyInstanceUID);
+        }
+      }
+    } else {
+      // Single-study (non-multi-region): the established global scoring.
+      const scored = candidates.map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }));
+      log(
+        'candidate priors with scores',
+        scored.map(({ prior, score }) => ({
+          uid: prior.StudyInstanceUID,
+          score,
+          StudyDescription: prior.StudyDescription,
+          StudyDate: prior.StudyDate,
+        }))
+      );
+      priorUIDs = scored
+        .filter(({ score }) => score >= policy.minScore)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, policy.maxPriors)
+        .map(({ prior }) => prior.StudyInstanceUID);
     }
 
-    // Register roles BEFORE any (re)hang so the role-based current/prior selectors
-    // and the sibling overview selectors resolve correctly.
+    // Register roles BEFORE any (re)hang so the role-based current/prior selectors,
+    // the region-timepoint compare selectors, and the overview resolve correctly.
     setComparisonRoles({ priors: priorUIDs, siblings: siblingUIDs });
 
     log(`${priorUIDs.length} prior(s), ${siblingUIDs.length} sibling region(s) to load`);
@@ -256,6 +272,27 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         },
         protocol.id
       );
+
+      // Debug: after the hang settles, log what actually landed in each viewport of
+      // the ACTIVE stage (matched series) vs the available pool, so missing/wrong
+      // matches are easy to spot. Deferred a tick because the grid updates on event.
+      if (DEBUG) {
+        const dump = () => {
+          const { protocol: active, stage } = hangingProtocolService.getActiveProtocol?.() ?? {};
+          const stageModel = active?.stages?.[hangingProtocolService.getState?.()?.stageIndex ?? 0] ?? stage;
+          const byUID = new Map(activeDisplaySets.map((d: any) => [d.displaySetInstanceUID, d]));
+          const gridViewports = servicesManager?.services?.viewportGridService?.getState?.()?.viewports;
+          log(`ACTIVE STAGE "${stageModel?.id ?? '?'}" matched viewports:`);
+          gridViewports?.forEach?.((vp: any, viewportId: string) => {
+            const descs = (vp?.displaySetInstanceUIDs ?? [])
+              .map((uid: string) => byUID.get(uid))
+              .map((d: any) => (d ? `${d.SeriesDescription} [${d.StudyInstanceUID === currentStudyUID ? 'CUR' : 'other'}]` : '?'));
+            log(`  viewport ${viewportId} <- ${descs.join(', ') || '(empty)'}`);
+          });
+        };
+        // setTimeout(0) is unavailable to guarantee here; use a microtask + best-effort.
+        Promise.resolve().then(dump);
+      }
     };
 
     // The current study's display sets can still be half-loaded "shell" sets when

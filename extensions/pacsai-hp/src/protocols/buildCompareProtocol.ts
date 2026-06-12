@@ -94,9 +94,9 @@ export type CompareConfig = {
    * Optional whole-region overview that tiles the SAME-SESSION sibling exams of a
    * multi-part study (e.g. the cervical/thoracic/lumbar spine acquired together)
    * side by side. Unlike the current/prior stages, overview viewports are
-   * region-addressable (matched by `pacsaiSpineRegion` + plane across ALL loaded
-   * studies, regardless of role/order), so each region's series lands in its own
-   * pane.
+   * region-addressable (matched by `pacsaiRegionTimepoint` = `<region>-session`
+   * + plane across all loaded studies — priors excluded), so each region's
+   * current-session series lands in its own pane.
    *
    * Emits ONE whole-spine stage per `view` (e.g. T2 sag, STIR sag, T1 sag,
    * T1 sag +C), in order — the radiologist works down the sequence list, each
@@ -125,14 +125,17 @@ export type CompareConfig = {
     }>;
   };
   /**
-   * Optional per-region DETAIL stages for drilling each loaded region one sequence
-   * at a time (typically the axials, which — unlike sagittals — aren't tiled across
-   * regions). Emits one single-viewport, region-addressable stage per (region,
-   * view), region-major (cervical's views, then thoracic's, then lumbar's), so you
-   * step through every loaded region's sequences. Reuses `overview.regions`. When
-   * set, it REPLACES the generic current-only fallback for this protocol.
+   * Optional per-region CURRENT-vs-PRIOR compare. For each loaded region and each
+   * view, emits a 2-up [session | prior] stage, region-major (cervical's views,
+   * then thoracic's, then lumbar's). Each region pairs with ITS OWN prior (via
+   * `pacsaiRegionTimepoint`). A stage is `enabled` (auto-eligible) when both
+   * session and prior match, `passive` (manually reachable, session + empty prior)
+   * when only the session is present, and `disabled` (skipped) otherwise — so it
+   * doubles as the per-region current-only view. Reuses `overview.regions`. When
+   * set, it REPLACES the generic current/prior + current-only stages for this
+   * protocol (those assume a single region and would mis-pair across regions).
    */
-  detail?: {
+  regionCompare?: {
     views: Array<{
       key: string;
       /** Short label appended after the region (e.g. "axial T2" -> "Lumbar axial T2"). */
@@ -196,20 +199,27 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     selectors,
     stages,
     overview,
-    detail,
+    regionCompare,
   } = cfg;
 
-  // Region-addressable series rules (region + plane + sequence keywords), matched
-  // across ANY loaded study (no role rule). Shared by the overview and the
-  // per-region detail selectors.
+  // Region-addressable series rules (region + timepoint + plane + sequence
+  // keywords), matched across ANY loaded study (no role rule). Shared by the
+  // whole-spine survey (timepoint 'session') and the per-region compare panes
+  // ('session' vs 'prior'). `pacsaiRegionTimepoint` encodes both region and
+  // timepoint, so the survey never tiles a prior in place of the current series.
   const regionViewRules = (
     region: string,
+    timepoint: 'session' | 'prior',
     plane: string,
     keywords?: string[],
     excludeKeywords?: string[]
   ): Rule[] => {
     const rules: Rule[] = [
-      { attribute: 'pacsaiSpineRegion', required: true, constraint: { equals: { value: region } } },
+      {
+        attribute: 'pacsaiRegionTimepoint',
+        required: true,
+        constraint: { equals: { value: `${region}-${timepoint}` } },
+      },
       { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: plane } } },
     ];
     if (excludeScouts) {
@@ -257,7 +267,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   };
 
   // studyMatchingRules are empty: the matcher then scans ALL loaded studies and
-  // the `pacsaiRole`/`pacsaiSpineRegion` series rules pick the right one(s).
+  // the `pacsaiRole`/`pacsaiRegionTimepoint` series rules pick the right one(s).
   const displaySetSelectors: Record<string, any> = {};
   selectors.forEach(sel => {
     ROLES.forEach(role => {
@@ -287,19 +297,24 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     overviewRegions.forEach(r => {
       displaySetSelectors[`overview-${view.key}-${r.key}`] = {
         studyMatchingRules: [],
-        seriesMatchingRules: regionViewRules(r.region, plane, view.keywords, view.excludeKeywords),
+        seriesMatchingRules: regionViewRules(r.region, 'session', plane, view.keywords, view.excludeKeywords),
       };
     });
   });
 
-  // Per-region detail selectors (one per view x region), region-addressable.
-  (detail?.views ?? []).forEach(view => {
+  // Per-region compare selectors: a session and a prior selector per (view, region),
+  // region-addressable via `pacsaiRegionTimepoint` so each region pairs with ITS OWN
+  // prior (not another region's).
+  const regionCompareViews = regionCompare?.views ?? [];
+  regionCompareViews.forEach(view => {
     const plane = view.plane ?? 'axial';
     overviewRegions.forEach(r => {
-      displaySetSelectors[`detail-${view.key}-${r.key}`] = {
-        studyMatchingRules: [],
-        seriesMatchingRules: regionViewRules(r.region, plane, view.keywords, view.excludeKeywords),
-      };
+      (['session', 'prior'] as const).forEach(tp => {
+        displaySetSelectors[`rc-${view.key}-${r.key}-${tp}`] = {
+          studyMatchingRules: [],
+          seriesMatchingRules: regionViewRules(r.region, tp, plane, view.keywords, view.excludeKeywords),
+        };
+      });
     });
   });
 
@@ -409,38 +424,55 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   }
 
-  // Per-region detail stages: one single-viewport, region-addressable stage per
+  // A compare viewport (session or prior pane) of a per-region compare stage, with
+  // cross-study relative scroll sync scoped per (view, region) so the pair scrolls
+  // together.
+  const rcViewport = (viewKey: string, regionKey: string, tp: 'session' | 'prior') => ({
+    viewportOptions: {
+      ...compareViewportOptions,
+      syncGroups: [
+        { type: 'pacsaiscroll', id: `${id}-rcscroll-${viewKey}-${regionKey}`, source: true, target: true },
+      ],
+    },
+    displaySets: [{ id: `rc-${viewKey}-${regionKey}-${tp}` }],
+  });
+
+  // Per-region current-vs-prior compare stages: one 2-up [session | prior] per
   // (region, view), region-major (all of cervical's views, then thoracic's, then
-  // lumbar's). Lets you step through every loaded region's sequences (typically
-  // the axials). Each enabled when its one series matches. When present, these
-  // REPLACE the generic current-only fallback (which otherwise re-shows the
-  // sagittal already covered by the overview).
-  const detailStages = [];
-  if (detail?.views?.length && overviewRegions.length) {
+  // lumbar's) so you read a region fully before moving on. `enabled` when BOTH
+  // session and prior match (a real comparison); `passive` (still reachable, shows
+  // session + empty prior pane) when only the session is present — so it also
+  // serves as the per-region current-only view; `disabled` (skipped) when neither
+  // matches. When present, these REPLACE the generic current/prior + current-only
+  // stages (which assume one region and would mis-pair across regions).
+  const regionCompareStages = [];
+  if (regionCompareViews.length && overviewRegions.length) {
     const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
     overviewRegions.forEach(r => {
-      detail.views.forEach(view => {
-        detailStages.push({
-          id: `detail-${r.key}-${view.key}`,
+      regionCompareViews.forEach(view => {
+        regionCompareStages.push({
+          id: `rc-${r.key}-${view.key}`,
           name: `${cap(r.region)} ${view.name}`,
           stageActivation: {
-            enabled: { minViewportsMatched: 1 },
+            enabled: { minViewportsMatched: 2 },
             passive: { minViewportsMatched: 1 },
           },
-          viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 1 } },
+          viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
           viewports: [
-            {
-              viewportOptions: compareViewportOptions,
-              displaySets: [{ id: `detail-${view.key}-${r.key}` }],
-            },
+            rcViewport(view.key, r.key, 'session'),
+            rcViewport(view.key, r.key, 'prior'),
           ],
         });
       });
     });
   }
 
-  // Detail stages replace the generic current-only fallback when configured.
-  const postCompareStages = detailStages.length ? detailStages : fallbackStages;
+  // When per-region compare is configured it OWNS the comparison + per-region views,
+  // so the generic current/prior and current-only stages are dropped (they assume a
+  // single region and would mis-pair across regions). Otherwise keep them.
+  const hasRegionCompare = regionCompareStages.length > 0;
+  const comparisonStages = hasRegionCompare ? regionCompareStages : cpStages;
+  const postCompareStages = hasRegionCompare ? [] : fallbackStages;
 
   const protocolMatchingRules: Rule[] = [
     {
@@ -473,7 +505,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       viewportOptions: { viewportType: 'stack', toolGroupId: 'default', allowUnmatchedView: true },
       displaySets: [{ id: `current-${selectors[0].key}`, matchedDisplaySetsIndex: -1 }],
     },
-    stages: [...overviewStages, ...cpStages, ...postCompareStages, safetyStage],
+    stages: [...overviewStages, ...comparisonStages, ...postCompareStages, safetyStage],
   } as Types.HangingProtocol.Protocol;
 }
 
