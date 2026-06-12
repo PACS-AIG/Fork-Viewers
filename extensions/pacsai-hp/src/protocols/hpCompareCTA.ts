@@ -1,4 +1,4 @@
-import buildCompareProtocol from './buildCompareProtocol';
+import buildCompareProtocol, { WINDOW } from './buildCompareProtocol';
 
 /**
  * CT angiography (head/neck) comparison.
@@ -38,11 +38,11 @@ export const hpCompareCTA = buildCompareProtocol({
     { key: 'saghead', plane: 'sagittal', keywords: ['head'], excludeKeywords: [...NOT_DIAGNOSTIC, 'mip', 'neck'] },
   ],
   stages: [
-    { name: 'CTA Head axial (current/prior)', selector: 'axhead' },
-    { name: 'CTA Head MIP (current/prior)', selector: 'mip' },
-    { name: 'CTA Neck axial (current/prior)', selector: 'axneck' },
-    { name: 'CTA Head coronal (current/prior)', selector: 'corhead' },
-    { name: 'CTA Head sagittal (current/prior)', selector: 'saghead' },
+    { name: 'CTA Head axial (current/prior)', selector: 'axhead', voi: WINDOW.cta },
+    { name: 'CTA Head MIP (current/prior)', selector: 'mip', voi: WINDOW.cta },
+    { name: 'CTA Neck axial (current/prior)', selector: 'axneck', voi: WINDOW.cta },
+    { name: 'CTA Head coronal (current/prior)', selector: 'corhead', voi: WINDOW.cta },
+    { name: 'CTA Head sagittal (current/prior)', selector: 'saghead', voi: WINDOW.cta },
   ],
   // No-prior multi-view: source head axial + neck axial + MIP.
   currentView: ['axhead', 'axneck', 'mip'],

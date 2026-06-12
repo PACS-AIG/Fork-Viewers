@@ -28,6 +28,7 @@ export const WINDOW = {
   softTissue: { windowWidth: 400, windowCenter: 40 },
   bone: { windowWidth: 2000, windowCenter: 500 },
   brain: { windowWidth: 80, windowCenter: 40 },
+  cta: { windowWidth: 700, windowCenter: 100 },
 } as const;
 
 type VOI = { windowWidth: number; windowCenter: number };
@@ -268,7 +269,9 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       { attribute: 'numImageFrames', constraint: { greaterThan: { value: seriesFloor } } },
     ];
     if (excludeScouts) {
-      rules.push({ attribute: 'SeriesDescription', constraint: { doesNotContainI: SCOUT_WORDS } });
+      // Required: scouts/topograms/localizers must never hang in a diagnostic stage
+      // (the `anyCurrent` safety selector keeps this soft so it can still show one).
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
     }
     if (sel.plane) {
       // Match the computed plane (orientation-based) rather than the description.
@@ -292,7 +295,9 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: sel.keywords } });
     }
     if (sel.excludeKeywords?.length) {
-      rules.push({ attribute: 'SeriesDescription', constraint: { doesNotContainI: sel.excludeKeywords } });
+      // Required: an excluded sequence (e.g. MIP for the source-axial selector,
+      // FLAIR/SWI for a T2 selector) must be hard-disqualified, not just deprioritized.
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: sel.excludeKeywords } });
     }
     return rules;
   };
@@ -389,6 +394,10 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
 
   const distinctSelectors = [...new Set(stages.map(s => s.selector))];
 
+  // Window preset configured for each selector in the compare stages, so the
+  // no-prior fallback view hangs at the same window as the current/prior layout.
+  const voiBySelector = new Map(stages.map(s => [s.selector, s.voi]));
+
   // Current-only multi-view (used when no prior is available). Validate the
   // configured keys against actual selectors; default to the distinct stage
   // selectors. Most-important key first — stages drop from the end.
@@ -410,7 +419,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
         passive: { minViewportsMatched: k },
       },
       viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: k } },
-      viewports: keys.map(key => viewport('current', key)),
+      viewports: keys.map(key => viewport('current', key, voiBySelector.get(key))),
     });
   }
 
