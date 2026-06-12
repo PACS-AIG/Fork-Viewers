@@ -129,50 +129,46 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     const curMod = getModality(current);
     const curDate = parseStudyDate(current);
 
-    // Same-session siblings = same modality + same day + a DIFFERENT (known) body
-    // part. These are concurrent regional exams (e.g. CT head + CT cervical, or a
-    // C/T/L spine set) — co-loaded so the whole session reviews in one window.
+    // Same-session siblings = same modality + same DAY, ANY region (including the
+    // SAME region — e.g. CT head + CTA head/neck both classify as 'head'). These are
+    // concurrent exams of one session, never temporal priors; co-loaded so the whole
+    // session is one click away, each hung by its own dedicated protocol when focused.
     const siblingStudies =
       curDate === undefined
         ? []
-        : candidates.filter(s => {
-            const b = getBodyPart(s);
-            return (
-              parseStudyDate(s) === curDate &&
-              getModality(s) === curMod &&
-              b !== 'unknown' &&
-              b !== curBody
-            );
-          });
+        : candidates.filter(s => parseStudyDate(s) === curDate && getModality(s) === curMod);
     const siblingUIDs = siblingStudies.map(s => s.StudyInstanceUID);
 
-    const distinctRegions = [...new Set([curBody, ...siblingStudies.map(getBodyPart)])];
-    const multiRegion = siblingStudies.length > 0 && distinctRegions.length >= 2;
-    const allSpine = distinctRegions.every(isSpine);
+    // A prior is a STRICTLY EARLIER study (temporal comparison). Same-day studies are
+    // siblings, never priors — so a same-day CTA / repeat / other-region exam can't be
+    // mistaken for a prior. (Lenient when a date is missing, to not drop real priors.)
+    const priorCandidates = candidates.filter(s => {
+      const d = parseStudyDate(s);
+      return d === undefined || curDate === undefined ? true : d < curDate;
+    });
+
+    // Whole-spine survey: opened study is spine AND >= 1 same-day spine sibling, so the
+    // survey tiles >= 2 spine regions. The presence of an unrelated non-spine sibling
+    // (e.g. a same-day head) doesn't disable it — the spine selectors simply ignore it.
+    const spineSiblings = siblingStudies.filter(s => isSpine(getBodyPart(s)));
+    const spineSurvey = isSpine(curBody) && spineSiblings.length > 0;
 
     let priorUIDs: string[] = [];
-    // Default: re-hang the active (opened-study) protocol. For a mixed / non-spine
-    // multi-region set we instead run the generic per-region session protocol so the
-    // regions lay out sequentially (the active head/chest/etc. protocol can't span
-    // regions). A continuous all-spine set keeps the active spine protocol (survey).
-    let targetProtocolId = protocol.id;
 
-    if (multiRegion) {
-      // Each region (opened + sibling) is compared to ITS OWN prior. Score each
-      // region's candidates against THAT region's session study so recency/region
-      // match correctly; one prior per region.
+    if (spineSurvey) {
+      // Each spine region (opened + spine sibling) compared to ITS OWN prior. Score
+      // each region's EARLIER candidates against THAT region's session study.
       const sessionByRegion = new Map<string, StudyLike>([[curBody, current]]);
-      siblingStudies.forEach(s => {
+      spineSiblings.forEach(s => {
         const b = getBodyPart(s);
         if (!sessionByRegion.has(b)) {
           sessionByRegion.set(b, s);
         }
       });
-      const sessionUIDs = new Set<string>([currentStudyUID, ...siblingUIDs]);
 
       for (const [region, sessionStudy] of sessionByRegion) {
-        const ranked = candidates
-          .filter(s => !sessionUIDs.has(s.StudyInstanceUID) && getBodyPart(s) === region)
+        const ranked = priorCandidates
+          .filter(s => getBodyPart(s) === region)
           .map(prior => ({ prior, score: scorePrior({ current: sessionStudy, prior }, policy.scorers) }))
           .filter(({ score }) => score >= policy.minScore)
           .sort((a, b) => b.score - a.score);
@@ -184,18 +180,12 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           priorUIDs.push(ranked[0].prior.StudyInstanceUID);
         }
       }
-
-      if (!allSpine) {
-        const sessionProtocol =
-          curMod === 'CT' ? '@pacsai/compareCT' : curMod === 'MR' ? '@pacsai/compareMR' : undefined;
-        if (sessionProtocol && hangingProtocolService.getProtocolById?.(sessionProtocol)) {
-          targetProtocolId = sessionProtocol;
-        }
-      }
-      log(`multi-region session: regions=[${distinctRegions.join(', ')}], protocol=${targetProtocolId}`);
+      log(`whole-spine session: regions=[${[...sessionByRegion.keys()].join(', ')}]`);
     } else {
-      // Single-region (or no siblings): the established global scoring.
-      const scored = candidates.map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }));
+      // Single study, OR a distinct/concurrent multi set: hang the OPENED study against
+      // its own best EARLIER prior. Siblings are co-loaded (role 'sibling') so they're
+      // available without re-opening, but the opened study keeps its dedicated hang.
+      const scored = priorCandidates.map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }));
       log(
         'candidate priors with scores',
         scored.map(({ prior, score }) => ({
@@ -299,14 +289,14 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           displaySets: activeDisplaySets,
           activeStudy: orderedStudies[0],
         },
-        targetProtocolId
+        protocol.id
       );
 
       // Debug: log the full planned protocol — every stage with the series each
       // viewport's selector resolves to (replays the matcher's rule eval, so it is
       // deterministic and independent of grid render timing).
       if (DEBUG) {
-        const planned = hangingProtocolService.getProtocolById?.(targetProtocolId) ?? protocol;
+        const planned = hangingProtocolService.getProtocolById?.(protocol.id) ?? protocol;
         logPlannedStages(planned, activeDisplaySets, currentStudyUID, log);
       }
     };
@@ -328,7 +318,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
             ds?.numImageFrames > 0
         );
 
-    log('re-hanging', targetProtocolId, 'with studies', [currentStudyUID, ...extraUIDs]);
+    log('re-hanging', protocol.id, 'with studies', [currentStudyUID, ...extraUIDs]);
     reHang();
 
     // Awaiting creation above usually makes the current study matchable right away,

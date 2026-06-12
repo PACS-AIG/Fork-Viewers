@@ -1,7 +1,7 @@
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
 import { getStudyRole } from './roleRegistry';
-import { getSpineRegion, getBodyPart } from './metadata';
+import { getSpineRegion } from './metadata';
 
 /**
  * DEBUG-only: log every stage of a built protocol together with the series each
@@ -24,27 +24,14 @@ function studyDescriptionOf(d: AnyDS): string {
   return String(d?.instances?.[0]?.StudyDescription ?? d?.StudyDescription ?? '');
 }
 
-function timepointOf(d: AnyDS, activeStudyUID?: string): string | undefined {
-  const role = getStudyRole(d?.StudyInstanceUID, activeStudyUID);
-  return role === 'current' || role === 'sibling' ? 'session' : role === 'prior' ? 'prior' : undefined;
-}
-
 function regionTimepoint(d: AnyDS, activeStudyUID?: string): string | undefined {
-  const tp = timepointOf(d, activeStudyUID);
+  const role = getStudyRole(d?.StudyInstanceUID, activeStudyUID);
+  const tp = role === 'current' || role === 'sibling' ? 'session' : role === 'prior' ? 'prior' : undefined;
   if (!tp) {
     return undefined;
   }
   const region = getSpineRegion(studyDescriptionOf(d));
   return region && region.startsWith('spine-') ? `${region.slice('spine-'.length)}-${tp}` : undefined;
-}
-
-function bodyPartTimepoint(d: AnyDS, activeStudyUID?: string): string | undefined {
-  const tp = timepointOf(d, activeStudyUID);
-  if (!tp) {
-    return undefined;
-  }
-  const bp = getBodyPart({ StudyDescription: studyDescriptionOf(d) } as any);
-  return bp === 'unknown' ? undefined : `${bp}-${tp}`;
 }
 
 function attrValue(d: AnyDS, attr: string, activeStudyUID: string | undefined, siblings: AnyDS[]): unknown {
@@ -53,8 +40,6 @@ function attrValue(d: AnyDS, attr: string, activeStudyUID: string | undefined, s
       return getStudyRole(d?.StudyInstanceUID, activeStudyUID);
     case 'pacsaiRegionTimepoint':
       return regionTimepoint(d, activeStudyUID);
-    case 'pacsaiBodyPartTimepoint':
-      return bodyPartTimepoint(d, activeStudyUID);
     case 'pacsaiPlane':
       return getImagePlane(d, siblings);
     case 'pacsaiKernel':

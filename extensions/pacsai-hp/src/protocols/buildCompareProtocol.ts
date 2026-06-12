@@ -156,8 +156,8 @@ export type CompareConfig = {
   /**
    * Custom attribute that yields `<region>-<timepoint>` for region-addressable
    * matching (overview + regionCompare). Default `pacsaiRegionTimepoint` (spine
-   * cervical/thoracic/lumbar); the generic session protocols pass
-   * `pacsaiBodyPartTimepoint` to compare across arbitrary body parts.
+   * cervical/thoracic/lumbar). Overridable should another spanning protocol ever
+   * need a different region keyspace.
    */
   regionAttribute?: string;
 };
@@ -296,13 +296,18 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   });
 
-  // Generic catch-all selector for the current study: ANY current-study series,
-  // with only the role rule. Guarantees the protocol always hangs something
-  // (never blank, never "Can't find applicable stage") even for enhanced/
-  // multiframe series whose numImageFrames can't be matched.
+  // Generic catch-all selector for the current study: ANY current-study series.
+  // Guarantees the protocol always hangs something (never blank) even for
+  // enhanced/multiframe series whose numImageFrames can't be matched. The
+  // numImageFrames + scout rules are SOFT (scored, not required), so this still
+  // matches anything, but a real recon out-scores a 1-image scout / topogram.
   displaySetSelectors['anyCurrent'] = {
     studyMatchingRules: [],
-    seriesMatchingRules: [roleRule('current')],
+    seriesMatchingRules: [
+      roleRule('current'),
+      { attribute: 'numImageFrames', weight: 5, constraint: { greaterThan: { value: seriesFloor } } },
+      { attribute: 'SeriesDescription', weight: 5, constraint: { doesNotContainI: SCOUT_WORDS } },
+    ],
   };
 
   // Region-addressable overview selectors, one per (view, region): match a series
@@ -457,11 +462,13 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
 
   // Per-region current-vs-prior compare stages: one 2-up [session | prior] per
   // (region, view), region-major (all of cervical's views, then thoracic's, then
-  // lumbar's) so you read a region fully before moving on. `enabled` when BOTH
-  // session and prior match (a real comparison); `passive` (still reachable, shows
-  // session + empty prior pane) when only the session is present — so it also
-  // serves as the per-region current-only view; `disabled` (skipped) when neither
-  // matches. When present, these REPLACE the generic current/prior + current-only
+  // lumbar's) so you read a region fully before moving on. ENABLED as soon as the
+  // SESSION pane matches (minViewportsMatched = 1) so the first real region/view is
+  // always the lead — even with no prior (the prior pane then renders empty via
+  // allowUnmatchedView). This is critical: requiring both panes would leave a
+  // no-prior set with NOTHING enabled, falling through to the catch-all stage (which
+  // would hang an arbitrary scout). `disabled` (skipped) only when the session pane
+  // is absent. When present, these REPLACE the generic current/prior + current-only
   // stages (which assume one region and would mis-pair across regions).
   const regionCompareStages = [];
   if (regionCompareViews.length && regionCompareRegions.length) {
@@ -473,7 +480,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
           id: `rc-${r.key}-${view.key}`,
           name: `${regionLabel} ${view.name}`,
           stageActivation: {
-            enabled: { minViewportsMatched: 2 },
+            enabled: { minViewportsMatched: 1 },
             passive: { minViewportsMatched: 1 },
           },
           viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
