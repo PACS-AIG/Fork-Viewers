@@ -136,6 +136,13 @@ export type CompareConfig = {
    * protocol (those assume a single region and would mis-pair across regions).
    */
   regionCompare?: {
+    /**
+     * Regions to compare, each `{ key, region }`. `region` must equal the value the
+     * region attribute yields (e.g. spine: 'cervical'; body-part: 'head', 'neck',
+     * 'spine-lumbar'). Defaults to `overview.regions` when omitted (spine reuses
+     * the survey's regions).
+     */
+    regions?: Array<{ key: string; region: string; label?: string }>;
     views: Array<{
       key: string;
       /** Short label appended after the region (e.g. "axial T2" -> "Lumbar axial T2"). */
@@ -146,6 +153,13 @@ export type CompareConfig = {
       excludeKeywords?: string[];
     }>;
   };
+  /**
+   * Custom attribute that yields `<region>-<timepoint>` for region-addressable
+   * matching (overview + regionCompare). Default `pacsaiRegionTimepoint` (spine
+   * cervical/thoracic/lumbar); the generic session protocols pass
+   * `pacsaiBodyPartTimepoint` to compare across arbitrary body parts.
+   */
+  regionAttribute?: string;
 };
 
 // The HP matcher reads a `from` source on rules; core's MatchingRule omits it.
@@ -200,7 +214,11 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     stages,
     overview,
     regionCompare,
+    regionAttribute = 'pacsaiRegionTimepoint',
   } = cfg;
+
+  // Regions used by per-region compare: its own list, else the survey's.
+  const regionCompareRegions = regionCompare?.regions ?? overview?.regions ?? [];
 
   // Region-addressable series rules (region + timepoint + plane + sequence
   // keywords), matched across ANY loaded study (no role rule). Shared by the
@@ -216,7 +234,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   ): Rule[] => {
     const rules: Rule[] = [
       {
-        attribute: 'pacsaiRegionTimepoint',
+        attribute: regionAttribute,
         required: true,
         constraint: { equals: { value: `${region}-${timepoint}` } },
       },
@@ -308,7 +326,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   const regionCompareViews = regionCompare?.views ?? [];
   regionCompareViews.forEach(view => {
     const plane = view.plane ?? 'axial';
-    overviewRegions.forEach(r => {
+    regionCompareRegions.forEach(r => {
       (['session', 'prior'] as const).forEach(tp => {
         displaySetSelectors[`rc-${view.key}-${r.key}-${tp}`] = {
           studyMatchingRules: [],
@@ -446,13 +464,14 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // matches. When present, these REPLACE the generic current/prior + current-only
   // stages (which assume one region and would mis-pair across regions).
   const regionCompareStages = [];
-  if (regionCompareViews.length && overviewRegions.length) {
+  if (regionCompareViews.length && regionCompareRegions.length) {
     const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-    overviewRegions.forEach(r => {
+    regionCompareRegions.forEach(r => {
+      const regionLabel = r.label ?? cap(r.region);
       regionCompareViews.forEach(view => {
         regionCompareStages.push({
           id: `rc-${r.key}-${view.key}`,
-          name: `${cap(r.region)} ${view.name}`,
+          name: `${regionLabel} ${view.name}`,
           stageActivation: {
             enabled: { minViewportsMatched: 2 },
             passive: { minViewportsMatched: 1 },

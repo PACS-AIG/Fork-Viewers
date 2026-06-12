@@ -17,7 +17,7 @@ import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
 import { getStudyRole } from './priors/roleRegistry';
-import { getSpineRegion } from './priors/metadata';
+import { getSpineRegion, getBodyPart } from './priors/metadata';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -38,6 +38,14 @@ export const ROLE_ATTRIBUTE = 'pacsaiRole';
  * survey (region-session panes) and the per-region current-vs-prior compare.
  */
 export const REGION_TIMEPOINT_ATTRIBUTE = 'pacsaiRegionTimepoint';
+
+/**
+ * Custom HP attribute id: body part + timepoint, e.g. `head-session`, `neck-prior`,
+ * `spine-cervical-session`. Like REGION_TIMEPOINT but for ANY body part (via
+ * getBodyPart), used by the generic CT/MR "session" protocols to lay out a
+ * multi-region same-session set as per-region current-vs-prior stages.
+ */
+export const BODYPART_TIMEPOINT_ATTRIBUTE = 'pacsaiBodyPartTimepoint';
 
 /** Read the study description off a display set (StudyDescription lives on instances). */
 function studyDescriptionOf(displaySet: any): string {
@@ -123,6 +131,28 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       REGION_TIMEPOINT_ATTRIBUTE,
       'Spine region + timepoint (session/prior)',
       regionTimepointForDisplaySet
+    );
+
+    // Body part + timepoint (e.g. 'head-session', 'neck-prior'), for the generic
+    // CT/MR session protocols' per-region compare across distinct regions.
+    const bodyPartTimepointForDisplaySet = (displaySet: any) => {
+      const activeStudyUID = hangingProtocolService?.getState?.()?.activeStudyUID;
+      const role = getStudyRole(displaySet?.StudyInstanceUID, activeStudyUID);
+      const timepoint =
+        role === 'current' || role === 'sibling' ? 'session' : role === 'prior' ? 'prior' : undefined;
+      if (!timepoint) {
+        return undefined;
+      }
+      const bodyPart = getBodyPart({
+        BodyPartExamined: displaySet?.instances?.[0]?.BodyPartExamined,
+        StudyDescription: studyDescriptionOf(displaySet),
+      } as any);
+      return bodyPart === 'unknown' ? undefined : `${bodyPart}-${timepoint}`;
+    };
+    hangingProtocolService?.addCustomAttribute?.(
+      BODYPART_TIMEPOINT_ATTRIBUTE,
+      'Body part + timepoint (session/prior)',
+      bodyPartTimepointForDisplaySet
     );
   },
 

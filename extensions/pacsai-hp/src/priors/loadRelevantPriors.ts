@@ -7,7 +7,8 @@ import {
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
 import { setComparisonRoles } from './roleRegistry';
-import { getBodyPart, getSpineRegion, isSpine, parseStudyDate } from './metadata';
+import { getBodyPart, getModality, getSpineRegion, isSpine, parseStudyDate } from './metadata';
+import logPlannedStages from './debugPlannedStages';
 import type { StudyLike } from './types';
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
@@ -125,26 +126,41 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       .filter(study => study.StudyInstanceUID && study.StudyInstanceUID !== currentStudyUID);
 
     const curBody = getBodyPart(current);
+    const curMod = getModality(current);
     const curDate = parseStudyDate(current);
-    const isSpineRegionStudy = isSpine(curBody) && curBody !== 'spine';
+
+    // Same-session siblings = same modality + same day + a DIFFERENT (known) body
+    // part. These are concurrent regional exams (e.g. CT head + CT cervical, or a
+    // C/T/L spine set) — co-loaded so the whole session reviews in one window.
+    const siblingStudies =
+      curDate === undefined
+        ? []
+        : candidates.filter(s => {
+            const b = getBodyPart(s);
+            return (
+              parseStudyDate(s) === curDate &&
+              getModality(s) === curMod &&
+              b !== 'unknown' &&
+              b !== curBody
+            );
+          });
+    const siblingUIDs = siblingStudies.map(s => s.StudyInstanceUID);
+
+    const distinctRegions = [...new Set([curBody, ...siblingStudies.map(getBodyPart)])];
+    const multiRegion = siblingStudies.length > 0 && distinctRegions.length >= 2;
+    const allSpine = distinctRegions.every(isSpine);
 
     let priorUIDs: string[] = [];
-    let siblingUIDs: string[] = [];
+    // Default: re-hang the active (opened-study) protocol. For a mixed / non-spine
+    // multi-region set we instead run the generic per-region session protocol so the
+    // regions lay out sequentially (the active head/chest/etc. protocol can't span
+    // regions). A continuous all-spine set keeps the active spine protocol (survey).
+    let targetProtocolId = protocol.id;
 
-    if (isSpineRegionStudy) {
-      // Multi-region spine session: each region (the opened one + same-day sibling
-      // regions) is compared to ITS OWN prior. Siblings = same-day, different-region
-      // spine studies; per-region priors = best same-region prior for each session
-      // region (scored against THAT region's session study so recency/region match).
-      const siblingStudies = candidates.filter(s => {
-        const b = getBodyPart(s);
-        return (
-          isSpine(b) && b !== 'spine' && b !== curBody && curDate !== undefined && parseStudyDate(s) === curDate
-        );
-      });
-      siblingUIDs = siblingStudies.map(s => s.StudyInstanceUID);
-
-      // One session study per region (opened study wins for its region).
+    if (multiRegion) {
+      // Each region (opened + sibling) is compared to ITS OWN prior. Score each
+      // region's candidates against THAT region's session study so recency/region
+      // match correctly; one prior per region.
       const sessionByRegion = new Map<string, StudyLike>([[curBody, current]]);
       siblingStudies.forEach(s => {
         const b = getBodyPart(s);
@@ -168,8 +184,17 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           priorUIDs.push(ranked[0].prior.StudyInstanceUID);
         }
       }
+
+      if (!allSpine) {
+        const sessionProtocol =
+          curMod === 'CT' ? '@pacsai/compareCT' : curMod === 'MR' ? '@pacsai/compareMR' : undefined;
+        if (sessionProtocol && hangingProtocolService.getProtocolById?.(sessionProtocol)) {
+          targetProtocolId = sessionProtocol;
+        }
+      }
+      log(`multi-region session: regions=[${distinctRegions.join(', ')}], protocol=${targetProtocolId}`);
     } else {
-      // Single-study (non-multi-region): the established global scoring.
+      // Single-region (or no siblings): the established global scoring.
       const scored = candidates.map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }));
       log(
         'candidate priors with scores',
@@ -195,6 +220,10 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
 
     if (!priorUIDs.length && !siblingUIDs.length) {
       // Nothing extra to load — the current-only fallback stage already hangs.
+      // Still dump the planned stages so the no-prior layout is inspectable.
+      if (DEBUG) {
+        logPlannedStages(protocol, displaySetService.getActiveDisplaySets(), currentStudyUID, log);
+      }
       return;
     }
 
@@ -270,28 +299,15 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           displaySets: activeDisplaySets,
           activeStudy: orderedStudies[0],
         },
-        protocol.id
+        targetProtocolId
       );
 
-      // Debug: after the hang settles, log what actually landed in each viewport of
-      // the ACTIVE stage (matched series) vs the available pool, so missing/wrong
-      // matches are easy to spot. Deferred a tick because the grid updates on event.
+      // Debug: log the full planned protocol — every stage with the series each
+      // viewport's selector resolves to (replays the matcher's rule eval, so it is
+      // deterministic and independent of grid render timing).
       if (DEBUG) {
-        const dump = () => {
-          const { protocol: active, stage } = hangingProtocolService.getActiveProtocol?.() ?? {};
-          const stageModel = active?.stages?.[hangingProtocolService.getState?.()?.stageIndex ?? 0] ?? stage;
-          const byUID = new Map(activeDisplaySets.map((d: any) => [d.displaySetInstanceUID, d]));
-          const gridViewports = servicesManager?.services?.viewportGridService?.getState?.()?.viewports;
-          log(`ACTIVE STAGE "${stageModel?.id ?? '?'}" matched viewports:`);
-          gridViewports?.forEach?.((vp: any, viewportId: string) => {
-            const descs = (vp?.displaySetInstanceUIDs ?? [])
-              .map((uid: string) => byUID.get(uid))
-              .map((d: any) => (d ? `${d.SeriesDescription} [${d.StudyInstanceUID === currentStudyUID ? 'CUR' : 'other'}]` : '?'));
-            log(`  viewport ${viewportId} <- ${descs.join(', ') || '(empty)'}`);
-          });
-        };
-        // setTimeout(0) is unavailable to guarantee here; use a microtask + best-effort.
-        Promise.resolve().then(dump);
+        const planned = hangingProtocolService.getProtocolById?.(targetProtocolId) ?? protocol;
+        logPlannedStages(planned, activeDisplaySets, currentStudyUID, log);
       }
     };
 
@@ -312,7 +328,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
             ds?.numImageFrames > 0
         );
 
-    log('re-hanging', protocol.id, 'with studies', [currentStudyUID, ...extraUIDs]);
+    log('re-hanging', targetProtocolId, 'with studies', [currentStudyUID, ...extraUIDs]);
     reHang();
 
     // Awaiting creation above usually makes the current study matchable right away,
