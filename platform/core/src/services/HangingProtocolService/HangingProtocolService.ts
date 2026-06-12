@@ -1467,6 +1467,15 @@ export default class HangingProtocolService extends PubSubService {
     const { displaySetSelectorMap } = options;
     if (displaySetSelectorMap) {
       Object.entries(displaySetSelectorMap).forEach(([key, displaySetInstanceUID]) => {
+        // A null/undefined value means the selector was not matched (e.g. an
+        // unmatched `prior-*` selector with no prior study, or the transient
+        // `activeDisplaySet:0` placeholder that setHangingProtocol stores). These
+        // are legitimate "no match" entries, not invalid UIDs — skip them.
+        // getDisplaySetByUID throws on a non-string arg, so guarding here prevents
+        // stage navigation (deltaStage) from crashing the whole setProtocol.
+        if (displaySetInstanceUID == null) {
+          return;
+        }
         const displaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
 
         if (!displaySet) {

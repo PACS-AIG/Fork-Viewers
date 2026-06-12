@@ -158,6 +158,29 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       return d === undefined || curDate === undefined ? true : d < curDate;
     });
 
+    // DEBUG: dump every patient-query candidate with how it classifies, so a
+    // 0-prior / 0-sibling result is diagnosable (wrong date parse, modality
+    // mismatch, region gate, or candidates missing UIDs / filtered out entirely).
+    if (DEBUG) {
+      log(`current: uid=${currentStudyUID} body=${curBody} mod=${curMod} date=${curDate}`);
+      log(
+        `candidates (${candidates.length} of ${patientStudies.length} returned):`,
+        candidates.map(s => {
+          const d = parseStudyDate(s);
+          return {
+            uid: s.StudyInstanceUID,
+            desc: s.StudyDescription,
+            rawDate: s.StudyDate,
+            date: d,
+            mod: getModality(s),
+            body: getBodyPart(s),
+            sibling: d === curDate && getModality(s) === curMod,
+            earlierPrior: d !== undefined && curDate !== undefined ? d < curDate : 'date-missing',
+          };
+        })
+      );
+    }
+
     // Whole-spine survey: opened study is spine AND >= 1 same-day spine sibling, so the
     // survey tiles >= 2 spine regions. The presence of an unrelated non-spine sibling
     // (e.g. a same-day head) doesn't disable it — the spine selectors simply ignore it.
