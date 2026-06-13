@@ -72,7 +72,17 @@ export const seriesTypeOverlayItem = {
             title={`Series name implies BONE, but it was reconstructed with a SOFT kernel${
               kinfo.convKernel ? ` (${kinfo.convKernel})` : ''
             }. Labeled BONE per the series description.`}
-            style={{ backgroundColor: '#b91c1c', color: '#fff', padding: '0 4px', borderRadius: '3px' }}
+            style={{
+              backgroundColor: '#b91c1c',
+              color: '#fff',
+              padding: '0 4px',
+              borderRadius: '3px',
+              // Viewport overlays render with pointer-events:none so cornerstone tools
+              // work underneath; re-enable it on this chip alone so the title tooltip
+              // (and the help cursor) trigger on hover.
+              pointerEvents: 'auto',
+              cursor: 'help',
+            }}
           >
             {kernelLabel}
           </span>
