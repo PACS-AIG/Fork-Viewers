@@ -34,12 +34,28 @@ const getCommandsModule = ({
       // Re-run the engine with the chosen study active and NO protocolId so it
       // auto-selects that study's dedicated protocol; keep all loaded studies so the
       // siblings stay co-loaded. loadRelevantPriors then fetches its prior + re-hangs.
+      //
+      // CRITICAL: put the focused study FIRST in the studies list. OHIF resolves both
+      // the active study and the protocol match as `activeStudy || studies[0]`, so when
+      // a sibling of a DIFFERENT region is co-loaded (e.g. focusing the head while a
+      // cervical spine is also loaded), a stale studies[0] would otherwise keep the
+      // cervical active and re-pick compareCTSpine — hanging the head against the spine
+      // prior. Making the focused study studies[0] guarantees its dedicated protocol.
       const displaySets = displaySetService.getActiveDisplaySets();
-      const studyUIDs = [...new Set(displaySets.map((ds: any) => ds.StudyInstanceUID))];
-      const studies = studyUIDs
+      const otherUIDs = [...new Set(displaySets.map((ds: any) => ds.StudyInstanceUID))].filter(
+        (uid: string) => uid !== studyInstanceUID
+      );
+      const studies = [studyInstanceUID, ...otherUIDs]
         .map((uid: string) => DicomMetadataStore.getStudy(uid))
         .filter(Boolean);
       hangingProtocolService.run({ studies, displaySets, activeStudy: study });
+      // DEBUG: confirm run() actually switched the active study + auto-selected the
+      // focused study's protocol (before loadRelevantPriors re-hangs with its prior).
+      console.log('[pacsai-hp] focusSessionStudy ->', {
+        requested: studyInstanceUID,
+        activeAfterRun: hangingProtocolService.getState?.()?.activeStudyUID,
+        protocolAfterRun: hangingProtocolService.getActiveProtocol?.()?.protocol?.id,
+      });
       loadRelevantPriors({ servicesManager, extensionManager });
     },
   };
