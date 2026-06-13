@@ -18,50 +18,83 @@
  */
 export type ImageKernel = 'soft' | 'lung' | 'bone';
 
+/** Classification plus provenance, so the overlay can flag a name-vs-kernel conflict. */
+export type KernelInfo = {
+  /** Final classification used for matching (description label can elevate to bone). */
+  kernel: ImageKernel;
+  /** What the ConvolutionKernel tag alone indicated (before any description elevation). */
+  fromKernel?: ImageKernel;
+  /** Raw ConvolutionKernel tag value, for display in the conflict tooltip. */
+  convKernel?: string;
+  /**
+   * True when the SeriesDescription said BONE but the ConvolutionKernel tag indicated
+   * a SOFT kernel — i.e. a "Cor BONE 2MM" reformat reconstructed with a soft kernel
+   * (e.g. Siemens H31s). We classify it bone per the label, but flag the discrepancy.
+   */
+  labelConflict: boolean;
+};
+
 const LUNG_KEYWORDS = /\blung\b/i;
 const BONE_KEYWORDS = /\b(bone|boneplus|sharp|edge|detail)\b/i;
 const SOFT_KEYWORDS = /\b(soft|standard|smooth|brain|stnd|sft)\b/i;
 // Kernel sharpness number at/above which we consider it a sharp (lung/bone) kernel.
 const SHARP_NUMBER_THRESHOLD = 55;
 
-function classify(kernel: unknown, description: string): ImageKernel {
+function classify(kernel: unknown, description: string): KernelInfo {
   const kernelStr = String(Array.isArray(kernel) ? kernel.join(' ') : (kernel ?? '')).trim();
+  const convKernel = kernelStr || undefined;
   const haystack = `${kernelStr} ${description}`;
 
   // Lung is distinguished by an explicit hint (kernel name or description).
   if (LUNG_KEYWORDS.test(haystack)) {
-    return 'lung';
+    return { kernel: 'lung', fromKernel: 'lung', convKernel, labelConflict: false };
   }
 
+  // Signal from the ConvolutionKernel tag, if present.
+  let fromKernel: ImageKernel | undefined;
   if (kernelStr) {
     if (BONE_KEYWORDS.test(kernelStr)) {
-      return 'bone';
-    }
-    if (SOFT_KEYWORDS.test(kernelStr)) {
-      return 'soft';
-    }
-    // Numeric sharpness (e.g. Siemens "Br36" -> 36 soft, "Hr60"/"Bl60" -> sharp).
-    const match = kernelStr.match(/\d{2,3}/);
-    if (match) {
-      return Number(match[0]) >= SHARP_NUMBER_THRESHOLD ? 'bone' : 'soft';
+      fromKernel = 'bone';
+    } else if (SOFT_KEYWORDS.test(kernelStr)) {
+      fromKernel = 'soft';
+    } else {
+      // Numeric sharpness (e.g. Siemens "Br36" -> 36 soft, "Hr60"/"Bl60" -> sharp).
+      const match = kernelStr.match(/\d{2,3}/);
+      if (match) {
+        fromKernel = Number(match[0]) >= SHARP_NUMBER_THRESHOLD ? 'bone' : 'soft';
+      }
     }
   }
 
-  // Fallback: SeriesDescription only when the kernel gave no signal.
-  if (BONE_KEYWORDS.test(description)) {
-    return 'bone';
+  // A genuinely SHARP kernel tag is authoritative — keep it.
+  if (fromKernel === 'bone') {
+    return { kernel: 'bone', fromKernel, convKernel, labelConflict: false };
   }
-  return 'soft';
+  // Otherwise an explicit BONE in the SeriesDescription is the tech's label and
+  // wins: a "Cor BONE 2MM" reformat often inherits a SOFT source-kernel tag (so the
+  // numeric/kernel signal reads soft, e.g. Siemens H31s) yet is intended/displayed
+  // as bone. Mirrors getImagePlane trusting the description's plane word. We keep the
+  // bone classification but flag the conflict (overlay shows a warning marker) when
+  // the kernel tag actually indicated soft, so the reader knows.
+  if (BONE_KEYWORDS.test(description)) {
+    return { kernel: 'bone', fromKernel, convKernel, labelConflict: fromKernel === 'soft' };
+  }
+  // Else use the kernel tag's soft signal, defaulting to soft when unknown.
+  return { kernel: fromKernel ?? 'soft', fromKernel, convKernel, labelConflict: false };
 }
 
-export function getImageKernel(displaySet: any): ImageKernel {
+export function getImageKernelInfo(displaySet: any): KernelInfo {
   if (!displaySet) {
-    return 'soft';
+    return { kernel: 'soft', labelConflict: false };
   }
   const instance = displaySet.instances?.[0] ?? displaySet.images?.[0] ?? displaySet;
   const kernel = instance?.ConvolutionKernel ?? displaySet.ConvolutionKernel;
   const description = String(displaySet.SeriesDescription ?? instance?.SeriesDescription ?? '');
   return classify(kernel, description);
+}
+
+export function getImageKernel(displaySet: any): ImageKernel {
+  return getImageKernelInfo(displaySet).kernel;
 }
 
 export default getImageKernel;

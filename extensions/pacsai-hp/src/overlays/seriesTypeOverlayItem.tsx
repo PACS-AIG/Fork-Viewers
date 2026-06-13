@@ -1,6 +1,6 @@
 import React from 'react';
 import getImagePlane from '../utils/getImagePlane';
-import getImageKernel from '../utils/getImageKernel';
+import { getImageKernelInfo } from '../utils/getImageKernel';
 
 /**
  * Viewport overlay item that labels each viewport with its series type:
@@ -45,7 +45,7 @@ export const seriesTypeOverlayItem = {
 
     const instance = firstInstance(displaySet);
     const modality = getModality(displaySet);
-    const parts: string[] = [];
+    const parts: React.ReactNode[] = [];
 
     // Coronal/sagittal of oblique reformats are disambiguated against the study's
     // axial reformat, so pass same-study siblings (matches the HP matcher's plane).
@@ -60,7 +60,26 @@ export const seriesTypeOverlayItem = {
 
     // Kernel class is only meaningful for CT.
     if (modality === 'CT') {
-      parts.push(getImageKernel(displaySet) === 'bone' ? 'BONE' : 'SOFT');
+      const kinfo = getImageKernelInfo(displaySet);
+      const kernelLabel = kinfo.kernel === 'bone' ? 'BONE' : kinfo.kernel === 'lung' ? 'LUNG' : 'SOFT';
+      if (kinfo.labelConflict) {
+        // Series is named BONE but reconstructed with a soft kernel — show BONE per
+        // the label, with a red marker + tooltip so the reader knows the real kernel.
+        parts.push(
+          <span
+            key="kernel"
+            data-cy="series-type-kernel-conflict"
+            title={`Series name implies BONE, but it was reconstructed with a SOFT kernel${
+              kinfo.convKernel ? ` (${kinfo.convKernel})` : ''
+            }. Labeled BONE per the series description.`}
+            style={{ backgroundColor: '#b91c1c', color: '#fff', padding: '0 4px', borderRadius: '3px' }}
+          >
+            {kernelLabel}
+          </span>
+        );
+      } else {
+        parts.push(kernelLabel);
+      }
     }
 
     const thickness = formatThickness(displaySet);
@@ -72,7 +91,7 @@ export const seriesTypeOverlayItem = {
     // and view position / laterality so the tag still appears.
     if (!parts.length) {
       if (modality) {
-        parts.push(modality);
+        parts.push(String(modality));
       }
       const viewPosition = instance?.ViewPosition;
       const laterality = instance?.ImageLaterality ?? instance?.Laterality;
@@ -92,7 +111,12 @@ export const seriesTypeOverlayItem = {
         data-cy="series-type-indicator"
         style={{ color: '#5DE2E7', fontWeight: 'bold', letterSpacing: '0.05em' }}
       >
-        {parts.join(' · ')}
+        {parts.map((part, i) => (
+          <React.Fragment key={i}>
+            {i > 0 ? ' · ' : ''}
+            {part}
+          </React.Fragment>
+        ))}
       </span>
     );
   },

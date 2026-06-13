@@ -310,6 +310,11 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           const photometric =
             inst?.PhotometricInterpretation ?? d?.PhotometricInterpretation ?? '?';
           const spp = inst?.SamplesPerPixel ?? d?.SamplesPerPixel ?? '?';
+          // Raw ConvolutionKernel (0018,1210) so a kernel mis-classification is
+          // diagnosable: getImageKernel reads this tag first (numeric <55 => soft),
+          // and only falls back to a "BONE"/"SOFT" word in the description if it is
+          // absent — so a soft kernel tag overrides a "BONE" in the series name.
+          const rawKernel = inst?.ConvolutionKernel ?? d?.ConvolutionKernel ?? '?';
           log(
             `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
               `mod=${d?.Modality} | unsupported=${!!d?.unsupported} | imageIds=${
@@ -317,7 +322,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
               } | plane=${getImagePlane(
                 d,
                 activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
-              )} | kernel=${getImageKernel(d)} | region=${region ?? '-'} | photometric=${photometric} | spp=${spp} | studyDesc="${studyDesc}" | IOP=[${iopStr}]`
+              )} | kernel=${getImageKernel(d)} | convKernel=${JSON.stringify(rawKernel)} | region=${region ?? '-'} | photometric=${photometric} | spp=${spp} | studyDesc="${studyDesc}" | IOP=[${iopStr}]`
           );
         });
         log('ordered studies for run()', [currentStudyUID, ...extraUIDs]);
