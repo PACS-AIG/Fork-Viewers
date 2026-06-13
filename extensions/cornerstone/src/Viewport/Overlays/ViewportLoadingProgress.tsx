@@ -107,9 +107,10 @@ function ViewportLoadingProgress({ viewportId, element, viewportData, servicesMa
   const percentComplete = Math.floor((progress.loaded / progress.total) * 100);
 
   // Compact corner chip — non-blocking, so the first image stays fully visible
-  // while the rest of the series streams in behind it.
+  // while the rest of the series streams in behind it. Sits just above the
+  // bottom-right slice-index overlay so the two don't overlap.
   return (
-    <div className="pointer-events-none absolute bottom-2 right-2 z-50 flex flex-col gap-1 rounded bg-black/60 px-2 py-1">
+    <div className="pointer-events-none absolute bottom-8 right-2 z-50 flex flex-col gap-1 rounded bg-black/60 px-2 py-1">
       <div className="flex items-center gap-2 text-xs text-white">
         <Icons.LoadingOHIFMark className="h-4 w-4 text-white" />
         <span>

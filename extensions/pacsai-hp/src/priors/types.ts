@@ -15,6 +15,8 @@
 export type StudyLike = {
   StudyInstanceUID: string;
   StudyDate?: string;
+  /** Study time (00080030), HHMMSS[.frac]. Used with StudyDate for interval comparisons. */
+  StudyTime?: string;
   StudyDescription?: string;
   /** Single modality if known (e.g. from QIDO mapping). */
   Modality?: string;

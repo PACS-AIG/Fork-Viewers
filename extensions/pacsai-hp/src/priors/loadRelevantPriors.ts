@@ -7,7 +7,15 @@ import {
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
 import { setComparisonRoles, setSessionStudies } from './roleRegistry';
-import { getBodyPart, getModality, getSpineRegion, isSpine, parseStudyDate } from './metadata';
+import {
+  getBodyPart,
+  getModality,
+  getSpineRegion,
+  isSpine,
+  parseStudyDate,
+  parseStudyDateTime,
+  SESSION_WINDOW_MS,
+} from './metadata';
 import logPlannedStages from './debugPlannedStages';
 import type { StudyLike } from './types';
 import getImagePlane from '../utils/getImagePlane';
@@ -46,6 +54,7 @@ function toStudyLike(qido: Record<string, unknown> = {}): StudyLike {
   return {
     StudyInstanceUID: (qido.studyInstanceUid ?? qido.StudyInstanceUID) as string,
     StudyDate: (qido.date ?? qido.StudyDate) as string,
+    StudyTime: (qido.time ?? qido.StudyTime) as string,
     StudyDescription: (qido.description ?? qido.StudyDescription) as string,
     // `modalities` is a (possibly backslash-delimited) string; getModality handles it.
     ModalitiesInStudy: (qido.modalities ?? qido.ModalitiesInStudy) as string,
@@ -128,15 +137,25 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     const curBody = getBodyPart(current);
     const curMod = getModality(current);
     const curDate = parseStudyDate(current);
+    const curDateTime = parseStudyDateTime(current);
 
-    // Same-session siblings = same modality + same DAY, ANY region (including the
-    // SAME region — e.g. CT head + CTA head/neck both classify as 'head'). These are
-    // concurrent exams of one session, never temporal priors; co-loaded so the whole
-    // session is one click away, each hung by its own dedicated protocol when focused.
+    // Two studies belong to the same concurrent SESSION when their acquisition
+    // timestamps are within SESSION_WINDOW_MS of each other (interval-based, not
+    // same-calendar-day — so a pair straddling midnight still counts as one session).
+    const isSameSession = (s: StudyLike): boolean => {
+      const t = parseStudyDateTime(s);
+      return curDateTime !== undefined && t !== undefined && Math.abs(t - curDateTime) <= SESSION_WINDOW_MS;
+    };
+
+    // Same-session siblings = same modality + within the session window, ANY region
+    // (including the SAME region — e.g. CT head + CTA head/neck both classify as
+    // 'head'). These are concurrent exams of one session, never temporal priors;
+    // co-loaded so the whole session is one click away, each hung by its own
+    // dedicated protocol when focused.
     const siblingStudies =
-      curDate === undefined
+      curDateTime === undefined
         ? []
-        : candidates.filter(s => parseStudyDate(s) === curDate && getModality(s) === curMod);
+        : candidates.filter(s => isSameSession(s) && getModality(s) === curMod);
     const siblingUIDs = siblingStudies.map(s => s.StudyInstanceUID);
 
     // Publish the same-session studies (opened + siblings) for the toolbar study
@@ -150,32 +169,42 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       })),
     ]);
 
-    // A prior is a STRICTLY EARLIER study (temporal comparison). Same-day studies are
-    // siblings, never priors — so a same-day CTA / repeat / other-region exam can't be
-    // mistaken for a prior. (Lenient when a date is missing, to not drop real priors.)
+    // A prior is a study EARLIER than the current one and OUTSIDE the session window
+    // (temporal comparison). Same-session studies are siblings, never priors — so a
+    // concurrent CTA / repeat / other-region exam (even a few hours earlier) can't be
+    // mistaken for a prior. (Lenient when a timestamp is missing, to not drop real priors.)
     const priorCandidates = candidates.filter(s => {
-      const d = parseStudyDate(s);
-      return d === undefined || curDate === undefined ? true : d < curDate;
+      const t = parseStudyDateTime(s);
+      if (t === undefined || curDateTime === undefined) {
+        return true;
+      }
+      return t < curDateTime && !isSameSession(s);
     });
 
     // DEBUG: dump every patient-query candidate with how it classifies, so a
     // 0-prior / 0-sibling result is diagnosable (wrong date parse, modality
     // mismatch, region gate, or candidates missing UIDs / filtered out entirely).
     if (DEBUG) {
-      log(`current: uid=${currentStudyUID} body=${curBody} mod=${curMod} date=${curDate}`);
+      log(
+        `current: uid=${currentStudyUID} body=${curBody} mod=${curMod} date=${curDate} dateTime=${curDateTime}`
+      );
       log(
         `candidates (${candidates.length} of ${patientStudies.length} returned):`,
         candidates.map(s => {
-          const d = parseStudyDate(s);
+          const t = parseStudyDateTime(s);
           return {
             uid: s.StudyInstanceUID,
             desc: s.StudyDescription,
             rawDate: s.StudyDate,
-            date: d,
+            rawTime: s.StudyTime,
+            dateTime: t,
             mod: getModality(s),
             body: getBodyPart(s),
-            sibling: d === curDate && getModality(s) === curMod,
-            earlierPrior: d !== undefined && curDate !== undefined ? d < curDate : 'date-missing',
+            sibling: isSameSession(s) && getModality(s) === curMod,
+            earlierPrior:
+              t !== undefined && curDateTime !== undefined
+                ? t < curDateTime && !isSameSession(s)
+                : 'date-missing',
           };
         })
       );

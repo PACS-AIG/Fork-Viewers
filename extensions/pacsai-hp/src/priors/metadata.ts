@@ -133,3 +133,45 @@ export function parseStudyDate(study: StudyLike): number | undefined {
   const ts = Date.UTC(Number(y), Number(mo) - 1, Number(d));
   return Number.isNaN(ts) ? undefined : ts;
 }
+
+/**
+ * Parse DICOM StudyDate (YYYYMMDD) + StudyTime (HHMMSS[.frac]) into a millisecond
+ * UTC timestamp, or undefined when the date is absent/unparseable. StudyTime is
+ * optional — when missing or malformed the time falls back to 00:00:00, so this
+ * degrades to `parseStudyDate`'s midnight value. Used for interval-based
+ * same-session vs prior classification (vs `parseStudyDate`'s calendar-day grain,
+ * which the recency scorer still uses for "days ago").
+ */
+export function parseStudyDateTime(study: StudyLike): number | undefined {
+  const raw = study.StudyDate;
+  if (!raw || typeof raw !== 'string') {
+    return undefined;
+  }
+  const dm = raw.match(/^(\d{4})(\d{2})(\d{2})/);
+  if (!dm) {
+    return undefined;
+  }
+  const [, y, mo, d] = dm;
+  let hh = 0;
+  let mi = 0;
+  let ss = 0;
+  const rawTime = study.StudyTime;
+  if (rawTime && typeof rawTime === 'string') {
+    const tm = rawTime.match(/^(\d{2})(\d{2})?(\d{2})?/);
+    if (tm) {
+      hh = Number(tm[1]) || 0;
+      mi = Number(tm[2]) || 0;
+      ss = Number(tm[3]) || 0;
+    }
+  }
+  const ts = Date.UTC(Number(y), Number(mo) - 1, Number(d), hh, mi, ss);
+  return Number.isNaN(ts) ? undefined : ts;
+}
+
+/**
+ * Time window within which two studies of one patient are treated as a single
+ * concurrent imaging SESSION (siblings) rather than current-vs-prior. Replaces the
+ * old same-calendar-day rule, so studies a couple of hours apart across midnight
+ * still count as one session, and a study >24h earlier is a genuine prior.
+ */
+export const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
