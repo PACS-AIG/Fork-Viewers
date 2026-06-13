@@ -9,8 +9,9 @@ import buildCompareProtocol, { WINDOW } from './buildCompareProtocol';
  * and an RGB 3D-spin volume. The generic/head protocols mishandle it: they match on
  * "head" and (worse) prefer the ORIGINAL acquisition, which in a CTA is the MONITORING
  * slice (chest/arch), not the diagnostic recon. So CTA gets its own protocol,
- * out-weighting head/generic CT for "angio"/"CTA" studies, with vascular windowing and
- * NO prefer-ORIGINAL.
+ * out-weighting head/generic CT for HEAD/NECK "angio"/"CTA" studies, with vascular
+ * windowing and NO prefer-ORIGINAL. Body-region angio (chest PE, abdominal/aorta/
+ * runoff) is excluded here — a chest CTA routes to compareCTAChest instead.
  *
  * Diagnostic views: source axials (head, neck), MIPs (head, carotid), head reformats
  * (cor/sag), neck reformats (cor/sag), and L/R carotid CPRs. Non-diagnostic/derived
@@ -25,6 +26,11 @@ import buildCompareProtocol, { WINDOW } from './buildCompareProtocol';
  */
 const CTA_KEYWORDS = ['angio', 'cta'];
 
+// Body regions that are angio studies but NOT head/neck — carved out so they don't
+// mis-hang on this protocol's head/neck selectors. A chest CTA (PE) instead routes to
+// compareCTAChest; the rest (abdominal/thoracic-aorta/runoff CTA) fall to generic CT.
+const NOT_HEAD_NECK = ['chest', 'thorax', 'pulmonary', 'abdomen', 'pelvis', 'aorta', 'runoff'];
+
 // Non-diagnostic / derived series kept out of the tiled stages. NOTE: 'cpr' is NOT
 // here — curved-planar carotid reformats are diagnostic (carotid stenosis) and get
 // their own views below. 'spin' stays (excludes the RGB 3D-spin volume).
@@ -37,6 +43,10 @@ export const hpCompareCTA = buildCompareProtocol({
     'Current vs prior CT angiography (head/neck) — source axials, MIPs, reformats, CPR carotids',
   modalities: ['CT'],
   bodyPartKeywords: CTA_KEYWORDS,
+  // Scope to head/neck angio: claim "angio"/"cta" studies but NOT body-region angio
+  // (chest PE → compareCTAChest; abdo/aorta/runoff → generic CT), which would
+  // otherwise out-weight their own protocols yet match none of the head/neck selectors.
+  bodyPartExcludeKeywords: NOT_HEAD_NECK,
   // Out-weight compareCTHead (which also matches the "head" in "CT ANGIO HEAD/NECK").
   matchWeight: 150,
   selectors: [

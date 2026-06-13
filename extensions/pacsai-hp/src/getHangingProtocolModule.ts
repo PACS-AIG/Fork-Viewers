@@ -6,6 +6,7 @@ import hpCompareCTChest from './protocols/hpCompareCTChest';
 import hpCompareCTHead from './protocols/hpCompareCTHead';
 import hpCompareCTNeck from './protocols/hpCompareCTNeck';
 import hpCompareCTA from './protocols/hpCompareCTA';
+import hpCompareCTAChest from './protocols/hpCompareCTAChest';
 import hpCompareMRBrain from './protocols/hpCompareMRBrain';
 
 const protocols = [
@@ -19,8 +20,10 @@ const protocols = [
   hpCompareCTChest,
   hpCompareCTHead,
   hpCompareCTNeck,
-  // CTA out-weights compareCTHead/compareCTNeck for angio studies (all match "head"/"neck").
+  // CTA (head/neck) out-weights compareCTHead/compareCTNeck for angio studies (all match "head"/"neck").
   hpCompareCTA,
+  // Chest CTA (PE): requires angio + chest, so it out-weights both compareCTChest and head/neck CTA.
+  hpCompareCTAChest,
   hpCompareMRBrain,
 ];
 

@@ -83,6 +83,21 @@ export type CompareConfig = {
   modalities: string[];
   /** If set, the StudyDescription must contain one of these — makes the protocol exam-specific. */
   bodyPartKeywords?: string[];
+  /**
+   * If set, the StudyDescription must NOT contain any of these. Use to carve a body
+   * region OUT of an otherwise-broad match — e.g. compareCTA matches "angio" but
+   * excludes chest/abdomen so a chest CTA falls to compareCTAChest instead of
+   * mis-hanging on head/neck selectors. Emitted as a required doesNotContainI rule.
+   */
+  bodyPartExcludeKeywords?: string[];
+  /**
+   * Additional required StudyDescription keyword groups, AND-ed with bodyPartKeywords
+   * and with each other (each group is itself an OR-list). Use to require e.g. an
+   * "angio"/"cta" token IN ADDITION to a body-part token, so the protocol claims only
+   * the intersection (CTA chest) and not every angio nor every chest study. Each group
+   * adds a required containsI rule weighted like bodyPartKeywords.
+   */
+  requireKeywordGroups?: string[][];
   /** Base weight of the modality rule (default 100). Body-part rule adds 2x when present. */
   matchWeight?: number;
   /** Minimum numImageFrames for a series to qualify (default 5; excludes scouts). CR uses 0. */
@@ -228,6 +243,8 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     description,
     modalities,
     bodyPartKeywords,
+    bodyPartExcludeKeywords,
+    requireKeywordGroups,
     matchWeight = 100,
     seriesFloor = 5,
     excludeScouts = true,
@@ -583,6 +600,27 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       constraint: { containsI: bodyPartKeywords },
     });
   }
+  if (bodyPartExcludeKeywords?.length) {
+    protocolMatchingRules.push({
+      id: `${id}-bodypart-exclude`,
+      weight: matchWeight * 2,
+      required: true,
+      attribute: 'StudyDescription',
+      constraint: { doesNotContainI: bodyPartExcludeKeywords },
+    });
+  }
+  (requireKeywordGroups ?? []).forEach((group, i) => {
+    if (!group.length) {
+      return;
+    }
+    protocolMatchingRules.push({
+      id: `${id}-require-${i}`,
+      weight: matchWeight * 2,
+      required: true,
+      attribute: 'StudyDescription',
+      constraint: { containsI: group },
+    });
+  });
 
   return {
     id,
