@@ -175,15 +175,18 @@ export type CompareConfig = {
     }>;
   };
   /**
-   * Optional per-region CURRENT-vs-PRIOR compare. For each loaded region and each
-   * view, emits a 2-up [session | prior] stage, region-major (cervical's views,
-   * then thoracic's, then lumbar's). Each region pairs with ITS OWN prior (via
-   * `pacsaiRegionTimepoint`). A stage is `enabled` (auto-eligible) when both
-   * session and prior match, `passive` (manually reachable, session + empty prior)
-   * when only the session is present, and `disabled` (skipped) otherwise — so it
-   * doubles as the per-region current-only view. Reuses `overview.regions`. When
-   * set, it REPLACES the generic current/prior + current-only stages for this
-   * protocol (those assume a single region and would mis-pair across regions).
+   * Optional per-region CURRENT-vs-PRIOR compare. For each loaded region, emits
+   * (region-major: cervical's stages, then thoracic's, then lumbar's):
+   *   - a 2-up [session | prior] compare stage per view, each region pairing with
+   *     ITS OWN prior (via `pacsaiRegionTimepoint`). These are `enabled` ONLY when
+   *     both session and prior match — i.e. only when a prior exists; with no prior
+   *     they are `disabled` (skipped) so the region never renders an empty prior half.
+   *   - a current-only multi-plane stage tiling every view's session pane side by
+   *     side (e.g. sag | ax | cor). This leads the region when no prior exists and
+   *     stays reachable as a current-only glance when a prior does.
+   * Reuses `overview.regions`. When set, it REPLACES the generic current/prior +
+   * current-only stages for this protocol (those assume a single region and would
+   * mis-pair across regions).
    */
   regionCompare?: {
     /**
@@ -575,16 +578,21 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     displaySets: [{ id: `rc-${viewKey}-${regionKey}-${tp}` }],
   });
 
-  // Per-region current-vs-prior compare stages: one 2-up [session | prior] per
-  // (region, view), region-major (all of cervical's views, then thoracic's, then
-  // lumbar's) so you read a region fully before moving on. ENABLED as soon as the
-  // SESSION pane matches (minViewportsMatched = 1) so the first real region/view is
-  // always the lead — even with no prior (the prior pane then renders empty via
-  // allowUnmatchedView). This is critical: requiring both panes would leave a
-  // no-prior set with NOTHING enabled, falling through to the catch-all stage (which
-  // would hang an arbitrary scout). `disabled` (skipped) only when the session pane
-  // is absent. When present, these REPLACE the generic current/prior + current-only
-  // stages (which assume one region and would mis-pair across regions).
+  // Per-region compare stages, region-major (all of cervical's stages, then
+  // thoracic's, then lumbar's) so you read a region fully before moving on. For
+  // each region we emit, in order:
+  //   1. One 2-up [session | prior] compare per view, ENABLED only when BOTH panes
+  //      match (minViewportsMatched = 2) — i.e. only when a prior exists for this
+  //      region. With no prior they go `disabled` and stage navigation skips them,
+  //      so the region never shows an empty prior half.
+  //   2. One current-only multi-plane stage tiling every view's SESSION pane side
+  //      by side (e.g. sag | ax | cor). It leads the region when no prior exists
+  //      (the compares above are then disabled) and stays reachable as a
+  //      current-only glance when a prior does (placed after the compares so a
+  //      prior, when present, still leads). ENABLED as soon as one plane matches;
+  //      `disabled` (skipped entirely) only when the region isn't loaded at all.
+  // Together these REPLACE the generic current/prior + current-only stages (which
+  // assume one region and would mis-pair across regions).
   const regionCompareStages = [];
   if (regionCompareViews.length && regionCompareRegions.length) {
     const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -595,8 +603,8 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
           id: `rc-${r.key}-${view.key}`,
           name: `${regionLabel} ${view.name}`,
           stageActivation: {
-            enabled: { minViewportsMatched: 1 },
-            passive: { minViewportsMatched: 1 },
+            enabled: { minViewportsMatched: 2 },
+            passive: { minViewportsMatched: 2 },
           },
           viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
           viewports: [
@@ -604,6 +612,25 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
             rcViewport(view.key, r.key, 'prior'),
           ],
         });
+      });
+      // Current-only multi-plane stage for this region. Plain (no cross-study scroll
+      // sync): the panes are different planes of the same study, so there is nothing
+      // to relative-sync. Absent planes render empty via allowUnmatchedView.
+      regionCompareStages.push({
+        id: `rc-${r.key}-all`,
+        name: regionLabel,
+        stageActivation: {
+          enabled: { minViewportsMatched: 1 },
+          passive: { minViewportsMatched: 1 },
+        },
+        viewportStructure: {
+          layoutType: 'grid',
+          properties: { rows: 1, columns: regionCompareViews.length },
+        },
+        viewports: regionCompareViews.map(view => ({
+          viewportOptions: compareViewportOptions,
+          displaySets: [{ id: `rc-${view.key}-${r.key}-session` }],
+        })),
       });
     });
   }
