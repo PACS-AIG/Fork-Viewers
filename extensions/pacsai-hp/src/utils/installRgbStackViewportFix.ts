@@ -96,35 +96,60 @@ function normalizeColorImage(image: any): boolean {
  * to an exact multiple of the component count (drops only the stray pad byte(s)).
  * Returns true if it patched the image.
  */
-function fixPixelDataPadding(image: any): boolean {
-  if (!image || typeof image.getPixelData !== 'function') {
-    return false;
-  }
-  const comps =
-    Number(image.numberOfComponents) || (image.rgba ? 4 : image.color ? 3 : 0);
-  if (comps < 2) {
-    return false; // grayscale: length is already a multiple of 1
-  }
-  let data: any;
-  try {
-    data = image.getPixelData();
-  } catch {
-    return false;
-  }
-  const len = data?.length;
+function trimToComponents(arr: any, comps: number): any | null {
+  const len = arr?.length;
   if (!len || len % comps === 0) {
-    return false; // already aligned
+    return null;
   }
   const trimmed = Math.floor(len / comps) * comps;
   if (trimmed <= 0) {
+    return null;
+  }
+  return typeof arr.subarray === 'function' ? arr.subarray(0, trimmed) : arr.slice(0, trimmed);
+}
+
+function fixPixelDataPadding(image: any): boolean {
+  if (!image) {
     return false;
   }
-  const view = typeof data.subarray === 'function' ? data.subarray(0, trimmed) : data.slice(0, trimmed);
-  image.getPixelData = () => view;
-  if (typeof image.sizeInBytes === 'number') {
-    image.sizeInBytes = view.byteLength ?? trimmed;
+  const comps = Number(image.numberOfComponents) || (image.rgba ? 4 : image.color ? 3 : 0);
+  if (comps < 2) {
+    return false; // grayscale: length is already a multiple of 1
   }
-  return true;
+  let fixed = false;
+
+  // getPixelData (used by some paths / our diagnostics).
+  if (typeof image.getPixelData === 'function') {
+    try {
+      const view = trimToComponents(image.getPixelData(), comps);
+      if (view) {
+        image.getPixelData = () => view;
+        if (typeof image.sizeInBytes === 'number') {
+          image.sizeInBytes = view.byteLength ?? view.length;
+        }
+        fixed = true;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // voxelManager.getScalarData — what cornerstone 2.x's createVTKImageData actually
+  // feeds to the vtk scalar array. This is the one that matters for the crash.
+  const vm = image.voxelManager;
+  if (vm && typeof vm.getScalarData === 'function') {
+    try {
+      const view = trimToComponents(vm.getScalarData(), comps);
+      if (view) {
+        vm.getScalarData = () => view;
+        fixed = true;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return fixed;
 }
 
 // Capped diagnostic dumps (per imageId, global limit) so a persistent mismatch is
@@ -150,22 +175,27 @@ function diagnose(image: any, log: (...a: unknown[]) => void): void {
   } catch {
     /* ignore */
   }
+  let vmLen: unknown = 'no-vm';
+  try {
+    const vm = image?.voxelManager;
+    if (vm && typeof vm.getScalarData === 'function') {
+      vmLen = vm.getScalarData()?.length;
+    }
+  } catch {
+    vmLen = 'vm-error';
+  }
   log('RGB-fix diagnostic', {
     imageId: String(id).slice(0, 80),
     rows: image?.rows,
     columns: image?.columns,
-    width: image?.width,
-    height: image?.height,
     pxCount: px || '?',
     pixelDataLength: len,
+    voxelManagerScalarLength: vmLen,
     lenOverPx: px && typeof len === 'number' ? len / px : '?',
     pixelDataType: ctor,
     numberOfComponents: image?.numberOfComponents,
     color: image?.color,
     rgba: image?.rgba,
-    samplesPerPixel: image?.samplesPerPixel ?? image?.SamplesPerPixel,
-    photometricInterpretation:
-      image?.photometricInterpretation ?? image?.photometricInterpretation,
   });
 }
 
@@ -180,6 +210,9 @@ export function installRgbStackViewportFix(log: (...args: unknown[]) => void = (
   eventTarget.addEventListener(IMAGE_LOADED, (evt: any) => {
     try {
       const image = evt?.detail?.image;
+      if (Number(image?.numberOfComponents) > 1 || image?.color || image?.rgba) {
+        diagnose(image, log);
+      }
       normalizeColorImage(image);
       // Trim the DICOM even-length pad byte so length % components === 0.
       fixPixelDataPadding(image);
