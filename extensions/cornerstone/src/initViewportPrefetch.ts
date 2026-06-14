@@ -33,11 +33,17 @@ function initViewportPrefetch(
     return;
   }
 
-  // imageIds already handed to the pool. The cache check alone isn't enough: a
-  // request that is queued-but-not-yet-started is not in the cache, so rapid
-  // re-settles would enqueue it twice. Reset per study open (VIEWPORTS_READY) so a
-  // reopened study whose cache was cleared on mode exit re-queues correctly.
+  // imageIds added to the pool during the CURRENT enqueue pass, so the same series
+  // shown in two panes isn't queued twice. Reset each pass (cache.getImageLoadObject
+  // covers already-loaded + in-flight across passes).
   const enqueued = new Set<string>();
+
+  // Signature of the last layout we prefetched (sorted visible displaySet UIDs).
+  // When it changes — notably the transient default layout -> hanging-protocol
+  // layout swap, and each stage change — we drop the stale queued prefetch and
+  // re-prioritize the now-visible layout. Unchanged settles (e.g. just clicking
+  // between viewports) are skipped to avoid needless queue churn.
+  let lastSignature = '';
 
   const getImageIds = (displaySetInstanceUID: string): string[] => {
     const displaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
@@ -77,16 +83,34 @@ function initViewportPrefetch(
       return;
     }
 
+    // Collect the visible viewports' displaySet UIDs (order-insensitive signature).
+    const visibleUIDs: string[] = [];
+    viewports.forEach((viewport: any) => {
+      (viewport?.displaySetInstanceUIDs ?? []).forEach((uid: string) => visibleUIDs.push(uid));
+    });
+    const signature = [...new Set(visibleUIDs)].sort().join('|');
+    if (signature === lastSignature) {
+      return;
+    }
+    lastSignature = signature;
+
+    // The visible layout changed (default -> HP layout, or a stage change). Drop any
+    // prefetch still QUEUED for the previous layout so this layout's images don't
+    // wait behind them; then re-queue from scratch. In-flight requests can't be
+    // cancelled (no AbortController in cs3D yet), so a few stale loads still finish,
+    // but the bulk of the queue is reclaimed. Interaction/Thumbnail are separate pool
+    // buckets and are untouched, so user scrolling is unaffected.
+    imageLoadPoolManager.clearRequestStack(REQUEST_TYPE);
+    enqueued.clear();
+
     // Gather each displayed stack's still-needed imageIds, then enqueue round-robin
     // so every visible viewport advances together instead of one filling first.
     const stacks: string[][] = [];
-    viewports.forEach((viewport: any) => {
-      (viewport?.displaySetInstanceUIDs ?? []).forEach((uid: string) => {
-        const imageIds = getImageIds(uid).filter(id => !isPending(id));
-        if (imageIds.length) {
-          stacks.push(imageIds);
-        }
-      });
+    new Set(visibleUIDs).forEach((uid: string) => {
+      const imageIds = getImageIds(uid).filter(id => !isPending(id));
+      if (imageIds.length) {
+        stacks.push(imageIds);
+      }
     });
 
     const maxLen = stacks.reduce((m, s) => Math.max(m, s.length), 0);
@@ -100,25 +124,21 @@ function initViewportPrefetch(
   };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let resetRequested = false;
-  const schedule = (reset: boolean) => {
-    resetRequested = resetRequested || reset;
+  const schedule = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      if (resetRequested) {
-        enqueued.clear();
-        resetRequested = false;
-      }
-      prefetchVisibleViewports();
-    }, SETTLE_DEBOUNCE_MS);
+    timer = setTimeout(prefetchVisibleViewports, SETTLE_DEBOUNCE_MS);
   };
 
   const { EVENTS } = viewportGridService;
-  // VIEWPORTS_READY = a fresh study/layout — reset the dedupe set first.
-  viewportGridService.subscribe(EVENTS.VIEWPORTS_READY, () => schedule(true));
+  // VIEWPORTS_READY = a fresh study open — force a re-run even if the displaySet UIDs
+  // happen to match the last study (its cache was cleared on mode exit).
+  viewportGridService.subscribe(EVENTS.VIEWPORTS_READY, () => {
+    lastSignature = '';
+    schedule();
+  });
   // Subsequent in-study settles (stage change, layout change, new active series).
   [EVENTS.LAYOUT_CHANGED, EVENTS.GRID_STATE_CHANGED, EVENTS.ACTIVE_VIEWPORT_ID_CHANGED].forEach(
-    evt => viewportGridService.subscribe(evt, () => schedule(false))
+    evt => viewportGridService.subscribe(evt, () => schedule())
   );
 }
 
