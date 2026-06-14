@@ -86,14 +86,20 @@ function normalizeColorImage(image: any): boolean {
   return changed;
 }
 
-// One diagnostic dump per imageId so a persistent mismatch is visible without spam.
+// Capped diagnostic dumps (per imageId, global limit) so a persistent mismatch is
+// visible without flooding the console.
 const diagnosed = new Set<string>();
+let diagnosticBudget = 8;
 function diagnose(image: any, log: (...a: unknown[]) => void): void {
   const id = image?.imageId;
-  if (!id || diagnosed.has(id)) {
+  if (!id || diagnosed.has(id) || diagnosticBudget <= 0) {
     return;
   }
   diagnosed.add(id);
+  diagnosticBudget -= 1;
+  const rows = Number(image?.rows ?? image?.height ?? 0);
+  const cols = Number(image?.columns ?? image?.width ?? 0);
+  const px = rows * cols;
   let len: unknown = '?';
   let ctor = '?';
   try {
@@ -104,18 +110,36 @@ function diagnose(image: any, log: (...a: unknown[]) => void): void {
     /* ignore */
   }
   log('RGB-fix diagnostic', {
-    imageId: id,
+    imageId: String(id).slice(0, 80),
     rows: image?.rows,
     columns: image?.columns,
     width: image?.width,
     height: image?.height,
+    pxCount: px || '?',
     pixelDataLength: len,
+    lenOverPx: px && typeof len === 'number' ? len / px : '?',
     pixelDataType: ctor,
     numberOfComponents: image?.numberOfComponents,
     color: image?.color,
     rgba: image?.rgba,
-    photometricInterpretation: image?.photometricInterpretation,
+    samplesPerPixel: image?.samplesPerPixel ?? image?.SamplesPerPixel,
+    photometricInterpretation:
+      image?.photometricInterpretation ?? image?.photometricInterpretation,
   });
+}
+
+function looksColor(image: any): boolean {
+  if (!image) {
+    return false;
+  }
+  if (image.color === true || image.rgba === true) {
+    return true;
+  }
+  if (Number(image.numberOfComponents) > 1) {
+    return true;
+  }
+  const pi = String(image.photometricInterpretation ?? '').toUpperCase();
+  return pi.startsWith('RGB') || pi.startsWith('YBR') || pi.startsWith('PALETTE');
 }
 
 export function installRgbStackViewportFix(log: (...args: unknown[]) => void = () => {}): void {
@@ -124,10 +148,15 @@ export function installRgbStackViewportFix(log: (...args: unknown[]) => void = (
   }
   installed = true;
 
-  // (1) Normalize color images as they enter the cache.
+  // (1) Normalize color images as they enter the cache — and dump a diagnostic for
+  // the color ones so a persistent mismatch is visible regardless of render path.
   eventTarget.addEventListener(IMAGE_LOADED, (evt: any) => {
     try {
-      normalizeColorImage(evt?.detail?.image);
+      const image = evt?.detail?.image;
+      if (looksColor(image)) {
+        diagnose(image, log);
+      }
+      normalizeColorImage(image);
     } catch {
       /* never let the fix itself throw into the event pipeline */
     }
