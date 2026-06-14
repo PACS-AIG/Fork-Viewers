@@ -210,9 +210,6 @@ export function installRgbStackViewportFix(log: (...args: unknown[]) => void = (
   eventTarget.addEventListener(IMAGE_LOADED, (evt: any) => {
     try {
       const image = evt?.detail?.image;
-      if (Number(image?.numberOfComponents) > 1 || image?.color || image?.rgba) {
-        diagnose(image, log);
-      }
       normalizeColorImage(image);
       // Trim the DICOM even-length pad byte so length % components === 0.
       fixPixelDataPadding(image);

@@ -14,8 +14,9 @@ import buildCompareProtocol from './buildCompareProtocol';
  *
  * Generic compareCT mishandles this: it only knows ax/cor/sag mono planes, so it
  * grabs the mono 4D source and ignores every map. This protocol selects the RAPID
- * outputs by name and leads with the mismatch, then a pageable 4-up (CBF + CBV +
- * Tmax + Mismatch), then the combined colored panel and the CT-P summary.
+ * outputs by name and hangs them in stroke-reading order: the CT-P SUMMARY (the
+ * one-page decision view) first, then the 4-up map overview, the CBF+Tmax core /
+ * penumbra pair, the mismatch alone, and the colored CBF/CBV/MTT/Tmax panel.
  *
  * NOTE: these RGB maps are the series tied to the cornerstone thumbnail crash;
  * hanging them in a viewport is a different render path, but this protocol is only
@@ -41,24 +42,30 @@ export const hpCompareCTPerfusion = buildCompareProtocol({
     { key: 'pmaps', keywords: ['parameter', 'colored'] },
     { key: 'summary', keywords: ['summary'], excludeKeywords: ['slices'] },
   ],
-  // Current|prior compare stages (rare for acute stroke, but supported with a prior).
+  // Current|prior compare stages (rare for acute stroke, but supported with a prior) —
+  // same convention order as the no-prior groups: summary first, then the decision
+  // pair, mismatch, the other maps, and the colored panel.
   stages: [
-    { name: 'Perfusion mismatch (current/prior)', selector: 'mismatch' },
-    { name: 'Perfusion CBF (current/prior)', selector: 'cbf' },
-    { name: 'Perfusion CBV (current/prior)', selector: 'cbv' },
-    { name: 'Perfusion Tmax (current/prior)', selector: 'tmax' },
-    { name: 'Perfusion maps colored (current/prior)', selector: 'pmaps' },
     { name: 'Perfusion CT-P summary (current/prior)', selector: 'summary' },
+    { name: 'Perfusion CBF (current/prior)', selector: 'cbf' },
+    { name: 'Perfusion Tmax (current/prior)', selector: 'tmax' },
+    { name: 'Perfusion mismatch (current/prior)', selector: 'mismatch' },
+    { name: 'Perfusion CBV (current/prior)', selector: 'cbv' },
+    { name: 'Perfusion maps colored (current/prior)', selector: 'pmaps' },
   ],
-  // No prior (the usual acute case): pageable current-only groups, by task.
+  // No prior (the usual acute case): pageable current-only groups, in reading order.
+  // Lead with the RAPID CT-P SUMMARY (the one-page thrombectomy decision view: core /
+  // Tmax>6s / mismatch volumes + ratio), then the 4-up map overview, the CBF+Tmax
+  // core-vs-penumbra pair, the mismatch alone, and the colored CBF/CBV/MTT/Tmax panel.
   currentStages: [
-    { name: 'Perfusion mismatch (CBF/Tmax)', selectors: ['mismatch'] },
-    { name: 'Perfusion maps (CBF + CBV + Tmax + Mismatch)', selectors: ['cbf', 'cbv', 'tmax', 'mismatch'] },
-    { name: 'Perfusion parameter maps (colored)', selectors: ['pmaps'] },
     { name: 'Perfusion CT-P summary', selectors: ['summary'] },
+    { name: 'Perfusion maps (CBF + CBV + Tmax + Mismatch)', selectors: ['cbf', 'cbv', 'tmax', 'mismatch'] },
+    { name: 'Perfusion CBF + Tmax (core / penumbra)', selectors: ['cbf', 'tmax'] },
+    { name: 'Perfusion mismatch (CBF/Tmax)', selectors: ['mismatch'] },
+    { name: 'Perfusion parameter maps (colored)', selectors: ['pmaps'] },
   ],
   // Densest-fully-matched current-only fallback (below the group stages).
-  currentView: ['mismatch', 'cbf', 'cbv', 'tmax'],
+  currentView: ['cbf', 'tmax', 'cbv', 'mismatch'],
 });
 
 export default hpCompareCTPerfusion;
