@@ -18,6 +18,7 @@ import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
 import getImageColor from './utils/getImageColor';
+import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
 import { getStudyRole } from './priors/roleRegistry';
 import { getSpineRegion } from './priors/metadata';
 
@@ -67,6 +68,11 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
 
     // Cross-study relative scroll synchronizer used by the protocols.
     syncGroupService?.addSynchronizerType?.(SCROLL_SYNC_TYPE, createScrollSyncSynchronizer);
+
+    // Fix cornerstone3D's RGB StackViewport crash (size-vs-components RangeError)
+    // so color series — RAPID perfusion/angio maps, 3D-spin, iMAR — render and
+    // thumbnail without breaking the viewport. Idempotent.
+    installRgbStackViewportFix();
 
     // Computed image-plane attribute so plane selectors work even when the
     // SeriesDescription omits ax/cor/sag (e.g. MPR reformats). Coronal/sagittal of
