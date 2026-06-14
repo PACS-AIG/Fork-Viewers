@@ -30,39 +30,53 @@ let installed = false;
  * grayscale (comps === 1) and anything whose length doesn't cleanly divide by the
  * pixel count (can't safely infer components).
  */
-function normalizeColorImage(image: any): boolean {
+function imageShape(image: any): { len: number; px: number; comps: number } | null {
   if (!image || typeof image.getPixelData !== 'function') {
-    return false;
+    return null;
   }
-  const rows = Number(image.rows ?? image.height);
-  const cols = Number(image.columns ?? image.width);
+  const rows = Number(image.rows ?? image.height ?? 0);
+  const cols = Number(image.columns ?? image.width ?? 0);
   const px = rows * cols;
   if (!px || !Number.isFinite(px)) {
-    return false;
+    return null;
   }
   let data: { length?: number } | undefined;
   try {
     data = image.getPixelData();
   } catch {
-    return false;
+    return null;
   }
-  const len = data?.length;
+  const len = Number(data?.length ?? 0);
   if (!len || len % px !== 0) {
+    return null;
+  }
+  return { len, px, comps: len / px };
+}
+
+/**
+ * Align an image's component flags with its ACTUAL pixel-data length so vtk's
+ * `length % numberOfComponents === 0` holds — in BOTH directions (data is RGB/RGBA
+ * but flags say grayscale, or data is single-channel but flags say color). Returns
+ * true if anything changed.
+ */
+function normalizeColorImage(image: any): boolean {
+  const shape = imageShape(image);
+  if (!shape) {
     return false;
   }
-  const comps = len / px;
-  // Only color (3 = RGB, 4 = RGBA) needs aligning; leave grayscale alone.
-  if (comps !== 3 && comps !== 4) {
+  const { comps } = shape;
+  if (comps !== 1 && comps !== 3 && comps !== 4) {
     return false;
   }
+  const color = comps >= 3;
   const rgba = comps === 4;
   let changed = false;
   if (image.numberOfComponents !== comps) {
     image.numberOfComponents = comps;
     changed = true;
   }
-  if (image.color !== true) {
-    image.color = true;
+  if (image.color !== color) {
+    image.color = color;
     changed = true;
   }
   if (image.rgba !== rgba) {
@@ -70,6 +84,38 @@ function normalizeColorImage(image: any): boolean {
     changed = true;
   }
   return changed;
+}
+
+// One diagnostic dump per imageId so a persistent mismatch is visible without spam.
+const diagnosed = new Set<string>();
+function diagnose(image: any, log: (...a: unknown[]) => void): void {
+  const id = image?.imageId;
+  if (!id || diagnosed.has(id)) {
+    return;
+  }
+  diagnosed.add(id);
+  let len: unknown = '?';
+  let ctor = '?';
+  try {
+    const d = image?.getPixelData?.();
+    len = d?.length;
+    ctor = d?.constructor?.name;
+  } catch {
+    /* ignore */
+  }
+  log('RGB-fix diagnostic', {
+    imageId: id,
+    rows: image?.rows,
+    columns: image?.columns,
+    width: image?.width,
+    height: image?.height,
+    pixelDataLength: len,
+    pixelDataType: ctor,
+    numberOfComponents: image?.numberOfComponents,
+    color: image?.color,
+    rgba: image?.rgba,
+    photometricInterpretation: image?.photometricInterpretation,
+  });
 }
 
 export function installRgbStackViewportFix(log: (...args: unknown[]) => void = () => {}): void {
@@ -103,15 +149,21 @@ export function installRgbStackViewportFix(log: (...args: unknown[]) => void = (
         let fixed = false;
         // The image may be passed as an arg, or read internally from the cache.
         for (const a of args) {
-          if (a && typeof a.getPixelData === 'function' && normalizeColorImage(a)) {
-            fixed = true;
+          if (a && typeof a.getPixelData === 'function') {
+            diagnose(a, log);
+            if (normalizeColorImage(a)) {
+              fixed = true;
+            }
           }
         }
         try {
           const id = this?.getCurrentImageId?.();
           const cached = id && cache.getImage?.(id);
-          if (cached && normalizeColorImage(cached)) {
-            fixed = true;
+          if (cached) {
+            diagnose(cached, log);
+            if (normalizeColorImage(cached)) {
+              fixed = true;
+            }
           }
         } catch {
           /* ignore */
@@ -120,6 +172,7 @@ export function installRgbStackViewportFix(log: (...args: unknown[]) => void = (
           log('normalized RGB image components after vtk size mismatch; retrying');
           return original.apply(this, args);
         }
+        log('could not normalize RGB image; rethrowing', String(e?.message ?? e));
         throw e;
       }
     };

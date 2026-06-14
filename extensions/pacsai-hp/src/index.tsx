@@ -72,7 +72,7 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     // Fix cornerstone3D's RGB StackViewport crash (size-vs-components RangeError)
     // so color series — RAPID perfusion/angio maps, 3D-spin, iMAR — render and
     // thumbnail without breaking the viewport. Idempotent.
-    installRgbStackViewportFix();
+    installRgbStackViewportFix((...args) => console.warn('[pacsai-hp]', ...args));
 
     // Computed image-plane attribute so plane selectors work even when the
     // SeriesDescription omits ax/cor/sag (e.g. MPR reformats). Coronal/sagittal of
