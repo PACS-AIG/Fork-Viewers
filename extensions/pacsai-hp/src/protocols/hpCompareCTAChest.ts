@@ -39,7 +39,9 @@ export const hpCompareCTAChest = buildCompareProtocol({
   currentView: ['axsoft', 'axlung', 'cor'],
   selectors: [
     { key: 'axsoft', plane: 'axial', kernel: 'soft', excludeKeywords: ['mip'] },
-    { key: 'axlung', plane: 'axial', kernel: 'lung', excludeKeywords: ['mip'] },
+    // Prefer a lung-kernel recon, but fall back to the soft axial (read at a lung
+    // window) when the study has none — so the lung pane always fills.
+    { key: 'axlung', plane: 'axial', preferKernel: 'lung', excludeKeywords: ['mip'] },
     { key: 'cor', plane: 'coronal', excludeKeywords: ['mip'] },
     { key: 'sag', plane: 'sagittal', excludeKeywords: ['mip'] },
     // Axial slab MIP — read at the PE/vascular window.

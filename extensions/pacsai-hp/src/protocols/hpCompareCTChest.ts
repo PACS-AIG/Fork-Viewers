@@ -25,7 +25,9 @@ export const hpCompareCTChest = buildCompareProtocol({
   // No-prior multi-view fallback (below the group stages): lung + soft + coronal.
   currentView: ['axlung', 'axsoft', 'cor'],
   selectors: [
-    { key: 'axlung', plane: 'axial', kernel: 'lung', excludeKeywords: ['mip'] },
+    // Prefer a lung-kernel recon, but fall back to the soft axial (read at a lung
+    // window) when the study has none — so the lung pane always fills.
+    { key: 'axlung', plane: 'axial', preferKernel: 'lung', excludeKeywords: ['mip'] },
     { key: 'axsoft', plane: 'axial', kernel: 'soft', excludeKeywords: ['mip'] },
     { key: 'cor', plane: 'coronal', excludeKeywords: ['mip'] },
     { key: 'sag', plane: 'sagittal', excludeKeywords: ['mip'] },

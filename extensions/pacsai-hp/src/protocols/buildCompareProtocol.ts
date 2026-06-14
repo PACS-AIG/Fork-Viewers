@@ -54,6 +54,14 @@ type SelectorDef = {
    * description as fallback).
    */
   kernel?: 'soft' | 'lung' | 'bone';
+  /**
+   * Prefer (but do not require) a reconstruction kernel class — adds weight so a
+   * matching-kernel recon wins when several share the plane, but a series of another
+   * kernel still matches. Use instead of `kernel` when the pane should always fill:
+   * e.g. a lung-axial pane that takes a dedicated lung-kernel recon when present but
+   * falls back to the soft axial (read at a lung window) when the study has none.
+   */
+  preferKernel?: 'soft' | 'lung' | 'bone';
   /** SeriesDescription must contain ANY of these (case-insensitive). Omit for "any image series". */
   keywords?: string[];
   /**
@@ -363,6 +371,11 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     if (sel.kernel) {
       // Match the computed kernel class (soft/bone) from ConvolutionKernel.
       rules.push({ attribute: 'pacsaiKernel', required: true, constraint: { equals: { value: sel.kernel } } });
+    }
+    if (sel.preferKernel) {
+      // Weighted, NOT required: prefers this kernel class but still matches others,
+      // so the pane falls back (e.g. soft axial when no lung-kernel recon exists).
+      rules.push({ attribute: 'pacsaiKernel', weight: 10, constraint: { equals: { value: sel.preferKernel } } });
     }
     if (sel.keywords?.length) {
       rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: sel.keywords } });

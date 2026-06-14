@@ -1,5 +1,6 @@
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
+import getImageColor from '../utils/getImageColor';
 import { getStudyRole } from './roleRegistry';
 import { getSpineRegion } from './metadata';
 
@@ -44,6 +45,10 @@ function attrValue(d: AnyDS, attr: string, activeStudyUID: string | undefined, s
       return getImagePlane(d, siblings);
     case 'pacsaiKernel':
       return getImageKernel(d);
+    case 'pacsaiColor':
+      // excludeColorSeries protocols (CTA/CTA-chest) add a required pacsaiColor==='mono'
+      // rule; without this the replay fails it for every series and shows (none).
+      return getImageColor(d);
     default:
       return d?.[attr];
   }
