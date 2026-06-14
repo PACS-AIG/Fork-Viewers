@@ -1,23 +1,26 @@
 import { cache, eventTarget, Enums, StackViewport } from '@cornerstonejs/core';
 
 /**
- * Runtime fix for cornerstone3D's StackViewport RGB crash
+ * Runtime fix for cornerstone3D's StackViewport color crash
  *   "RangeError: model.size is not a multiple of model.numberOfComponents"
- * thrown from StackViewport.createVTKImageData when an image's pixel-data length
- * doesn't divide by the component count cornerstone assigns to the vtk scalar
- * array. It hits color series whose decoded data is RGB (3) vs RGBA (4) out of
- * sync with the image's `color`/`rgba`/`numberOfComponents` flags — e.g. the
- * iSchemaView RAPID perfusion/angio maps, "3D SPIN", and "...iMAR" volumes — and
- * breaks both the viewport render and the series-panel thumbnails.
+ * thrown from StackViewport.createVTKImageData when a color image's pixel-data
+ * length isn't an exact multiple of its component count.
  *
- * No cornerstone fork: we (1) normalize a color image's component metadata to match
- * its actual pixel-data length the moment it enters the cache, so the value vtk
- * receives always divides evenly; and (2) wrap createVTKImageData so any image that
- * slipped through (cached before the listener attached) is normalized and retried
- * once before the error can propagate. Grayscale images are left untouched.
+ * Root cause: DICOM pads `OB` pixel data to an EVEN byte length. A color series
+ * whose true size (rows·cols·components) is ODD therefore arrives with a trailing
+ * pad byte that isn't a whole pixel — e.g. an iSchemaView RAPID map at 751×563:
+ * 751·563·3 = 1268439 (odd) → buffer 1268440 → 1268440 % 3 = 1 → vtk throws. The
+ * component flags are correct; it's purely the buffer length. (The same class also
+ * covers "3D SPIN" / "...iMAR" RGB volumes.) Breaks both the viewport render and
+ * the series-panel thumbnails.
  *
- * Cornerstone-version-sensitive only in part (2) — if the prototype method is ever
- * renamed, that guard simply no-ops and the (1) cache normalization still applies.
+ * No cornerstone fork: as each image enters the cache (IMAGE_LOADED, which fires on
+ * both render paths) we (a) trim getPixelData to a whole number of components
+ * (`fixPixelDataPadding` — the actual fix), and (b) align the color/rgba flags to
+ * the data as a harmless backstop. We also wrap createVTKImageData to do the same
+ * and retry once for any image cached before the listener attached. Grayscale is
+ * left untouched. Version-sensitive only in the wrapper — if the method is renamed
+ * in a cornerstone upgrade the wrapper no-ops and the IMAGE_LOADED fix still applies.
  */
 
 const { IMAGE_LOADED } = Enums.Events;
@@ -86,6 +89,44 @@ function normalizeColorImage(image: any): boolean {
   return changed;
 }
 
+/**
+ * THE fix: DICOM pads `OB` pixel data to an even byte length, so a color image
+ * whose true size (rows·cols·components) is ODD arrives with a trailing pad byte —
+ * making `length % numberOfComponents !== 0` and crashing vtk. Trim `getPixelData`
+ * to an exact multiple of the component count (drops only the stray pad byte(s)).
+ * Returns true if it patched the image.
+ */
+function fixPixelDataPadding(image: any): boolean {
+  if (!image || typeof image.getPixelData !== 'function') {
+    return false;
+  }
+  const comps =
+    Number(image.numberOfComponents) || (image.rgba ? 4 : image.color ? 3 : 0);
+  if (comps < 2) {
+    return false; // grayscale: length is already a multiple of 1
+  }
+  let data: any;
+  try {
+    data = image.getPixelData();
+  } catch {
+    return false;
+  }
+  const len = data?.length;
+  if (!len || len % comps === 0) {
+    return false; // already aligned
+  }
+  const trimmed = Math.floor(len / comps) * comps;
+  if (trimmed <= 0) {
+    return false;
+  }
+  const view = typeof data.subarray === 'function' ? data.subarray(0, trimmed) : data.slice(0, trimmed);
+  image.getPixelData = () => view;
+  if (typeof image.sizeInBytes === 'number') {
+    image.sizeInBytes = view.byteLength ?? trimmed;
+  }
+  return true;
+}
+
 // Capped diagnostic dumps (per imageId, global limit) so a persistent mismatch is
 // visible without flooding the console.
 const diagnosed = new Set<string>();
@@ -128,20 +169,6 @@ function diagnose(image: any, log: (...a: unknown[]) => void): void {
   });
 }
 
-function looksColor(image: any): boolean {
-  if (!image) {
-    return false;
-  }
-  if (image.color === true || image.rgba === true) {
-    return true;
-  }
-  if (Number(image.numberOfComponents) > 1) {
-    return true;
-  }
-  const pi = String(image.photometricInterpretation ?? '').toUpperCase();
-  return pi.startsWith('RGB') || pi.startsWith('YBR') || pi.startsWith('PALETTE');
-}
-
 export function installRgbStackViewportFix(log: (...args: unknown[]) => void = () => {}): void {
   if (installed) {
     return;
@@ -153,10 +180,9 @@ export function installRgbStackViewportFix(log: (...args: unknown[]) => void = (
   eventTarget.addEventListener(IMAGE_LOADED, (evt: any) => {
     try {
       const image = evt?.detail?.image;
-      if (looksColor(image)) {
-        diagnose(image, log);
-      }
       normalizeColorImage(image);
+      // Trim the DICOM even-length pad byte so length % components === 0.
+      fixPixelDataPadding(image);
     } catch {
       /* never let the fix itself throw into the event pipeline */
     }
@@ -176,24 +202,26 @@ export function installRgbStackViewportFix(log: (...args: unknown[]) => void = (
           throw e;
         }
         let fixed = false;
+        const tryFix = (img: any) => {
+          if (!img || typeof img.getPixelData !== 'function') {
+            return;
+          }
+          diagnose(img, log);
+          // padding trim is the real fix; field normalize is harmless backup.
+          if (fixPixelDataPadding(img)) {
+            fixed = true;
+          }
+          if (normalizeColorImage(img)) {
+            fixed = true;
+          }
+        };
         // The image may be passed as an arg, or read internally from the cache.
         for (const a of args) {
-          if (a && typeof a.getPixelData === 'function') {
-            diagnose(a, log);
-            if (normalizeColorImage(a)) {
-              fixed = true;
-            }
-          }
+          tryFix(a);
         }
         try {
           const id = this?.getCurrentImageId?.();
-          const cached = id && cache.getImage?.(id);
-          if (cached) {
-            diagnose(cached, log);
-            if (normalizeColorImage(cached)) {
-              fixed = true;
-            }
-          }
+          tryFix(id && cache.getImage?.(id));
         } catch {
           /* ignore */
         }
