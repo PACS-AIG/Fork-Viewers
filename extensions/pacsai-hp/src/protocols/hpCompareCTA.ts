@@ -13,11 +13,13 @@ import buildCompareProtocol, { WINDOW } from './buildCompareProtocol';
  * windowing and NO prefer-ORIGINAL. Body-region angio (chest PE, abdominal/aorta/
  * runoff) is excluded here — a chest CTA routes to compareCTAChest instead.
  *
- * Diagnostic views: source axials (head, neck), MIPs (head, carotid), head reformats
+ * Diagnostic views: source axials (head, neck), head MIPs (axial COW + cor/sag),
+ * carotid/neck MIPs (cor/sag, + axial for vendors that emit it), head reformats
  * (cor/sag), neck reformats (cor/sag), and L/R carotid CPRs. Non-diagnostic/derived
- * series (monitoring, topogram, scout, protocol, 3D-spin) are excluded from the tiled
- * stages — they remain in the series panel. The RGB 3D-spin is also the series that
- * trips cornerstone's thumbnail renderer, so keeping it out is doubly intentional.
+ * series (monitoring, topogram, scout, protocol) and ALL color/RGB series (3D-spin,
+ * RAPID/iSchemaView renders, perfusion maps — via `excludeColorSeries`) are excluded
+ * from the tiled stages; they remain in the series panel. Excluding color also keeps
+ * the RGB series that trip cornerstone's thumbnail renderer out of the auto-hang.
  *
  * Stroke CTAs usually have NO prior, so beyond the current/prior compare stages this
  * protocol defines pageable current-only GROUP stages (`currentStages`): source axials,
@@ -49,13 +51,28 @@ export const hpCompareCTA = buildCompareProtocol({
   bodyPartExcludeKeywords: NOT_HEAD_NECK,
   // Out-weight compareCTHead (which also matches the "head" in "CT ANGIO HEAD/NECK").
   matchWeight: 150,
+  // Drop the RAPID/iSchemaView color renders, perfusion maps and 3D-spin from the
+  // diagnostic stages (also avoids the RGB thumbnail crash auto-hanging them).
+  excludeColorSeries: true,
   selectors: [
-    // Source axials.
-    { key: 'axhead', plane: 'axial', keywords: ['head'], excludeKeywords: [...NOT_DIAGNOSTIC, 'mip', 'neck', 'cpr'] },
+    // Source axials. `axhead` does NOT require a "head" token: many cerebral CTAs are a
+    // single combined head+neck source acquisition named e.g. "ANGIOGRAM CTA" / "NCCT" /
+    // "SCANS" with no region word — so it matches any axial source recon (largest wins,
+    // i.e. the thin angio source), just excluding MIPs/neck/cpr. `axneck` stays
+    // neck-specific so a separate neck source recon still lands in its own pane.
+    { key: 'axhead', plane: 'axial', excludeKeywords: [...NOT_DIAGNOSTIC, 'mip', 'neck', 'cpr'] },
     { key: 'axneck', plane: 'axial', keywords: ['neck'], excludeKeywords: [...NOT_DIAGNOSTIC, 'mip', 'head', 'cpr'] },
-    // MIPs — split head vs carotid/neck (each lands in its own pane).
-    { key: 'miphead', plane: 'axial', keywords: ['mip'], excludeKeywords: [...NOT_DIAGNOSTIC, 'carotid', 'neck'] },
-    { key: 'mipneck', plane: 'axial', keywords: ['mip'], excludeKeywords: [...NOT_DIAGNOSTIC, 'head'] },
+    // MIPs — head (intracranial / circle-of-Willis) vs neck (carotid / vertebral),
+    // PER PLANE so every MIP orientation hangs (this vendor emits axial COW + cor/sag
+    // head + cor/sag neck). A head MIP is any MIP that isn't neck/carotid (covers the
+    // COW slab, which carries no "head" token); a neck MIP must POSITIVELY name
+    // neck/carotid (so the COW slab is never mistaken for a carotid MIP).
+    { key: 'miphead_ax', plane: 'axial', keywords: ['mip'], excludeKeywords: [...NOT_DIAGNOSTIC, 'neck', 'carotid', 'cpr'] },
+    { key: 'miphead_cor', plane: 'coronal', keywords: ['mip'], excludeKeywords: [...NOT_DIAGNOSTIC, 'neck', 'carotid', 'cpr'] },
+    { key: 'miphead_sag', plane: 'sagittal', keywords: ['mip'], excludeKeywords: [...NOT_DIAGNOSTIC, 'neck', 'carotid', 'cpr'] },
+    { key: 'mipneck_cor', plane: 'coronal', keywordGroups: [['mip'], ['neck', 'carotid']], excludeKeywords: [...NOT_DIAGNOSTIC, 'cpr'] },
+    { key: 'mipneck_sag', plane: 'sagittal', keywordGroups: [['mip'], ['neck', 'carotid']], excludeKeywords: [...NOT_DIAGNOSTIC, 'cpr'] },
+    { key: 'mipneck_ax', plane: 'axial', keywordGroups: [['mip'], ['neck', 'carotid']], excludeKeywords: [...NOT_DIAGNOSTIC, 'cpr'] },
     // Head reformats.
     { key: 'corhead', plane: 'coronal', keywords: ['head'], excludeKeywords: [...NOT_DIAGNOSTIC, 'mip', 'neck', 'cpr'] },
     { key: 'saghead', plane: 'sagittal', keywords: ['head'], excludeKeywords: [...NOT_DIAGNOSTIC, 'mip', 'neck', 'cpr'] },
@@ -69,10 +86,14 @@ export const hpCompareCTA = buildCompareProtocol({
   ],
   // Current|prior compare stages (one per view) — lead when a prior exists.
   stages: [
-    { name: 'CTA Head axial (current/prior)', selector: 'axhead', voi: WINDOW.cta },
+    { name: 'CTA Source axial (current/prior)', selector: 'axhead', voi: WINDOW.cta },
     { name: 'CTA Neck axial (current/prior)', selector: 'axneck', voi: WINDOW.cta },
-    { name: 'CTA Head MIP (current/prior)', selector: 'miphead', voi: WINDOW.cta },
-    { name: 'CTA Carotid MIP (current/prior)', selector: 'mipneck', voi: WINDOW.cta },
+    { name: 'CTA Head MIP axial (current/prior)', selector: 'miphead_ax', voi: WINDOW.cta },
+    { name: 'CTA Head MIP coronal (current/prior)', selector: 'miphead_cor', voi: WINDOW.cta },
+    { name: 'CTA Head MIP sagittal (current/prior)', selector: 'miphead_sag', voi: WINDOW.cta },
+    { name: 'CTA Carotid MIP coronal (current/prior)', selector: 'mipneck_cor', voi: WINDOW.cta },
+    { name: 'CTA Carotid MIP sagittal (current/prior)', selector: 'mipneck_sag', voi: WINDOW.cta },
+    { name: 'CTA Carotid MIP axial (current/prior)', selector: 'mipneck_ax', voi: WINDOW.cta },
     { name: 'CTA Head coronal (current/prior)', selector: 'corhead', voi: WINDOW.cta },
     { name: 'CTA Head sagittal (current/prior)', selector: 'saghead', voi: WINDOW.cta },
     { name: 'CTA Neck coronal (current/prior)', selector: 'corneck', voi: WINDOW.cta },
@@ -83,13 +104,17 @@ export const hpCompareCTA = buildCompareProtocol({
   // No prior (the usual stroke case): pageable 2-up current-only groups, by task.
   currentStages: [
     { name: 'CTA Source axial (head + neck)', selectors: ['axhead', 'axneck'], voi: WINDOW.cta },
-    { name: 'CTA MIP (head + carotid)', selectors: ['miphead', 'mipneck'], voi: WINDOW.cta },
+    { name: 'CTA Head MIP (ax + cor + sag)', selectors: ['miphead_ax', 'miphead_cor', 'miphead_sag'], voi: WINDOW.cta },
+    { name: 'CTA Carotid MIP (cor + sag)', selectors: ['mipneck_cor', 'mipneck_sag'], voi: WINDOW.cta },
+    // Axial head+carotid MIP pair — back-compat for vendors whose MIPs are axial only
+    // (auto-hangs when both axial MIPs exist; inert when a vendor has no axial neck MIP).
+    { name: 'CTA MIP axial (head + carotid)', selectors: ['miphead_ax', 'mipneck_ax'], voi: WINDOW.cta },
     { name: 'CTA CPR carotid (L + R)', selectors: ['cprlt', 'cprrt'], voi: WINDOW.cta },
     { name: 'CTA Head reformats (cor + sag)', selectors: ['corhead', 'saghead'], voi: WINDOW.cta },
     { name: 'CTA Neck reformats (cor + sag)', selectors: ['corneck', 'sagneck'], voi: WINDOW.cta },
   ],
   // Densest-fully-matched current-only fallback (below the group stages).
-  currentView: ['axhead', 'axneck', 'mipneck'],
+  currentView: ['axhead', 'miphead_ax', 'mipneck_cor'],
 });
 
 export default hpCompareCTA;

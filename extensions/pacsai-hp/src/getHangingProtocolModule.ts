@@ -7,6 +7,7 @@ import hpCompareCTHead from './protocols/hpCompareCTHead';
 import hpCompareCTNeck from './protocols/hpCompareCTNeck';
 import hpCompareCTA from './protocols/hpCompareCTA';
 import hpCompareCTAChest from './protocols/hpCompareCTAChest';
+import hpCompareCTPerfusion from './protocols/hpCompareCTPerfusion';
 import hpCompareMRBrain from './protocols/hpCompareMRBrain';
 
 const protocols = [
@@ -24,6 +25,8 @@ const protocols = [
   hpCompareCTA,
   // Chest CTA (PE): requires angio + chest, so it out-weights both compareCTChest and head/neck CTA.
   hpCompareCTAChest,
+  // CT perfusion (stroke): RAPID color maps; matches "perfusion"/"ctp", out-weights generic CT.
+  hpCompareCTPerfusion,
   hpCompareMRBrain,
 ];
 

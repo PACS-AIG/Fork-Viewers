@@ -56,6 +56,13 @@ type SelectorDef = {
   kernel?: 'soft' | 'lung' | 'bone';
   /** SeriesDescription must contain ANY of these (case-insensitive). Omit for "any image series". */
   keywords?: string[];
+  /**
+   * SeriesDescription must satisfy EVERY group — contain ANY term within each group
+   * (AND across groups, OR within a group). Use when a selector needs two independent
+   * tokens, e.g. a neck MIP = contains 'mip' AND ('neck' | 'carotid'). Each group adds
+   * its own required containsI rule. Combine freely with `keywords`/`excludeKeywords`.
+   */
+  keywordGroups?: string[][];
   /** SeriesDescription must NOT contain any of these (e.g. exclude FLAIR from a T2 selector). */
   excludeKeywords?: string[];
   /**
@@ -104,6 +111,15 @@ export type CompareConfig = {
   seriesFloor?: number;
   /** Exclude topogram/scout/localizer by description (default true). */
   excludeScouts?: boolean;
+  /**
+   * Exclude COLOR series (RGB/palette/YBR, via the `pacsaiColor` attribute) from
+   * the diagnostic role selectors, and soft-deprioritize them in the catch-all.
+   * For angio/perfusion studies this drops the RAPID/iSchemaView summary renders,
+   * perfusion parameter maps and 3D-spin volumes — derived overlays that aren't
+   * source/MIP series and also trip cornerstone's RGB render crash. Default false
+   * (grayscale-only modalities don't need it).
+   */
+  excludeColorSeries?: boolean;
   /**
    * Selector keys to tile in the current study when NO prior is available, most
    * important first (e.g. ['ax','cor','sag']). The builder emits descending-density
@@ -248,6 +264,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     matchWeight = 100,
     seriesFloor = 5,
     excludeScouts = true,
+    excludeColorSeries = false,
     currentView,
     currentStages,
     selectors,
@@ -305,6 +322,12 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       // (the `anyCurrent` safety selector keeps this soft so it can still show one).
       rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
     }
+    if (excludeColorSeries) {
+      // Required: derived COLOR series (RAPID renders, perfusion maps, 3D-spin) must
+      // never hang in a diagnostic stage. `pacsaiColor` is 'mono' unless positively
+      // RGB, so this only drops confirmed color series.
+      rules.push({ attribute: 'pacsaiColor', required: true, constraint: { equals: { value: 'mono' } } });
+    }
     if (sel.plane) {
       // Match the computed plane (orientation-based) rather than the description.
       rules.push({ attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: sel.plane } } });
@@ -325,6 +348,14 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     }
     if (sel.keywords?.length) {
       rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: sel.keywords } });
+    }
+    if (sel.keywordGroups?.length) {
+      // Each group is its own required containsI rule => AND across groups, OR within.
+      sel.keywordGroups.forEach(group => {
+        if (group.length) {
+          rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: group } });
+        }
+      });
     }
     if (sel.excludeKeywords?.length) {
       // Required: an excluded sequence (e.g. MIP for the source-axial selector,
@@ -357,6 +388,11 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       roleRule('current'),
       { attribute: 'numImageFrames', weight: 5, constraint: { greaterThan: { value: seriesFloor } } },
       { attribute: 'SeriesDescription', weight: 5, constraint: { doesNotContainI: SCOUT_WORDS } },
+      // Soft (not required): prefer a grayscale series over a derived color one as the
+      // last-resort hang, but still allow color if it is genuinely all that exists.
+      ...(excludeColorSeries
+        ? [{ attribute: 'pacsaiColor', weight: 5, constraint: { equals: { value: 'mono' } } }]
+        : []),
     ],
   };
 

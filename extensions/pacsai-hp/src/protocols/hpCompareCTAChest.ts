@@ -32,6 +32,9 @@ export const hpCompareCTAChest = buildCompareProtocol({
   bodyPartKeywords: ['chest', 'thorax', 'pulmonary'],
   requireKeywordGroups: [['angio', 'cta']],
   matchWeight: 150,
+  // Keep derived color series (3D-spin volumes, perfusion/render overlays) out of the
+  // diagnostic stages — also avoids the RGB thumbnail crash auto-hanging them.
+  excludeColorSeries: true,
   // No-prior multi-view fallback (below the group stages): soft/PE + lung + coronal.
   currentView: ['axsoft', 'axlung', 'cor'],
   selectors: [

@@ -17,6 +17,7 @@ import { patientInfoOverlayItems } from './overlays/patientInfoOverlayItems';
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
+import getImageColor from './utils/getImageColor';
 import { getStudyRole } from './priors/roleRegistry';
 import { getSpineRegion } from './priors/metadata';
 
@@ -31,6 +32,9 @@ export const KERNEL_ATTRIBUTE = 'pacsaiKernel';
 
 /** Custom HP attribute id: comparison role (current/prior/sibling). */
 export const ROLE_ATTRIBUTE = 'pacsaiRole';
+
+/** Custom HP attribute id: color class (rgb/mono), to exclude derived color series. */
+export const COLOR_ATTRIBUTE = 'pacsaiColor';
 
 /**
  * Custom HP attribute id: spine region + timepoint, e.g. `lumbar-session`,
@@ -86,6 +90,15 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       KERNEL_ATTRIBUTE,
       'Reconstruction kernel class (soft/bone)',
       getImageKernel
+    );
+
+    // Color class (rgb/mono) so diagnostic selectors can exclude derived color
+    // series — RAPID/iSchemaView summary renders, perfusion maps, 3D-spin volumes —
+    // which aren't source/MIP series and also trip cornerstone's RGB render crash.
+    hangingProtocolService?.addCustomAttribute?.(
+      COLOR_ATTRIBUTE,
+      'Color class (rgb/mono)',
+      getImageColor
     );
 
     // Comparison role (current/prior/sibling). Current is derived from the live

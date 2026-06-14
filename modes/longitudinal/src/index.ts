@@ -281,6 +281,7 @@ function modeFactory({ modeConfiguration }) {
       '@pacsai/compareMRSpine',
       '@pacsai/compareCTChest',
       '@pacsai/compareCTAChest',
+      '@pacsai/compareCTPerfusion',
       '@pacsai/compareCTA',
       '@pacsai/compareCTHead',
       '@pacsai/compareCTNeck',
