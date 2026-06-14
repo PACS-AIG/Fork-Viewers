@@ -83,6 +83,13 @@ class ImageOverlayViewerTool extends AnnotationDisplayTool {
     ImageOverlayViewerTool.addOverlayPlaneModule(imageId, overlayMetadata);
 
     this._getCachedStat(imageId, overlayMetadata, this.configuration.fillColor).then(cachedStat => {
+      // `_getCachedStat` resolves on a later microtask, by which point this viewport
+      // may have been torn down (a layout/stage change that disabled the element while
+      // overlays were still pending). Without a VTK renderer the worldToCanvas calls in
+      // `_renderOverlay` log "No renderer found for the viewport" — bail quietly instead.
+      if (typeof viewport.getRenderer === 'function' && !viewport.getRenderer()) {
+        return;
+      }
       cachedStat.overlays.forEach(overlay => {
         this._renderOverlay(enabledElement, svgDrawingHelper, overlay);
       });
