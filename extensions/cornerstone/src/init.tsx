@@ -27,6 +27,7 @@ import initCornerstoneTools from './initCornerstoneTools';
 import { connectToolsToMeasurementService } from './initMeasurementService';
 import initCineService from './initCineService';
 import initStudyPrefetcherService from './initStudyPrefetcherService';
+import initViewportPrefetch from './initViewportPrefetch';
 import interleaveCenterLoader from './utils/interleaveCenterLoader';
 import nthLoader from './utils/nthLoader';
 import interleaveTopToBottom from './utils/interleaveTopToBottom';
@@ -165,7 +166,11 @@ export default async function init({
   imageLoadPoolManager.maxNumRequests = {
     [RequestTypes.Interaction]: appConfig?.maxNumRequests?.interaction || 10,
     [RequestTypes.Thumbnail]: appConfig?.maxNumRequests?.thumbnail || 5,
-    [RequestTypes.Prefetch]: appConfig?.maxNumRequests?.prefetch || 5,
+    // Default raised from 5 -> 20: a multi-viewport compare (e.g. whole-spine)
+    // background-prefetches every visible stack at once (see initViewportPrefetch),
+    // and 5 global prefetch slots made that fill crawl. Interaction is a separate
+    // bucket, so a larger prefetch pool does not slow user scrolling.
+    [RequestTypes.Prefetch]: appConfig?.maxNumRequests?.prefetch || 20,
     [RequestTypes.Compute]: appConfig?.maxNumRequests?.compute || 10,
   };
 
@@ -176,6 +181,10 @@ export default async function init({
 
   initCineService(servicesManager);
   initStudyPrefetcherService(servicesManager);
+  // Background-load every visible viewport's full stack on each layout settle, so
+  // non-interacted viewports don't stall waiting for a scroll to drive cs3D's
+  // stackContextPrefetch.
+  initViewportPrefetch(servicesManager, extensionManager);
 
   // When a custom image load is performed, update the relevant viewports
   hangingProtocolService.subscribe(
