@@ -129,21 +129,33 @@ export function logPlannedStages(
     const en = stage?.stageActivation?.enabled?.minViewportsMatched ?? 1;
     const pa = stage?.stageActivation?.passive?.minViewportsMatched ?? 0;
     const vpMatches = (stage?.viewports ?? []).map((vp: any) => {
-      const id = vp?.displaySets?.[0]?.id;
+      const ds0 = vp?.displaySets?.[0];
+      const id = ds0?.id;
+      // Index-pinned panes (tiling stages) take the Nth ranked match — matched only
+      // when an Nth match exists, so the count mirrors the real engine's dedup.
+      const mdi = ds0?.matchedDisplaySetsIndex ?? 0;
       const matched = matchesForSelector(selectors[id], displaySets, activeStudyUID);
-      return { id, matched };
+      const isMatched = mdi > 0 ? matched.length > mdi : matched.length > 0;
+      return { id, mdi, matched, isMatched };
     });
-    const matchedCount = vpMatches.filter((v: any) => v.matched.length).length;
+    const matchedCount = vpMatches.filter((v: any) => v.isMatched).length;
     const status = matchedCount >= pa ? (matchedCount >= en ? 'ENABLED' : 'passive') : 'disabled';
     log(
       `  [${i}] ${stage?.id} "${stage?.name}" — ${matchedCount}/${stage?.viewports?.length} vp matched, en≥${en}/pa≥${pa} => ${status}`
     );
     vpMatches.forEach((v: any) => {
-      // First candidate (▶) is the likely pick; others are also-eligible.
-      const list = v.matched.length
-        ? v.matched.map((d: AnyDS, idx: number) => `${idx === 0 ? '▶ ' : '  '}${desc(d)}`).join('  |  ')
-        : '(none)';
-      log(`        ${v.id}: ${list}`);
+      const label = v.mdi ? `${v.id}[${v.mdi}]` : v.id;
+      let list: string;
+      if (!v.matched.length) {
+        list = '(none)';
+      } else if (v.mdi > 0) {
+        // Pinned pane: show just the single ranked pick (or none if out of range).
+        list = v.isMatched ? `▶ ${desc(v.matched[v.mdi])}` : '(none)';
+      } else {
+        // First candidate (▶) is the likely pick; others are also-eligible.
+        list = v.matched.map((d: AnyDS, idx: number) => `${idx === 0 ? '▶ ' : '  '}${desc(d)}`).join('  |  ');
+      }
+      log(`        ${label}: ${list}`);
     });
   });
 }

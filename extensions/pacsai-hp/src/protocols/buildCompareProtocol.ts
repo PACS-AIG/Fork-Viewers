@@ -138,6 +138,20 @@ export type CompareConfig = {
    * a single front-anchored stack that degrades by dropping panes.
    */
   currentStages?: Array<{ name: string; selectors: string[]; voi?: VOI }>;
+  /**
+   * Tile up to N of the CURRENT study's images side by side in one stage — for
+   * projection radiography (CR/DX), where a single "study" holds several distinct
+   * single-image views (ankle AP/Lat/Obl, chest PA/Lat, …) the radiologist reads
+   * together. Each pane takes the next-ranked match of the first selector via
+   * `matchedDisplaySetsIndex` (0..N-1), so it tiles WHATEVER views exist without
+   * hard-coding projection names (handles e.g. two obliques). Emits descending-
+   * density stages (N..2 panes; the 1-pane case is the existing current-only/safety),
+   * so the engine auto-picks the densest layout that fully fills — no empty panes.
+   * A study with more than N views shows the first N (cap is a readability choice).
+   * Placed after the current/prior compare (which leads when a prior exists) and
+   * before the 1-pane fallback. 4 lays out 2x2; 2–3 as a single row.
+   */
+  tileCurrentImages?: number;
   selectors: SelectorDef[];
   stages: StageDef[];
   /**
@@ -270,6 +284,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     excludeColorSeries = false,
     currentView,
     currentStages,
+    tileCurrentImages,
     selectors,
     stages,
     overview,
@@ -635,15 +650,47 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     });
   }
 
+  // Multi-view tiling of the current study (projection radiography): descending-
+  // density stages that tile N..2 of the current study's images by ranked index, so
+  // all projections of an exam (e.g. ankle AP/Lat/Obl) hang together. The engine
+  // auto-picks the densest stage that fully fills (minViewportsMatched = k). 4 lays
+  // out 2x2; 2-3 a single row. The 1-pane case falls through to the current-only/
+  // safety stages below.
+  const tileStages = [];
+  if (tileCurrentImages && tileCurrentImages >= 2) {
+    const tileSelectorId = `current-${selectors[0].key}`;
+    const gridFor = (k: number) => {
+      const rows = k >= 4 ? 2 : 1;
+      return { rows, columns: Math.ceil(k / rows) };
+    };
+    for (let k = tileCurrentImages; k >= 2; k--) {
+      tileStages.push({
+        id: `current-tile-${k}`,
+        name: 'Current (all views)',
+        stageActivation: {
+          enabled: { minViewportsMatched: k },
+          passive: { minViewportsMatched: k },
+        },
+        viewportStructure: { layoutType: 'grid', properties: gridFor(k) },
+        viewports: Array.from({ length: k }, (_, i) => ({
+          viewportOptions: compareViewportOptions,
+          displaySets: [{ id: tileSelectorId, matchedDisplaySetsIndex: i }],
+        })),
+      });
+    }
+  }
+
   // When per-region compare is configured it OWNS the comparison + per-region views,
   // so the generic current/prior and current-only stages are dropped (they assume a
   // single region and would mis-pair across regions). Otherwise keep them.
   const hasRegionCompare = regionCompareStages.length > 0;
   const comparisonStages = hasRegionCompare ? regionCompareStages : cpStages;
-  // No-prior path: pageable current-only groups first (auto-hang the first whose
-  // panes all match), then the descending currentView fallback. Region-compare
-  // protocols manage their own current-only views, so groups don't apply there.
-  const postCompareStages = hasRegionCompare ? [] : [...currentGroupStages, ...fallbackStages];
+  // No-prior path: pageable current-only groups, then multi-view tiling (projection
+  // radiography), then the descending currentView fallback. Region-compare protocols
+  // manage their own current-only views, so none of these apply there.
+  const postCompareStages = hasRegionCompare
+    ? []
+    : [...currentGroupStages, ...tileStages, ...fallbackStages];
 
   const protocolMatchingRules: Rule[] = [
     {
