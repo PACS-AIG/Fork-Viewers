@@ -213,7 +213,9 @@ const toolbarButtons: Button[] = [
       label: 'Previous Stage',
       tooltip: 'Previous hanging protocol stage',
       commands: 'previousStage',
-      evaluate: 'evaluate.action',
+      // Disabled when the active protocol has <= 1 reachable stage (e.g. no
+      // comparison protocol matched — US etc. — or a single-stage current view).
+      evaluate: 'evaluate.pacsai.multiStage',
     },
   },
   {
@@ -224,7 +226,9 @@ const toolbarButtons: Button[] = [
       label: 'Next Stage',
       tooltip: 'Next hanging protocol stage',
       commands: 'nextStage',
-      evaluate: 'evaluate.action',
+      // Disabled when the active protocol has <= 1 reachable stage (e.g. no
+      // comparison protocol matched — US etc. — or a single-stage current view).
+      evaluate: 'evaluate.pacsai.multiStage',
     },
   },
   {
