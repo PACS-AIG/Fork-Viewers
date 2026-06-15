@@ -66,6 +66,53 @@ function toStudyLike(qido: Record<string, unknown> = {}): StudyLike {
 const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log('[pacsai-hp]', ...args);
 
+/**
+ * DEBUG: dump one `series <ROLE> | …` line per active display set (role, name,
+ * frames, modality, plane, kernel, raw ConvolutionKernel, spine region, photometric,
+ * SamplesPerPixel, StudyDescription, IOP). Called for BOTH the re-hang path (with
+ * priors/siblings) and the no-prior/no-sibling early-return path, so any case —
+ * including a single study or a special-case protocol — is inspectable.
+ */
+function dumpSeries(
+  activeDisplaySets: any[],
+  currentStudyUID: string,
+  priorUIDs: string[],
+  logFn: (...args: unknown[]) => void
+): void {
+  const priorSet = new Set(priorUIDs);
+  activeDisplaySets.forEach((d: any) => {
+    const inst =
+      d?.instances?.[Math.floor((d?.instances?.length ?? 1) / 2)] ??
+      d?.instances?.[0] ??
+      d?.images?.[0] ??
+      d;
+    const iop = (inst?.ImageOrientationPatient ?? d?.ImageOrientationPatient) as
+      | number[]
+      | undefined;
+    const role =
+      d?.StudyInstanceUID === currentStudyUID
+        ? 'CUR'
+        : priorSet.has(d?.StudyInstanceUID)
+          ? 'PRI'
+          : 'SIB';
+    const iopStr = Array.isArray(iop) ? iop.map(n => Number(n).toFixed(3)).join(',') : 'none';
+    const studyDesc = inst?.StudyDescription ?? d?.StudyDescription ?? '';
+    const region = getSpineRegion(String(studyDesc));
+    const photometric = inst?.PhotometricInterpretation ?? d?.PhotometricInterpretation ?? '?';
+    const spp = inst?.SamplesPerPixel ?? d?.SamplesPerPixel ?? '?';
+    const rawKernel = inst?.ConvolutionKernel ?? d?.ConvolutionKernel ?? '?';
+    logFn(
+      `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
+        `mod=${d?.Modality} | unsupported=${!!d?.unsupported} | imageIds=${
+          d?.imageIds?.length ?? d?.images?.length ?? 0
+        } | plane=${getImagePlane(
+          d,
+          activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
+        )} | kernel=${getImageKernel(d)} | convKernel=${JSON.stringify(rawKernel)} | region=${region ?? '-'} | photometric=${photometric} | spp=${spp} | studyDesc="${studyDesc}" | IOP=[${iopStr}]`
+    );
+  });
+}
+
 export async function loadRelevantPriors({ servicesManager, extensionManager }: withAppTypes) {
   const { hangingProtocolService, displaySetService, customizationService, uiNotificationService } =
     servicesManager?.services ?? {};
@@ -273,9 +320,12 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
 
     if (!priorUIDs.length && !siblingUIDs.length) {
       // Nothing extra to load — the current-only fallback stage already hangs.
-      // Still dump the planned stages so the no-prior layout is inspectable.
+      // Still dump the current study's series + planned stages so a no-prior /
+      // no-sibling case (US, single study, special-case protocol) is inspectable.
       if (DEBUG) {
-        logPlannedStages(protocol, displaySetService.getActiveDisplaySets(), currentStudyUID, log);
+        const activeDisplaySets = displaySetService.getActiveDisplaySets();
+        dumpSeries(activeDisplaySets, currentStudyUID, priorUIDs, log);
+        logPlannedStages(protocol, activeDisplaySets, currentStudyUID, log);
       }
       return;
     }
@@ -314,46 +364,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       }
       const activeDisplaySets = displaySetService.getActiveDisplaySets();
       if (DEBUG) {
-        const priorSet = new Set(priorUIDs);
-        activeDisplaySets.forEach((d: any) => {
-          const inst = d?.instances?.[Math.floor((d?.instances?.length ?? 1) / 2)] ??
-            d?.instances?.[0] ?? d?.images?.[0] ?? d;
-          const iop = (inst?.ImageOrientationPatient ?? d?.ImageOrientationPatient) as
-            | number[]
-            | undefined;
-          const role =
-            d?.StudyInstanceUID === currentStudyUID
-              ? 'CUR'
-              : priorSet.has(d?.StudyInstanceUID)
-                ? 'PRI'
-                : 'SIB';
-          const iopStr = Array.isArray(iop)
-            ? iop.map(n => Number(n).toFixed(3)).join(',')
-            : 'none';
-          // StudyDescription/region drive the overview selectors — surface them so
-          // a missing StudyDescription (→ no region → no overview) is diagnosable.
-          const studyDesc = inst?.StudyDescription ?? d?.StudyDescription ?? '';
-          const region = getSpineRegion(String(studyDesc));
-          // Color/RGB series (SamplesPerPixel>1) are the ones that trip cornerstone's
-          // "size not a multiple of numberOfComponents" on thumbnail/viewport render.
-          const photometric =
-            inst?.PhotometricInterpretation ?? d?.PhotometricInterpretation ?? '?';
-          const spp = inst?.SamplesPerPixel ?? d?.SamplesPerPixel ?? '?';
-          // Raw ConvolutionKernel (0018,1210) so a kernel mis-classification is
-          // diagnosable: getImageKernel reads this tag first (numeric <55 => soft),
-          // and only falls back to a "BONE"/"SOFT" word in the description if it is
-          // absent — so a soft kernel tag overrides a "BONE" in the series name.
-          const rawKernel = inst?.ConvolutionKernel ?? d?.ConvolutionKernel ?? '?';
-          log(
-            `series ${role} | "${d?.SeriesDescription}" | n=${d?.numImageFrames} | ` +
-              `mod=${d?.Modality} | unsupported=${!!d?.unsupported} | imageIds=${
-                d?.imageIds?.length ?? d?.images?.length ?? 0
-              } | plane=${getImagePlane(
-                d,
-                activeDisplaySets.filter((s: any) => s?.StudyInstanceUID === d?.StudyInstanceUID)
-              )} | kernel=${getImageKernel(d)} | convKernel=${JSON.stringify(rawKernel)} | region=${region ?? '-'} | photometric=${photometric} | spp=${spp} | studyDesc="${studyDesc}" | IOP=[${iopStr}]`
-          );
-        });
+        dumpSeries(activeDisplaySets, currentStudyUID, priorUIDs, log);
         log('ordered studies for run()', [currentStudyUID, ...extraUIDs]);
       }
       hangingProtocolService.run(
