@@ -194,6 +194,12 @@ export type CompareConfig = {
       keywords?: string[];
       /** SeriesDescription must NOT contain any of these (e.g. exclude 'stir' from T2). */
       excludeKeywords?: string[];
+      /**
+       * Prefer (but do not require) a kernel class per region tile — keeps the survey
+       * consistent (e.g. spine CT: prefer the bone sagittal across C/T/L) while still
+       * tiling a region that only has another kernel.
+       */
+      preferKernel?: 'soft' | 'lung' | 'bone';
     }>;
   };
   /**
@@ -203,9 +209,11 @@ export type CompareConfig = {
    *     ITS OWN prior (via `pacsaiRegionTimepoint`). These are `enabled` ONLY when
    *     both session and prior match — i.e. only when a prior exists; with no prior
    *     they are `disabled` (skipped) so the region never renders an empty prior half.
-   *   - a current-only multi-plane stage tiling every view's session pane side by
-   *     side (e.g. sag | ax | cor). This leads the region when no prior exists and
-   *     stays reachable as a current-only glance when a prior does.
+   *   - the current-only multi-plane stage(s) tiling every view's session pane side
+   *     by side (e.g. sag | ax | cor). This leads the region when no prior exists and
+   *     stays reachable as a current-only glance when a prior does. With `kernels`
+   *     set, this becomes ONE stage per kernel (e.g. spine: a bone sag/ax/cor 3-up
+   *     that leads, then a soft sag/ax/cor 3-up), so both reconstructions are shown.
    * Reuses `overview.regions`. When set, it REPLACES the generic current/prior +
    * current-only stages for this protocol (those assume a single region and would
    * mis-pair across regions).
@@ -227,6 +235,15 @@ export type CompareConfig = {
       keywords?: string[];
       excludeKeywords?: string[];
     }>;
+    /**
+     * Optional kernel variants for the per-region current-only multi-plane stage.
+     * When set, that single `rc-{region}-all` stage becomes one stage PER kernel, in
+     * order — e.g. spine CT: `[{key:'bone',kernel:'bone'},{key:'soft',kernel:'soft'}]`
+     * yields a bone sag/ax/cor 3-up (leads) then a soft sag/ax/cor 3-up, so the
+     * radiologist sees both reconstructions instead of one arbitrary kernel per plane.
+     * Each variant requires its kernel (a region lacking it just skips that variant).
+     */
+    kernels?: Array<{ key: string; label?: string; kernel: 'soft' | 'lung' | 'bone' }>;
   };
   /**
    * Custom attribute that yields `<region>-<timepoint>` for region-addressable
@@ -313,7 +330,9 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     timepoint: 'session' | 'prior',
     plane: string,
     keywords?: string[],
-    excludeKeywords?: string[]
+    excludeKeywords?: string[],
+    kernel?: 'soft' | 'lung' | 'bone',
+    preferKernel?: 'soft' | 'lung' | 'bone'
   ): Rule[] => {
     const rules: Rule[] = [
       {
@@ -323,6 +342,15 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       },
       { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: plane } } },
     ];
+    if (kernel) {
+      // Required: restricts a per-kernel variant stage to that recon (e.g. spine bone vs soft).
+      rules.push({ attribute: 'pacsaiKernel', required: true, constraint: { equals: { value: kernel } } });
+    }
+    if (preferKernel) {
+      // Weighted, NOT required: prefers this kernel (e.g. bone for the spine survey)
+      // but still matches another so a region lacking it still tiles.
+      rules.push({ attribute: 'pacsaiKernel', weight: 10, constraint: { equals: { value: preferKernel } } });
+    }
     if (excludeScouts) {
       rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
     }
@@ -437,7 +465,15 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     overviewRegions.forEach(r => {
       displaySetSelectors[`overview-${view.key}-${r.key}`] = {
         studyMatchingRules: [],
-        seriesMatchingRules: regionViewRules(r.region, 'session', plane, view.keywords, view.excludeKeywords),
+        seriesMatchingRules: regionViewRules(
+          r.region,
+          'session',
+          plane,
+          view.keywords,
+          view.excludeKeywords,
+          undefined,
+          view.preferKernel
+        ),
       };
     });
   });
@@ -446,6 +482,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // region-addressable via `pacsaiRegionTimepoint` so each region pairs with ITS OWN
   // prior (not another region's).
   const regionCompareViews = regionCompare?.views ?? [];
+  const regionCompareKernels = regionCompare?.kernels ?? [];
   regionCompareViews.forEach(view => {
     const plane = view.plane ?? 'axial';
     regionCompareRegions.forEach(r => {
@@ -453,6 +490,21 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
         displaySetSelectors[`rc-${view.key}-${r.key}-${tp}`] = {
           studyMatchingRules: [],
           seriesMatchingRules: regionViewRules(r.region, tp, plane, view.keywords, view.excludeKeywords),
+        };
+      });
+      // Kernel-restricted SESSION selectors for the per-kernel current-only stages
+      // (e.g. spine bone vs soft) — region + plane + kernel, current session only.
+      regionCompareKernels.forEach(k => {
+        displaySetSelectors[`rc-${view.key}-${r.key}-session-${k.key}`] = {
+          studyMatchingRules: [],
+          seriesMatchingRules: regionViewRules(
+            r.region,
+            'session',
+            plane,
+            view.keywords,
+            view.excludeKeywords,
+            k.kernel
+          ),
         };
       });
     });
@@ -641,24 +693,36 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
           ],
         });
       });
-      // Current-only multi-plane stage for this region. Plain (no cross-study scroll
-      // sync): the panes are different planes of the same study, so there is nothing
-      // to relative-sync. Absent planes render empty via allowUnmatchedView.
-      regionCompareStages.push({
-        id: `rc-${r.key}-all`,
-        name: regionLabel,
-        stageActivation: {
-          enabled: { minViewportsMatched: 1 },
-          passive: { minViewportsMatched: 1 },
-        },
-        viewportStructure: {
-          layoutType: 'grid',
-          properties: { rows: 1, columns: regionCompareViews.length },
-        },
-        viewports: regionCompareViews.map(view => ({
-          viewportOptions: compareViewportOptions,
-          displaySets: [{ id: `rc-${view.key}-${r.key}-session` }],
-        })),
+      // Current-only multi-plane stage(s) for this region. Plain (no cross-study
+      // scroll sync): the panes are different planes of the same study, so there is
+      // nothing to relative-sync. Absent planes render empty via allowUnmatchedView.
+      // With `kernels` set, emit one variant per kernel (e.g. spine: bone 3-up leads,
+      // soft 3-up next) using the kernel-restricted session selectors; otherwise a
+      // single kernel-agnostic 3-up.
+      const allVariants = regionCompareKernels.length
+        ? regionCompareKernels.map(k => ({
+            id: `rc-${r.key}-all-${k.key}`,
+            name: `${regionLabel} (${k.label ?? k.key})`,
+            selectorSuffix: `-${k.key}`,
+          }))
+        : [{ id: `rc-${r.key}-all`, name: regionLabel, selectorSuffix: '' }];
+      allVariants.forEach(variant => {
+        regionCompareStages.push({
+          id: variant.id,
+          name: variant.name,
+          stageActivation: {
+            enabled: { minViewportsMatched: 1 },
+            passive: { minViewportsMatched: 1 },
+          },
+          viewportStructure: {
+            layoutType: 'grid',
+            properties: { rows: 1, columns: regionCompareViews.length },
+          },
+          viewports: regionCompareViews.map(view => ({
+            viewportOptions: compareViewportOptions,
+            displaySets: [{ id: `rc-${view.key}-${r.key}-session${variant.selectorSuffix}` }],
+          })),
+        });
       });
     });
   }

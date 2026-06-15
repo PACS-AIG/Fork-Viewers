@@ -34,9 +34,11 @@ const spineMRSagViews = [
   { key: 't1post', name: 'Whole spine T1 sag +C', plane: 'sagittal' as const, keywords: ['post'] },
 ];
 
-// CT has no T2/STIR/T1 — a single sagittal (bone/soft reformat) whole-spine view.
+// CT has no T2/STIR/T1 — a single sagittal whole-spine view. Prefer the bone recon
+// (the spine survey workhorse) so the C/T/L tile is consistent, falling back to soft
+// for any region that lacks a bone sagittal.
 const spineCTSagViews = [
-  { key: 'sag', name: 'Whole spine (sagittal)', plane: 'sagittal' as const },
+  { key: 'sag', name: 'Whole spine (sagittal)', plane: 'sagittal' as const, preferKernel: 'bone' as const },
 ];
 
 // Per-region AXIAL views (axials aren't tiled across regions; they're compared
@@ -77,7 +79,16 @@ export const hpCompareCTSpine = buildCompareProtocol({
   selectors: PLANE_SELECTORS,
   stages: spineStages,
   overview: { regions: spineOverviewRegions, views: spineCTSagViews },
-  regionCompare: { views: spineCTCompareViews },
+  // Spine CT is read on both the bone algorithm (osseous detail) and a soft recon.
+  // Show each region's current-only review as a bone sag/ax/cor 3-up (leads) then a
+  // soft sag/ax/cor 3-up, instead of one arbitrary kernel per plane.
+  regionCompare: {
+    views: spineCTCompareViews,
+    kernels: [
+      { key: 'bone', label: 'bone', kernel: 'bone' },
+      { key: 'soft', label: 'soft', kernel: 'soft' },
+    ],
+  },
 });
 
 export const hpCompareMRSpine = buildCompareProtocol({
