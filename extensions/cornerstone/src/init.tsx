@@ -28,6 +28,7 @@ import { connectToolsToMeasurementService } from './initMeasurementService';
 import initCineService from './initCineService';
 import initStudyPrefetcherService from './initStudyPrefetcherService';
 import initViewportPrefetch from './initViewportPrefetch';
+import initImageRetry from './initImageRetry';
 import interleaveCenterLoader from './utils/interleaveCenterLoader';
 import nthLoader from './utils/nthLoader';
 import interleaveTopToBottom from './utils/interleaveTopToBottom';
@@ -185,6 +186,9 @@ export default async function init({
   // non-interacted viewports don't stall waiting for a scroll to drive cs3D's
   // stackContextPrefetch.
   initViewportPrefetch(servicesManager, extensionManager);
+  // Auto-retry transient (connection-reset / timeout / 5xx) image-load failures so a
+  // flaky connection doesn't permanently strand the last slice(s) of a stack.
+  initImageRetry();
 
   // When a custom image load is performed, update the relevant viewports
   hangingProtocolService.subscribe(
@@ -241,7 +245,15 @@ export default async function init({
    */
   const imageLoadFailedHandler = ({ detail }) => {
     const handler = errorHandler.getHTTPErrorHandler();
-    handler(detail.error);
+    // Guarded: the deployment's HTTP error handler (app-config.js) destructures the
+    // xhr off the error, which is undefined on a connection reset — without this it
+    // throws on every transient failure and spams the console. Retrying is handled
+    // separately by initImageRetry; this call is only for the deployment's logging.
+    try {
+      handler(detail.error);
+    } catch (e) {
+      console.debug('[pacsai] HTTP error handler threw on image load failure', e);
+    }
   };
 
   eventTarget.addEventListener(EVENTS.IMAGE_LOAD_FAILED, imageLoadFailedHandler);
