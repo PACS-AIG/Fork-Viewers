@@ -42,21 +42,35 @@ export const hpCompareCTARunoff = buildCompareProtocol({
     { key: 'sag', plane: 'sagittal', excludeKeywords: [...NOT_DIAGNOSTIC, 'mip'] },
     // Thin axial source — cross-sectional lumen / mural calcium.
     { key: 'ax', plane: 'axial', excludeKeywords: [...NOT_DIAGNOSTIC, 'mip'] },
-    // Thick-slab MIP (any plane; this vendor emits an axial 10x5 MIP).
-    { key: 'mip', keywords: ['mip'], excludeKeywords: NOT_DIAGNOSTIC },
+    // Thick-slab MIP, split by plane: the CORONAL MIP is the classic whole-tree runoff
+    // overview. Some vendors emit only an axial MIP, so keep an axial MIP view too.
+    { key: 'mipcor', plane: 'coronal', keywords: ['mip'], excludeKeywords: NOT_DIAGNOSTIC },
+    { key: 'mipsag', plane: 'sagittal', keywords: ['mip'], excludeKeywords: NOT_DIAGNOSTIC },
+    { key: 'mipax', plane: 'axial', keywords: ['mip'], excludeKeywords: NOT_DIAGNOSTIC },
   ],
   // Current vs prior (per view) — lead when a prior exists.
   stages: [
     { name: 'Runoff coronal (current/prior)', selector: 'cor', voi: WINDOW.cta },
+    { name: 'Runoff coronal MIP (current/prior)', selector: 'mipcor', voi: WINDOW.cta },
     { name: 'Runoff sagittal (current/prior)', selector: 'sag', voi: WINDOW.cta },
     { name: 'Runoff axial source (current/prior)', selector: 'ax', voi: WINDOW.cta },
-    { name: 'Runoff MIP (current/prior)', selector: 'mip', voi: WINDOW.cta },
+    { name: 'Runoff axial MIP (current/prior)', selector: 'mipax', voi: WINDOW.cta },
   ],
-  // No prior: pageable task groups. The cor+sag reformats are group 0 (default hang).
+  // No prior: pageable task groups. A selector repeated twice tiles both per-leg series
+  // (bilateral runoff). Order leads with the bilateral coronal reformats when present,
+  // then falls back to coronal+sagittal (unilateral), the MIPs, and the axial source.
   currentStages: [
+    // Bilateral: the two per-leg oblique coronal reformats side by side.
+    { name: 'Runoff coronal — both legs', selectors: ['cor', 'cor'], voi: WINDOW.cta },
+    // Bilateral coronal MIP (whole arterial tree, per leg).
+    { name: 'Runoff coronal MIP — both legs', selectors: ['mipcor', 'mipcor'], voi: WINDOW.cta },
+    // Unilateral-friendly: coronal + sagittal reformat.
     { name: 'Runoff reformats (cor + sag)', selectors: ['cor', 'sag'], voi: WINDOW.cta },
+    // Coronal reformat beside its coronal MIP.
+    { name: 'Runoff coronal (reformat + MIP)', selectors: ['cor', 'mipcor'], voi: WINDOW.cta },
+    // Axial source beside the axial MIP (vendors whose only MIP is axial).
+    { name: 'Runoff axial (source + MIP)', selectors: ['ax', 'mipax'], voi: WINDOW.cta },
     { name: 'Runoff axial source', selectors: ['ax'], voi: WINDOW.cta },
-    { name: 'Runoff MIP', selectors: ['mip'], voi: WINDOW.cta },
   ],
   currentView: ['cor', 'sag', 'ax'],
 });

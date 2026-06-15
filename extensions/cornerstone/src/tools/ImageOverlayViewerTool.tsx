@@ -141,7 +141,12 @@ class ImageOverlayViewerTool extends AnnotationDisplayTool {
       isNaN(attributes.x) ||
       isNaN(attributes.y) ||
       isNaN(attributes.width) ||
-      isNaN(attributes.height)
+      isNaN(attributes.height) ||
+      // An oblique reformat can map the overlay's top-left/bottom-right corners such
+      // that bottom-right < top-left, yielding a negative width/height — an invalid
+      // SVG <image> attribute. Bail rather than throw (the overlay can't be placed).
+      attributes.width <= 0 ||
+      attributes.height <= 0
     ) {
       console.warn('Invalid rendering attribute for image overlay', attributes['data-id']);
       return false;

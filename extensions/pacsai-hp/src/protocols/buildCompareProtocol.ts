@@ -514,17 +514,27 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // sequence) so the axial pair scrolls together but the "Current (3 planes)"
   // fallback doesn't cross-sync different planes. `imageslice` syncs the scrolled
   // slice and works across studies (different frames of reference).
-  const viewport = (role: Role, selectorKey: string, voi?: VOI) => ({
+  // `index` (matchedDisplaySetsIndex) selects the Nth-ranked match of the selector —
+  // used to tile several series of ONE selector side by side (e.g. the two per-leg
+  // coronal reformats of a bilateral runoff). Default 0 = the best match.
+  const viewport = (role: Role, selectorKey: string, voi?: VOI, index = 0) => ({
     viewportOptions: {
       ...compareViewportOptions,
       syncGroups: [
         // Cross-study relative scroll sync (registered by the extension as
         // 'pacsaiscroll'); the built-in 'imageslice' sync is position-based and
-        // does not work across different studies / frames of reference.
-        { type: 'pacsaiscroll', id: `${id}-scroll-${selectorKey}`, source: true, target: true },
+        // does not work across different studies / frames of reference. Scoped per
+        // (selector, index) so tiled panes of one selector don't cross-sync.
+        { type: 'pacsaiscroll', id: `${id}-scroll-${selectorKey}-${index}`, source: true, target: true },
       ],
     },
-    displaySets: [{ id: `${role}-${selectorKey}`, ...(voi ? { options: { voi } } : {}) }],
+    displaySets: [
+      {
+        id: `${role}-${selectorKey}`,
+        ...(index ? { matchedDisplaySetsIndex: index } : {}),
+        ...(voi ? { options: { voi } } : {}),
+      },
+    ],
   });
 
   // Current|prior stages — require BOTH current and prior matched (enabled and
@@ -579,13 +589,16 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // match (enabled minViewportsMatched = N, so an auto-hang never shows an empty
   // pane); still manually reachable when at least one matches (passive = 1). These
   // sit AFTER the current/prior stages (which lead when a prior exists) and BEFORE
-  // the descending currentView fallback.
+  // the descending currentView fallback. A selector listed MORE THAN ONCE tiles its
+  // 1st, 2nd, … ranked matches (matchedDisplaySetsIndex), e.g. ['cor','cor'] shows
+  // the two per-leg coronal reformats of a bilateral runoff side by side.
   const currentGroupStages = (currentStages ?? [])
     .map((cs, i) => {
       const keys = cs.selectors.filter(key => selectors.some(s => s.key === key));
       if (!keys.length) {
         return null;
       }
+      const keyIndex: Record<string, number> = {};
       return {
         id: `current-group-${i}`,
         name: cs.name,
@@ -594,7 +607,11 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
           passive: { minViewportsMatched: 1 },
         },
         viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: keys.length } },
-        viewports: keys.map(key => viewport('current', key, cs.voi ?? voiBySelector.get(key))),
+        viewports: keys.map(key => {
+          const index = keyIndex[key] ?? 0;
+          keyIndex[key] = index + 1;
+          return viewport('current', key, cs.voi ?? voiBySelector.get(key), index);
+        }),
       };
     })
     .filter(Boolean);
