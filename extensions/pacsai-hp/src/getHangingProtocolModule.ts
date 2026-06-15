@@ -9,6 +9,7 @@ import hpCompareCTA from './protocols/hpCompareCTA';
 import hpCompareCTAChest from './protocols/hpCompareCTAChest';
 import hpCompareCTPerfusion from './protocols/hpCompareCTPerfusion';
 import hpCompareMRBrain from './protocols/hpCompareMRBrain';
+import hpCompareMRAbdomen from './protocols/hpCompareMRAbdomen';
 
 const protocols = [
   // Generic per-modality (lower weight, fallbacks for their modality)
@@ -28,6 +29,8 @@ const protocols = [
   // CT perfusion (stroke): RAPID color maps; matches "perfusion"/"ctp", out-weights generic CT.
   hpCompareCTPerfusion,
   hpCompareMRBrain,
+  // MR abdomen / MRCP: sequence-based (T2 / T1 Dixon / DWI / MRCP), out-weights generic MR.
+  hpCompareMRAbdomen,
 ];
 
 function getHangingProtocolModule() {
