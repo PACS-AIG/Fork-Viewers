@@ -282,6 +282,7 @@ function modeFactory({ modeConfiguration }) {
       '@pacsai/compareCTChest',
       '@pacsai/compareCTAChest',
       '@pacsai/compareCTARunoff',
+      '@pacsai/compareCTAAbdPelvis',
       '@pacsai/compareCTPerfusion',
       '@pacsai/compareCTA',
       '@pacsai/compareCTHead',

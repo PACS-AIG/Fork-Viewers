@@ -31,6 +31,11 @@ export const hpCompareCTAChest = buildCompareProtocol({
   // chest angio — not plain chest CT (compareCTChest) nor head/neck angio (compareCTA).
   bodyPartKeywords: ['chest', 'thorax', 'pulmonary'],
   requireKeywordGroups: [['angio', 'cta']],
+  // A combined chest/abdomen/pelvis or thoracic-aorta CTA is an aortic study read
+  // (arterial axial + cor/sag reformats), not a PE study — route it to
+  // compareCTAAbdPelvis instead of hanging the PE lung/soft layout here. A pure
+  // "CTA CHEST" PE study has none of these tokens and still matches.
+  bodyPartExcludeKeywords: ['abdomen', 'pelvis', 'aorta', 'aortic'],
   matchWeight: 150,
   // Keep derived color series (3D-spin volumes, perfusion/render overlays) out of the
   // diagnostic stages — also avoids the RGB thumbnail crash auto-hanging them.

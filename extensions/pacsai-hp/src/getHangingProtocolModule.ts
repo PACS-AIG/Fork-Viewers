@@ -9,6 +9,7 @@ import hpCompareCTSkullBase from './protocols/hpCompareCTSkullBase';
 import hpCompareCTA from './protocols/hpCompareCTA';
 import hpCompareCTAChest from './protocols/hpCompareCTAChest';
 import hpCompareCTARunoff from './protocols/hpCompareCTARunoff';
+import hpCompareCTAAbdPelvis from './protocols/hpCompareCTAAbdPelvis';
 import hpCompareCTPerfusion from './protocols/hpCompareCTPerfusion';
 import hpCompareMRBrain from './protocols/hpCompareMRBrain';
 import hpCompareMRAbdomen from './protocols/hpCompareMRAbdomen';
@@ -33,6 +34,9 @@ const protocols = [
   hpCompareCTAChest,
   // Extremity / peripheral runoff CTA: requires angio + extremity/runoff, out-weights head/neck CTA.
   hpCompareCTARunoff,
+  // Aorta / abdomen / pelvis (body) CTA: requires angio + aorta/abdomen/pelvis (runoff excluded);
+  // carved out of compareCTAChest so a chest/abd/pelvis or thoracic-aorta CTA reads as aortic, not PE.
+  hpCompareCTAAbdPelvis,
   // CT perfusion (stroke): RAPID color maps; matches "perfusion"/"ctp", out-weights generic CT.
   hpCompareCTPerfusion,
   hpCompareMRBrain,
