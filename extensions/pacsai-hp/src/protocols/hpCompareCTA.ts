@@ -29,9 +29,25 @@ import buildCompareProtocol, { WINDOW } from './buildCompareProtocol';
 const CTA_KEYWORDS = ['angio', 'cta'];
 
 // Body regions that are angio studies but NOT head/neck — carved out so they don't
-// mis-hang on this protocol's head/neck selectors. A chest CTA (PE) instead routes to
-// compareCTAChest; the rest (abdominal/thoracic-aorta/runoff CTA) fall to generic CT.
-const NOT_HEAD_NECK = ['chest', 'thorax', 'pulmonary', 'abdomen', 'pelvis', 'aorta', 'runoff'];
+// mis-hang on this protocol's head/neck selectors. A chest CTA (PE) routes to
+// compareCTAChest; a peripheral/extremity runoff routes to compareCTARunoff; the rest
+// (abdominal / thoracic-aorta CTA) fall to generic CT. NOTE: matching is on the STUDY
+// description, so include the body-region words that appear there ("lower extremity",
+// not the series-level "runoff").
+const NOT_HEAD_NECK = [
+  'chest',
+  'thorax',
+  'pulmonary',
+  'abdomen',
+  'pelvis',
+  'aorta',
+  'runoff',
+  'extremity',
+  'leg',
+  'femoral',
+  'popliteal',
+  'peripheral',
+];
 
 // Non-diagnostic / derived series kept out of the tiled stages. NOTE: 'cpr' is NOT
 // here — curved-planar carotid reformats are diagnostic (carotid stenosis) and get
