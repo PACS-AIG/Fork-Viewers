@@ -5,6 +5,7 @@ import { hpCompareCTSpine, hpCompareMRSpine } from './protocols/hpCompareSpine';
 import hpCompareCTChest from './protocols/hpCompareCTChest';
 import hpCompareCTHead from './protocols/hpCompareCTHead';
 import hpCompareCTNeck from './protocols/hpCompareCTNeck';
+import hpCompareCTSkullBase from './protocols/hpCompareCTSkullBase';
 import hpCompareCTA from './protocols/hpCompareCTA';
 import hpCompareCTAChest from './protocols/hpCompareCTAChest';
 import hpCompareCTARunoff from './protocols/hpCompareCTARunoff';
@@ -23,6 +24,9 @@ const protocols = [
   hpCompareCTChest,
   hpCompareCTHead,
   hpCompareCTNeck,
+  // Skull base / temporal bone / orbit / facial bones / sinus: bone+soft kernel in
+  // ax/cor/sag. Matches fossa/sella/iac/orbit/temporal/facial/sinus, out-weights generic CT.
+  hpCompareCTSkullBase,
   // CTA (head/neck) out-weights compareCTHead/compareCTNeck for angio studies (all match "head"/"neck").
   hpCompareCTA,
   // Chest CTA (PE): requires angio + chest, so it out-weights both compareCTChest and head/neck CTA.
