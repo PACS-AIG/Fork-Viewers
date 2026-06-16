@@ -34,9 +34,16 @@ function PanelStudyBrowser({
   const [{ activeViewportId, viewports, isHangingProtocolLayout }, viewportGridService] =
     useViewportGrid();
   const [activeTabName, setActiveTabName] = useState('all');
-  const [expandedStudyInstanceUIDs, setExpandedStudyInstanceUIDs] = useState([
-    ...StudyInstanceUIDs,
-  ]);
+  // Expand only the primary/opened study by default. Expanding EVERY study in a
+  // multi-study session (e.g. a whole-spine C/T/L set, or a patient with several
+  // same-session CTs) mounts all of their thumbnail lists at once; as the hanging
+  // protocol loads and each list's displaySets stream in, the panel's content height
+  // keeps growing and it visibly scrolls/jumps on its own. Showing just the primary
+  // study (siblings are one click away) avoids that load-time reflow. Panel expansion
+  // is independent of the hanging protocol — the viewports hang the same either way.
+  const [expandedStudyInstanceUIDs, setExpandedStudyInstanceUIDs] = useState(() =>
+    StudyInstanceUIDs.slice(0, 1)
+  );
   const [hasLoadedViewports, setHasLoadedViewports] = useState(false);
   const [studyDisplayList, setStudyDisplayList] = useState([]);
   const [displaySets, setDisplaySets] = useState([]);
