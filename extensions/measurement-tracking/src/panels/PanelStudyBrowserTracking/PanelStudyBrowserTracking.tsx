@@ -60,9 +60,12 @@ export default function PanelStudyBrowserTracking({
   const [trackedMeasurements, sendTrackedMeasurementsEvent] = useTrackedMeasurements();
 
   const [activeTabName, setActiveTabName] = useState(studyMode);
-  const [expandedStudyInstanceUIDs, setExpandedStudyInstanceUIDs] = useState([
-    ...StudyInstanceUIDs,
-  ]);
+  // Expand only the primary/opened study by default. Expanding every study in a
+  // multi-study session mounts all their thumbnail lists at once, which reflows the
+  // panel as displaySets stream in. Siblings/priors are one click away.
+  const [expandedStudyInstanceUIDs, setExpandedStudyInstanceUIDs] = useState(() =>
+    StudyInstanceUIDs.slice(0, 1)
+  );
   const [studyDisplayList, setStudyDisplayList] = useState([]);
   const [hasLoadedViewports, setHasLoadedViewports] = useState(false);
   const [displaySets, setDisplaySets] = useState([]);

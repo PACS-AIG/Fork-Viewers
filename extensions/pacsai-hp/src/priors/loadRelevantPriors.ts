@@ -344,9 +344,16 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     // (short-circuits if already loaded). Awaiting the current study makes it
     // matchable deterministically — without this it can still be a half-loaded
     // "shell" when we re-hang, which is what the poll below otherwise waits out.
+    // madeInClient = FALSE: the studies are still created (makeDisplaySets runs
+    // regardless), but the DISPLAY_SETS_ADDED event is NOT flagged client-initiated.
+    // With `true`, the tracked study-browser panel treats each loaded study as a
+    // user "jump-to" — it scrolls the panel to that study's thumbnail AND auto-expands
+    // its accordion. Loading the current + priors + sibling regions then made the
+    // panel scroll by itself and pop every accordion open right after the hang. This
+    // is background loading, not a user action, so it must not drive the panel.
     await Promise.all(
       [currentStudyUID, ...extraUIDs].map(uid =>
-        requestDisplaySetCreationForStudy(dataSource, displaySetService, uid, true)
+        requestDisplaySetCreationForStudy(dataSource, displaySetService, uid, false)
       )
     );
 
