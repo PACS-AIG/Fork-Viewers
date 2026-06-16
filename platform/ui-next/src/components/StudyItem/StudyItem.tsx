@@ -28,11 +28,14 @@ const StudyItem = ({
     <Accordion
       type="single"
       collapsible
-      onClick={onClick}
-      onKeyDown={() => {}}
-      role="button"
-      tabIndex={0}
-      defaultValue={isActive ? 'study-item' : undefined}
+      // Controlled by `isExpanded` (the panel's single source of truth). Previously the
+      // radix accordion kept its OWN open/closed state (seeded once via defaultValue)
+      // WHILE the app also toggled expansion through the root onClick -> onClickStudy.
+      // Two independent state machines for one accordion drifted out of sync, so a
+      // study would expand then immediately collapse, with every-other-click going
+      // dead. Driving radix from `value`/`onValueChange` keeps a single source of truth.
+      value={isExpanded ? 'study-item' : ''}
+      onValueChange={() => onClick()}
     >
       <AccordionItem value="study-item">
         <AccordionTrigger className={classnames('hover:bg-accent bg-popover group w-full rounded')}>
