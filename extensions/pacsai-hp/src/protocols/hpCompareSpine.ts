@@ -88,6 +88,11 @@ export const hpCompareCTSpine = buildCompareProtocol({
       { key: 'bone', label: 'bone', kernel: 'bone' },
       { key: 'soft', label: 'soft', kernel: 'soft' },
     ],
+    // sag/ax/cor with the coronal LAST: spine curved-coronal reformats are bone-only,
+    // so the soft 3-up has no coronal — descending one level lets it fall to a clean
+    // sag+ax 2-up instead of showing an empty coronal pane (the bone 3-up still leads
+    // with all three). Same mechanism as the MR per-region glance.
+    allViews: ['sag', 'ax', 'cor'],
   },
 });
 

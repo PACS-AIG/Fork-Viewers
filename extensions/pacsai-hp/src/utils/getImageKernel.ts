@@ -39,6 +39,27 @@ const BONE_KEYWORDS = /\b(bone|boneplus|sharp|edge|detail)\b/i;
 const SOFT_KEYWORDS = /\b(soft|standard|smooth|brain|stnd|sft)\b/i;
 // Kernel sharpness number at/above which we consider it a sharp (lung/bone) kernel.
 const SHARP_NUMBER_THRESHOLD = 55;
+// A Siemens-style kernel code embedded in free text: 1-3 letters immediately
+// followed by 2-3 digits and an optional trailing letter (e.g. Br60, Bl64f, Hr40s,
+// Tr20). Anchored to a letter prefix so it never matches a slice-thickness token
+// ("2.00") or an instance count.
+const KERNEL_CODE = /\b[A-Za-z]{1,3}(\d{2,3})[a-z]?\b/g;
+
+// Highest kernel-code sharpness number found in the description, or undefined. Used
+// only as a fallback when the ConvolutionKernel tag is absent — MPR / curved
+// reformats frequently drop the tag but keep the code in the description (e.g.
+// "...CURVED COR 2.00 Br60"). Takes the max so a leading vertebral-level token
+// ("T12 ... Br60") doesn't mask the real kernel code.
+function descriptionKernelNumber(description: string): number | undefined {
+  let max: number | undefined;
+  for (const m of description.matchAll(KERNEL_CODE)) {
+    const n = Number(m[1]);
+    if (max === undefined || n > max) {
+      max = n;
+    }
+  }
+  return max;
+}
 
 function classify(kernel: unknown, description: string): KernelInfo {
   const kernelStr = String(Array.isArray(kernel) ? kernel.join(' ') : (kernel ?? '')).trim();
@@ -76,7 +97,16 @@ function classify(kernel: unknown, description: string): KernelInfo {
   // as bone. Mirrors getImagePlane trusting the description's plane word. We keep the
   // bone classification but flag the conflict (overlay shows a warning marker) when
   // the kernel tag actually indicated soft, so the reader knows.
-  if (BONE_KEYWORDS.test(description)) {
+  //
+  // ALSO: when the ConvolutionKernel tag is ABSENT (fromKernel undefined — common on
+  // MPR / curved-coronal reformats), read a sharp kernel code straight from the
+  // description (e.g. "...CURVED COR 2.00 Br60" -> 60 >= threshold) so the reformat is
+  // classified bone like its source instead of silently defaulting to soft. Only when
+  // there's no tag signal, so a present tag stays authoritative.
+  const sharpCodeInDesc =
+    fromKernel === undefined &&
+    (descriptionKernelNumber(description) ?? 0) >= SHARP_NUMBER_THRESHOLD;
+  if (BONE_KEYWORDS.test(description) || sharpCodeInDesc) {
     return { kernel: 'bone', fromKernel, convKernel, labelConflict: fromKernel === 'soft' };
   }
   // Else use the kernel tag's soft signal, defaulting to soft when unknown.
