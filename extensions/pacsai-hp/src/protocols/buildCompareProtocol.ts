@@ -244,6 +244,18 @@ export type CompareConfig = {
      * Each variant requires its kernel (a region lacking it just skips that variant).
      */
     kernels?: Array<{ key: string; label?: string; kernel: 'soft' | 'lung' | 'bone' }>;
+    /**
+     * View keys (a subset of `views`) to tile in the per-region current-only "all"
+     * glance — defaults to EVERY compare view. Tiling all compare views forces an
+     * empty pane for any view a region lacks (e.g. a disc-oblique axial that only some
+     * regions have, or a coronal that's usually absent), so set a compact list of the
+     * views that are reliably present. Order matters: the often-absent view(s) must be
+     * LAST, because the glance is emitted at full density and one step down, picking the
+     * layout whose every pane fills — so a region missing the trailing view falls to the
+     * shorter, fully-filled tile (no empty pane) while a region that has it leads with
+     * the full one. Views omitted here still get their own per-view compare stage.
+     */
+    allViews?: string[];
   };
   /**
    * Custom attribute that yields `<region>-<timepoint>` for region-addressable
@@ -693,6 +705,16 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   const regionCompareStages = [];
   if (regionCompareViews.length && regionCompareRegions.length) {
     const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+    // Views tiled in the per-region current-only "all" glance: the curated `allViews`
+    // (validated against the compare views), else every compare view.
+    const allViewKeys = (
+      regionCompare?.allViews?.length ? regionCompare.allViews : regionCompareViews.map(v => v.key)
+    ).filter(key => regionCompareViews.some(v => v.key === key));
+    // Balanced grid for the glance: a single row up to 4 panes, then two rows.
+    const rcAllGrid = (k: number) => {
+      const rows = k >= 5 ? 2 : 1;
+      return { layoutType: 'grid', properties: { rows, columns: Math.ceil(k / rows) } };
+    };
     regionCompareRegions.forEach(r => {
       const regionLabel = r.label ?? cap(r.region);
       regionCompareViews.forEach(view => {
@@ -724,22 +746,50 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
           }))
         : [{ id: `rc-${r.key}-all`, name: regionLabel, selectorSuffix: '' }];
       allVariants.forEach(variant => {
-        regionCompareStages.push({
-          id: variant.id,
-          name: variant.name,
-          stageActivation: {
-            enabled: { minViewportsMatched: 1 },
-            passive: { minViewportsMatched: 1 },
-          },
-          viewportStructure: {
-            layoutType: 'grid',
-            properties: { rows: 1, columns: regionCompareViews.length },
-          },
-          viewports: regionCompareViews.map(view => ({
-            viewportOptions: compareViewportOptions,
-            displaySets: [{ id: `rc-${view.key}-${r.key}-session${variant.selectorSuffix}` }],
-          })),
-        });
+        if (regionCompare?.allViews?.length) {
+          // Curated glance: emit at full density and ONE step down (k = N, N-1). Each
+          // level requires ALL its panes matched (minViewportsMatched = k), so the engine
+          // picks the densest layout that fully fills — a region missing the single
+          // trailing view (e.g. C/T with no disc-oblique axial) falls to the shorter tile
+          // with NO empty pane, while a region that has it (lumbar) leads with the full
+          // tile. Only two levels so navigation isn't cluttered with ever-sparser subsets.
+          const floor = Math.max(1, allViewKeys.length - 1);
+          for (let k = allViewKeys.length; k >= floor; k--) {
+            const keys = allViewKeys.slice(0, k);
+            regionCompareStages.push({
+              id: `${variant.id}-${k}`,
+              name: variant.name,
+              stageActivation: {
+                enabled: { minViewportsMatched: k },
+                passive: { minViewportsMatched: k },
+              },
+              viewportStructure: rcAllGrid(k),
+              viewports: keys.map(key => ({
+                viewportOptions: compareViewportOptions,
+                displaySets: [{ id: `rc-${key}-${r.key}-session${variant.selectorSuffix}` }],
+              })),
+            });
+          }
+        } else {
+          // Default (e.g. CT spine): one glance tiling every compare view, ENABLED as
+          // soon as a single plane matches. Views a region lacks render empty.
+          regionCompareStages.push({
+            id: variant.id,
+            name: variant.name,
+            stageActivation: {
+              enabled: { minViewportsMatched: 1 },
+              passive: { minViewportsMatched: 1 },
+            },
+            viewportStructure: {
+              layoutType: 'grid',
+              properties: { rows: 1, columns: regionCompareViews.length },
+            },
+            viewports: regionCompareViews.map(view => ({
+              viewportOptions: compareViewportOptions,
+              displaySets: [{ id: `rc-${view.key}-${r.key}-session${variant.selectorSuffix}` }],
+            })),
+          });
+        }
       });
     });
   }

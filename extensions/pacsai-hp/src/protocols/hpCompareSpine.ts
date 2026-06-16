@@ -100,7 +100,16 @@ export const hpCompareMRSpine = buildCompareProtocol({
   selectors: PLANE_SELECTORS,
   stages: spineStages,
   overview: { regions: spineOverviewRegions, views: spineMRSagViews },
-  regionCompare: { views: spineMRCompareViews },
+  regionCompare: {
+    views: spineMRCompareViews,
+    // The per-region current-only glance tiles only the reliably-present views, in
+    // read order, with the region-variable disc-oblique axial LAST and the (usually
+    // absent) coronal omitted — so cervical/thoracic fall to a clean 6-up (4 sag +
+    // axial T2 + axial T1+C) with no empty panes, while lumbar (which has the disc
+    // obliques) leads with the full 7-up. The omitted coronal still gets its own
+    // per-view compare stage for the rare prior comparison.
+    allViews: ['t2', 'stir', 't1', 't1post', 'axt2', 'axt1post', 'axobl'],
+  },
 });
 
 export default hpCompareCTSpine;
