@@ -110,14 +110,34 @@ function modeFactory({ modeConfiguration }) {
         });
       }
 
-      // Add a StudyDescription line to the top-left overlay, beneath the stock
-      // series description (so each whole-spine pane names its region). Idempotent.
+      // Top-left overlay: (1) make the stock SeriesDescription reflect the CURRENT
+      // image as you scroll — it reads `referenceInstance` (the displaySet's fixed
+      // first instance), which is wrong for the all-in-one composite whose images span
+      // many source series; prefer the current image's instance, falling back to
+      // referenceInstance (identical for a normal single-series viewport, and the
+      // fallback covers volume/multi-frame where instances[imageIndex] may be absent).
+      // (2) Append a StudyDescription line beneath it (so each whole-spine pane names
+      // its region). Idempotent.
       const topLeft = customizationService.getCustomization('viewportOverlay.topLeft') || [];
-      if (!topLeft.some((item: { id?: string }) => item?.id === studyDescriptionOverlayItem.id)) {
-        customizationService.setCustomizations({
-          'viewportOverlay.topLeft': { $set: [...topLeft, studyDescriptionOverlayItem] },
-        });
-      }
+      const topLeftPatched = topLeft.map((item: any) =>
+        item?.id === 'SeriesDescription'
+          ? {
+              ...item,
+              condition: ({ instance, referenceInstance }: Record<string, any>) =>
+                (instance ?? referenceInstance)?.SeriesDescription,
+              contentF: ({ instance, referenceInstance }: Record<string, any>) =>
+                (instance ?? referenceInstance)?.SeriesDescription,
+            }
+          : item
+      );
+      const topLeftItems = topLeftPatched.some(
+        (item: { id?: string }) => item?.id === studyDescriptionOverlayItem.id
+      )
+        ? topLeftPatched
+        : [...topLeftPatched, studyDescriptionOverlayItem];
+      customizationService.setCustomizations({
+        'viewportOverlay.topLeft': { $set: topLeftItems },
+      });
 
       // Add patient identification (name, then MRN · sex · DOB) to the bottom-left
       // overlay, ahead of the window-level / zoom readouts. Idempotent.

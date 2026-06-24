@@ -38,13 +38,31 @@ export const seriesTypeOverlayItem = {
   id: SERIES_TYPE_OVERLAY_ITEM_ID,
   title: 'Series type',
   contentF: (props: Record<string, any>) => {
-    const { displaySet, servicesManager } = props ?? {};
+    const { displaySet, instance: currentInstance, servicesManager } = props ?? {};
     if (!displaySet) {
       return null;
     }
 
-    const instance = firstInstance(displaySet);
-    const modality = getModality(displaySet);
+    // Describe the CURRENT image (updates as you scroll), not a fixed first instance —
+    // essential for the all-in-one composite, whose images span many source series.
+    // Wrap the current instance as a single-instance "view" so the shared plane/kernel/
+    // thickness helpers (which read a displaySet) report per-image. For a normal
+    // single-series viewport every image shares these series-level fields, so the
+    // result is identical to describing the displaySet.
+    const instance = currentInstance ?? firstInstance(displaySet);
+    const view = {
+      SeriesDescription: instance?.SeriesDescription ?? displaySet?.SeriesDescription,
+      Modality: instance?.Modality ?? displaySet?.Modality,
+      SliceThickness: instance?.SliceThickness ?? displaySet?.SliceThickness,
+      ConvolutionKernel: instance?.ConvolutionKernel,
+      ImageType: instance?.ImageType,
+      ImageOrientationPatient: instance?.ImageOrientationPatient,
+      StudyInstanceUID: displaySet?.StudyInstanceUID,
+      displaySetInstanceUID: displaySet?.displaySetInstanceUID,
+      instances: instance ? [instance] : [],
+      images: instance ? [instance] : [],
+    };
+    const modality = getModality(view);
     const parts: React.ReactNode[] = [];
 
     // Coronal/sagittal of oblique reformats are disambiguated against the study's
@@ -53,14 +71,14 @@ export const seriesTypeOverlayItem = {
     const siblings = displaySetService
       ?.getActiveDisplaySets?.()
       ?.filter((d: any) => d?.StudyInstanceUID === displaySet?.StudyInstanceUID);
-    const plane = getImagePlane(displaySet, siblings);
+    const plane = getImagePlane(view, siblings);
     if (plane) {
       parts.push(plane.toUpperCase());
     }
 
     // Kernel class is only meaningful for CT.
     if (modality === 'CT') {
-      const kinfo = getImageKernelInfo(displaySet);
+      const kinfo = getImageKernelInfo(view);
       const kernelLabel = kinfo.kernel === 'bone' ? 'BONE' : kinfo.kernel === 'lung' ? 'LUNG' : 'SOFT';
       if (kinfo.labelConflict) {
         // Series is named BONE but reconstructed with a soft kernel — show BONE per
@@ -92,7 +110,7 @@ export const seriesTypeOverlayItem = {
       }
     }
 
-    const thickness = formatThickness(displaySet);
+    const thickness = formatThickness(view);
     if (thickness) {
       parts.push(thickness);
     }
