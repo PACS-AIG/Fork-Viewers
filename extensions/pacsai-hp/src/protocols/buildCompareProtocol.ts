@@ -493,27 +493,49 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     };
   });
 
-  // Region-addressable overview selectors, one per (view, region): match a series
-  // by spine region + plane + sequence keywords across ANY loaded study (no role
-  // rule), so the current study and its loaded same-session siblings each tile
-  // into their own region pane.
-  const overviewRegions = overview?.regions ?? [];
+  // Region-AGNOSTIC overview selector, one per view: matches the sequence/plane in
+  // ANY loaded spine region of the current session (`pacsaiRegionTimepoint` ends in
+  // '-session' — current + same-session siblings, never a prior), excluding the
+  // all-in-one composite. The survey then tiles the regions PRESENT via
+  // matchedDisplaySetsIndex (descending density below), so a region that wasn't
+  // imaged drops out instead of leaving an empty pane. The engine dedups by series,
+  // so the usual 1-series-per-region-per-sequence survey puts one region per pane
+  // (ordered by match rank — the opened region first, then siblings).
+  const overviewAnyRules = (
+    plane: string,
+    keywords?: string[],
+    excludeKeywords?: string[],
+    preferKernel?: 'soft' | 'lung' | 'bone'
+  ): Rule[] => {
+    const rules: Rule[] = [
+      notAllInOneRule(),
+      { attribute: regionAttribute, required: true, constraint: { containsI: ['-session'] } },
+      { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: plane } } },
+    ];
+    if (preferKernel) {
+      rules.push({ attribute: 'pacsaiKernel', weight: 10, constraint: { equals: { value: preferKernel } } });
+    }
+    if (excludeScouts) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: SCOUT_WORDS } });
+    }
+    if (keywords?.length) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: keywords } });
+    }
+    if (excludeKeywords?.length) {
+      rules.push({ attribute: 'SeriesDescription', required: true, constraint: { doesNotContainI: excludeKeywords } });
+    }
+    return rules;
+  };
   (overview?.views ?? []).forEach(view => {
-    const plane = view.plane ?? 'sagittal';
-    overviewRegions.forEach(r => {
-      displaySetSelectors[`overview-${view.key}-${r.key}`] = {
-        studyMatchingRules: [],
-        seriesMatchingRules: regionViewRules(
-          r.region,
-          'session',
-          plane,
-          view.keywords,
-          view.excludeKeywords,
-          undefined,
-          view.preferKernel
-        ),
-      };
-    });
+    displaySetSelectors[`overview-${view.key}-any`] = {
+      studyMatchingRules: [],
+      seriesMatchingRules: overviewAnyRules(
+        view.plane ?? 'sagittal',
+        view.keywords,
+        view.excludeKeywords,
+        view.preferKernel
+      ),
+    };
   });
 
   // Per-region compare selectors: a session and a prior selector per (view, region),
@@ -707,32 +729,39 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     },
   ];
 
-  // Whole-region overview: one LEAD stage per view (sequence), in order — the
-  // radiologist works down the sequence list (T2 sag, STIR sag, T1 sag, T1 +C),
-  // each tiled across the spine. Panes use `allowUnmatchedView`, so an absent
-  // region/sequence renders empty rather than spawning subset stages (which would
-  // clutter next/prev navigation). Each stage activates when >= 2 regions have
-  // that view (enabled & passive minViewportsMatched = 2): 3 regions -> 3 filled;
-  // 2 -> 2 filled + 1 empty; a single region falls through to the per-region
-  // compare / current-only stages. Requires the prior loader to fetch the siblings.
+  // Whole-region overview: one LEAD stage per sequence (T2 sag, STIR sag, T1 sag,
+  // T1 +C), each tiling the spine regions PRESENT side by side. Requires the prior
+  // loader to fetch the same-session sibling regions. Shows ALL regions when all are
+  // loaded and drops to just the regions present (NO empty pane) when one wasn't
+  // imaged — e.g. a thoracic + lumbar set with no cervical hangs a clean 2-up, not a
+  // 3-up with a blank cervical pane (which looked broken).
   const overviewStages = [];
   if (overview?.regions?.length && overview?.views?.length) {
-    const regions = overview.regions;
-    const minRegions = Math.min(2, regions.length);
+    const regionCount = overview.regions.length;
+    // Per sequence, tile the region-agnostic session selector at descending density
+    // (N down to 2 panes) via matchedDisplaySetsIndex; each level requires ALL its
+    // panes filled (minViewportsMatched = k), so the engine auto-picks the densest
+    // layout that fully fills: N when all regions are loaded, the count present when
+    // one is absent. Two levels only (N, N-1) to keep next/prev uncluttered. A single
+    // region doesn't reach here — it falls to the per-region compare / current-only
+    // stages.
+    const minRegions = Math.min(2, regionCount);
     overview.views.forEach(view => {
-      overviewStages.push({
-        id: `overview-${view.key}`,
-        name: view.name,
-        stageActivation: {
-          enabled: { minViewportsMatched: minRegions },
-          passive: { minViewportsMatched: minRegions },
-        },
-        viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: regions.length } },
-        viewports: regions.map(r => ({
-          viewportOptions: compareViewportOptions,
-          displaySets: [{ id: `overview-${view.key}-${r.key}` }],
-        })),
-      });
+      for (let k = regionCount; k >= minRegions; k--) {
+        overviewStages.push({
+          id: `overview-${view.key}-${k}`,
+          name: view.name,
+          stageActivation: {
+            enabled: { minViewportsMatched: k },
+            passive: { minViewportsMatched: k },
+          },
+          viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: k } },
+          viewports: Array.from({ length: k }, (_, i) => ({
+            viewportOptions: compareViewportOptions,
+            displaySets: [{ id: `overview-${view.key}-any`, matchedDisplaySetsIndex: i }],
+          })),
+        });
+      }
     });
   }
 
