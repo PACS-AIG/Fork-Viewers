@@ -155,7 +155,6 @@ function modeFactory({ modeConfiguration }) {
       toolbarService.addButtons([...toolbarButtons, ...moreTools]);
       toolbarService.createButtonSection('primary', [
         'SessionStudies',
-        'BrowsingMode',
         'MeasurementTools',
         'Zoom',
         'Pan',
@@ -167,6 +166,10 @@ function modeFactory({ modeConfiguration }) {
         'NextStage',
         'Crosshairs',
         'MoreTools',
+        // Browsing-mode dropdown last, at the right end of the (center-justified)
+        // toolbar row — kept away from the SessionStudies dropdown on the left so the
+        // two selectors don't crowd together.
+        'BrowsingMode',
       ]);
 
       // // ActivatePanel event trigger for when a segmentation or measurement is added.
