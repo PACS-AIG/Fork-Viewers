@@ -705,8 +705,22 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // it only needs to exist and stay non-disabled, not be last.) The composite is built
   // after the initial hang (same lifecycle as priors), so these stages stay `disabled`
   // until it exists.
-  const allInOneViewport = (role: Role) => ({
-    viewportOptions: { toolGroupId: 'default', allowUnmatchedView: true, viewportType: 'stack' },
+  const allInOneViewport = (role: Role, sync = false) => ({
+    viewportOptions: {
+      toolGroupId: 'default',
+      allowUnmatchedView: true,
+      viewportType: 'stack',
+      // Plane-grouped cross-study scroll for the 2-up (current|prior): scrolling the
+      // current's sagittals shows the prior's sagittals, axials its axials, etc. Same
+      // id on both panes so they share one sync group. (1-up stage passes no sync.)
+      ...(sync
+        ? {
+            syncGroups: [
+              { type: 'pacsaiallinonescroll', id: `${id}-allinone-scroll`, source: true, target: true },
+            ],
+          }
+        : {}),
+    },
     displaySets: [{ id: `${role}-allinone` }],
   });
   const allInOneStages = [
@@ -718,7 +732,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
         passive: { minViewportsMatched: 2 },
       },
       viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
-      viewports: [allInOneViewport('current'), allInOneViewport('prior')],
+      viewports: [allInOneViewport('current', true), allInOneViewport('prior', true)],
     },
     {
       id: 'allinone',

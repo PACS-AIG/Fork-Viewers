@@ -27,11 +27,28 @@ const allInOneSelector = (role: 'current' | 'prior') => ({
   ],
 });
 
-// Forced stack (mixed geometry/modality must never attempt a volume); no cross-study
-// sync — the two concatenated stacks have different series/counts and no slice
-// correspondence (independent scroll).
-const allInOneViewport = (role: 'current' | 'prior') => ({
-  viewportOptions: { toolGroupId: 'default', allowUnmatchedView: true, viewportType: 'stack' },
+// Forced stack (mixed geometry/modality must never attempt a volume). The 2-up
+// (current|prior) gets plane-grouped scroll sync — scrolling sagittals shows the
+// prior's sagittals, axials its axials, etc. (same sync id on both panes); the 1-up
+// passes no sync.
+const allInOneViewport = (role: 'current' | 'prior', sync = false) => ({
+  viewportOptions: {
+    toolGroupId: 'default',
+    allowUnmatchedView: true,
+    viewportType: 'stack',
+    ...(sync
+      ? {
+          syncGroups: [
+            {
+              type: 'pacsaiallinonescroll',
+              id: '@pacsai/allInOne-allinone-scroll',
+              source: true,
+              target: true,
+            },
+          ],
+        }
+      : {}),
+  },
   displaySets: [{ id: `${role}-allinone` }],
 });
 
@@ -69,7 +86,7 @@ export const hpAllInOne: Types.HangingProtocol.Protocol = {
         passive: { minViewportsMatched: 2 },
       },
       viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
-      viewports: [allInOneViewport('current'), allInOneViewport('prior')],
+      viewports: [allInOneViewport('current', true), allInOneViewport('prior', true)],
     },
     {
       id: 'allinone',

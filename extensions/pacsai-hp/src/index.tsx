@@ -15,6 +15,7 @@ import {
 } from './overlays/studyDescriptionOverlayItem';
 import { patientInfoOverlayItems } from './overlays/patientInfoOverlayItems';
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
+import createAllInOneScrollSynchronizer from './sync/createAllInOneScrollSynchronizer';
 import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
 import getImageColor from './utils/getImageColor';
@@ -26,6 +27,9 @@ import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
+
+/** Sync type for the all-in-one compare: plane-grouped scroll (sagittal↔sagittal, …). */
+export const ALL_IN_ONE_SCROLL_SYNC_TYPE = 'pacsaiallinonescroll';
 
 /** Custom HP attribute id: computed image plane (axial/coronal/sagittal). */
 export const PLANE_ATTRIBUTE = 'pacsaiPlane';
@@ -73,6 +77,11 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
 
     // Cross-study relative scroll synchronizer used by the protocols.
     syncGroupService?.addSynchronizerType?.(SCROLL_SYNC_TYPE, createScrollSyncSynchronizer);
+    // Plane-grouped scroll sync for the all-in-one compare (sagittal↔sagittal, etc.).
+    syncGroupService?.addSynchronizerType?.(
+      ALL_IN_ONE_SCROLL_SYNC_TYPE,
+      createAllInOneScrollSynchronizer
+    );
 
     // Fix cornerstone3D's RGB StackViewport crash (size-vs-components RangeError)
     // so color series — RAPID perfusion/angio maps, 3D-spin, iMAR — render and
