@@ -698,10 +698,13 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // prior's all-in-one beside it for a quick whole-study glance. INDEPENDENT scroll
   // (no cross-study sync): the two concatenated stacks have different series/counts
   // and no slice correspondence. `viewportType: 'stack'` forced — the mixed geometry
-  // must never attempt a volume. Appended LAST (before the safety catch-all) so it is
-  // the final stage you page to: present in every compare protocol, this is the
-  // default "append" browsing mode. The composite is built after the initial hang
-  // (same lifecycle as priors), so these stages stay `disabled` until it exists.
+  // must never attempt a volume. Appended as the FINAL stage(s) — AFTER the safety
+  // catch-all — so the "compare + all-in-one" mode pages to it at the very end:
+  // present in every compare protocol, this is the default "append" browsing mode.
+  // (The safety `current-any` stays just before it as the US / no-composite fallback;
+  // it only needs to exist and stay non-disabled, not be last.) The composite is built
+  // after the initial hang (same lifecycle as priors), so these stages stay `disabled`
+  // until it exists.
   const allInOneViewport = (role: Role) => ({
     viewportOptions: { toolGroupId: 'default', allowUnmatchedView: true, viewportType: 'stack' },
     displaySets: [{ id: `${role}-allinone` }],
@@ -983,8 +986,9 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       ...overviewStages,
       ...comparisonStages,
       ...postCompareStages,
-      ...allInOneStages,
       safetyStage,
+      // All-in-one LAST so "compare + all-in-one" mode pages to it at the very end.
+      ...allInOneStages,
     ],
   } as Types.HangingProtocol.Protocol;
 }
