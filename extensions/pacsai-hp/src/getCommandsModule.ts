@@ -1,10 +1,7 @@
 import { Types, DicomMetadataStore } from '@ohif/core';
 import loadRelevantPriors from './priors/loadRelevantPriors';
-import {
-  setBrowsingMode as persistBrowsingMode,
-  protocolIdForMode,
-  type BrowsingMode,
-} from './allinone/browsingMode';
+import { setBrowsingMode as persistBrowsingMode, type BrowsingMode } from './allinone/browsingMode';
+import { rehangForMode } from './allinone/rehang';
 
 const getCommandsModule = ({
   servicesManager,
@@ -77,25 +74,7 @@ const getCommandsModule = ({
         return;
       }
       persistBrowsingMode(mode);
-      const { hangingProtocolService, displaySetService } = servicesManager.services;
-      const displaySets = displaySetService.getActiveDisplaySets();
-      if (!displaySets?.length) {
-        return;
-      }
-      const activeStudyUID = hangingProtocolService?.getState?.()?.activeStudyUID;
-      const studyUIDs = [...new Set(displaySets.map((ds: any) => ds.StudyInstanceUID))];
-      const studies = studyUIDs
-        .map((uid: string) => DicomMetadataStore.getStudy(uid))
-        .filter(Boolean);
-      if (!studies.length) {
-        return;
-      }
-      const activeStudy =
-        studies.find((s: any) => s.StudyInstanceUID === activeStudyUID) ?? studies[0];
-      // 'append' => undefined => engine auto-selects the active study's compare
-      // protocol; 'allinone'/'manual' => the forced protocol id.
-      const protocolId = protocolIdForMode(mode, undefined);
-      hangingProtocolService.run({ studies, displaySets, activeStudy }, protocolId);
+      rehangForMode(servicesManager);
     },
   };
 

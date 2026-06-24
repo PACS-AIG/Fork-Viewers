@@ -104,36 +104,40 @@ function compositeUID(studyUID: string): string {
   return `${studyUID}.pacsai-allinone`;
 }
 
+/** Outcome of a per-study build, so callers know whether to re-hang. */
+type BuildStatus = 'created' | 'updated' | 'unchanged' | 'skipped';
+
 /**
  * Build (or refresh) the all-in-one composite for one study from its eligible
- * source display sets. Idempotent: skips when an up-to-date composite already
- * exists; rebuilds (delete + re-add) when more source series have streamed in
- * (tracked via `allInOneSourceCount`). Returns the composite UID, or undefined
- * when the study has no eligible series (e.g. a pure-US study).
+ * source display sets. Idempotent: 'unchanged' when an up-to-date composite already
+ * exists; 'updated' (rebuilt via delete + re-add) when more source series have
+ * streamed in since last build (tracked via `allInOneSourceCount`); 'created' on
+ * first build; 'skipped' when the study has no eligible series (e.g. a pure-US study).
  */
 function buildForStudy(
   studyUID: string,
   sources: any[],
   displaySetService: any,
   dataSource: any
-): string | undefined {
+): BuildStatus {
   const sorted = [...sources].sort(bySeries);
   // Concatenate the REAL instances in series order; each source's images are already
   // InstanceNumber-sorted by its SOP class handler, so we preserve that order.
   const instances = sorted.flatMap(ds => Array.from(ds.images ?? ds.instances ?? []));
   if (!instances.length) {
-    return undefined;
+    return 'skipped';
   }
 
   const uid = compositeUID(studyUID);
   const existing = displaySetService.getDisplaySetByUID(uid);
   if (existing) {
     if (existing.allInOneSourceCount === instances.length) {
-      return uid; // up to date — nothing streamed in since last build
+      return 'unchanged'; // up to date — nothing streamed in since last build
     }
     // A series streamed in (or changed) — rebuild from scratch with the full set.
-    // (The composite is only rendered once loading settles — it's the LAST stage —
-    // so this delete/re-add doesn't race a live viewport in practice.)
+    // (The composite is the LAST stage, so this delete/re-add normally happens while
+    // it isn't the displayed viewport; a grown composite's stage is already enabled,
+    // so the auto-refresh leaves it to re-match on navigation rather than re-hanging.)
     displaySetService.deleteDisplaySet(uid);
   }
 
@@ -167,20 +171,28 @@ function buildForStudy(
   });
   imageSet.imageIds = imageIds;
   displaySetService.addDisplaySets(imageSet);
-  return uid;
+  return existing ? 'updated' : 'created';
 }
 
 /**
  * Build/refresh the all-in-one composite for EVERY loaded study (current, priors,
  * siblings). Call before re-hanging so the all-in-one stage can match the current
  * study's composite beside the prior's. Cheap + idempotent — safe to call on each
- * re-hang.
+ * re-hang and from the DISPLAY_SETS_ADDED auto-refresh.
+ *
+ * Returns how many composites were newly CREATED vs grown (UPDATED) this pass, so the
+ * auto-refresh can re-hang only when a composite first appears (its stage needs
+ * enabling) and stay silent when one merely grew (stage already enabled).
  */
-export function syncAllInOneDisplaySets({ servicesManager, extensionManager }: withAppTypes): void {
+export function syncAllInOneDisplaySets({
+  servicesManager,
+  extensionManager,
+}: withAppTypes): { created: number; updated: number } {
+  const result = { created: 0, updated: 0 };
   const { displaySetService } = servicesManager?.services ?? {};
   const [dataSource] = extensionManager?.getActiveDataSource?.() ?? [];
   if (!displaySetService || typeof dataSource?.getImageIdsForDisplaySet !== 'function') {
-    return;
+    return result;
   }
 
   const byStudy = new Map<string, any[]>();
@@ -202,11 +214,18 @@ export function syncAllInOneDisplaySets({ servicesManager, extensionManager }: w
 
   byStudy.forEach((sources, studyUID) => {
     try {
-      buildForStudy(studyUID, sources, displaySetService, dataSource);
+      const status = buildForStudy(studyUID, sources, displaySetService, dataSource);
+      if (status === 'created') {
+        result.created++;
+      } else if (status === 'updated') {
+        result.updated++;
+      }
     } catch (error) {
       console.warn('[pacsai-hp] failed to build all-in-one for study', studyUID, error);
     }
   });
+
+  return result;
 }
 
 export default syncAllInOneDisplaySets;

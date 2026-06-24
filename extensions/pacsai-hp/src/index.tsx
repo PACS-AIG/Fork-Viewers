@@ -22,6 +22,7 @@ import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
 import { getStudyRole } from './priors/roleRegistry';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
+import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -66,7 +67,7 @@ function studyDescriptionOf(displaySet: any): string {
 const pacsaiHpExtension: Types.Extensions.Extension = {
   id,
 
-  preRegistration: ({ servicesManager }: Types.Extensions.ExtensionParams) => {
+  preRegistration: ({ servicesManager, extensionManager }: Types.Extensions.ExtensionParams) => {
     const { syncGroupService, hangingProtocolService, displaySetService } =
       servicesManager.services;
 
@@ -159,6 +160,12 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       'Spine region + timepoint (session/prior)',
       regionTimepointForDisplaySet
     );
+
+    // Keep the all-in-one composites in sync with late-streaming series (covers the
+    // single-study path, which builds once with no poll). Debounced; re-hangs only
+    // when a composite is first created. One app-lifetime subscription (the
+    // displaySetService singleton persists across mode enter/exit).
+    initAllInOneAutoRefresh({ servicesManager, extensionManager });
   },
 
   getHangingProtocolModule,
