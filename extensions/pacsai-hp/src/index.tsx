@@ -21,6 +21,7 @@ import getImageColor from './utils/getImageColor';
 import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
 import { getStudyRole } from './priors/roleRegistry';
 import { getSpineRegion } from './priors/metadata';
+import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -36,6 +37,9 @@ export const ROLE_ATTRIBUTE = 'pacsaiRole';
 
 /** Custom HP attribute id: color class (rgb/mono), to exclude derived color series. */
 export const COLOR_ATTRIBUTE = 'pacsaiColor';
+
+/** Custom HP attribute id: marks the synthetic all-in-one composite stack. */
+export const ALL_IN_ONE_ATTRIBUTE = 'pacsaiAllInOne';
 
 /**
  * Custom HP attribute id: spine region + timepoint, e.g. `lumbar-session`,
@@ -105,6 +109,17 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       COLOR_ATTRIBUTE,
       'Color class (rgb/mono)',
       getImageColor
+    );
+
+    // All-in-one composite marker: 'allinone' for the synthetic concatenated stack
+    // (built by loadRelevantPriors), 'series' for every real series. Lets the
+    // all-in-one stage match ONLY the composite (equals 'allinone') and every
+    // diagnostic selector exclude it (equals 'series'), so the composite never
+    // lands in a normal plane/kernel pane.
+    hangingProtocolService?.addCustomAttribute?.(
+      ALL_IN_ONE_ATTRIBUTE,
+      'All-in-one composite marker (allinone/series)',
+      (displaySet: any) => (displaySet?.isAllInOne ? ALL_IN_ONE_MARKER : 'series')
     );
 
     // Comparison role (current/prior/sibling). Current is derived from the live

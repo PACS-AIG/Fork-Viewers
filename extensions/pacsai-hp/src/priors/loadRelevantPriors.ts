@@ -20,6 +20,7 @@ import logPlannedStages from './debugPlannedStages';
 import type { StudyLike } from './types';
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
+import syncAllInOneDisplaySets from '../allinone/buildAllInOneDisplaySet';
 
 /**
  * Auto-loads the most relevant prior study/studies for the active study and
@@ -319,11 +320,22 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     log(`${priorUIDs.length} prior(s), ${siblingUIDs.length} sibling region(s) to load`);
 
     if (!priorUIDs.length && !siblingUIDs.length) {
-      // Nothing extra to load — the current-only fallback stage already hangs.
-      // Still dump the current study's series + planned stages so a no-prior /
-      // no-sibling case (US, single study, special-case protocol) is inspectable.
+      // No comparison study to load. Still build the current study's all-in-one
+      // composite (every diagnostic series concatenated into one scroll) and re-hang
+      // so its all-in-one stage becomes navigable — a single study still gets the
+      // one-scroll view (and an "all-in-one only" mode would have something to show).
+      syncAllInOneDisplaySets({ servicesManager, extensionManager });
+      const currentStudy = DicomMetadataStore.getStudy(currentStudyUID);
+      const activeDisplaySets = displaySetService.getActiveDisplaySets();
+      if (currentStudy) {
+        hangingProtocolService.run(
+          { studies: [currentStudy], displaySets: activeDisplaySets, activeStudy: currentStudy },
+          protocol.id
+        );
+      }
+      // Dump the current study's series + planned stages so a no-prior / no-sibling
+      // case (US, single study, special-case protocol) is inspectable.
       if (DEBUG) {
-        const activeDisplaySets = displaySetService.getActiveDisplaySets();
         dumpSeries(activeDisplaySets, currentStudyUID, priorUIDs, log);
         logPlannedStages(protocol, activeDisplaySets, currentStudyUID, log);
       }
@@ -362,6 +374,12 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     // overlay's "current first" assumption. Always rebuild from the latest study/
     // display-set state so late-loading series are picked up.
     const reHang = () => {
+      // Build/refresh the all-in-one composite for every loaded study (current +
+      // priors + siblings) BEFORE matching, so the all-in-one stage hangs the
+      // current study's concatenated scroll beside the prior's. Idempotent; the
+      // streaming poll re-runs this so a study that finishes loading late still
+      // gets its full composite.
+      syncAllInOneDisplaySets({ servicesManager, extensionManager });
       const orderedStudies = [
         DicomMetadataStore.getStudy(currentStudyUID),
         ...extraUIDs.map(uid => DicomMetadataStore.getStudy(uid)),

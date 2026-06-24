@@ -306,6 +306,15 @@ function roleRule(role: string): Rule {
   return { attribute: 'pacsaiRole', required: true, constraint: { equals: { value: role } } };
 }
 
+// Excludes the synthetic all-in-one composite stack from a selector. The
+// `pacsaiAllInOne` attribute is 'allinone' for the composite and 'series' for every
+// real series, so requiring `=== 'series'` keeps the composite out of every
+// diagnostic plane/kernel/region pane; the all-in-one stage's own selectors instead
+// require `=== 'allinone'` so ONLY the composite matches them.
+function notAllInOneRule(): Rule {
+  return { attribute: 'pacsaiAllInOne', required: true, constraint: { equals: { value: 'series' } } };
+}
+
 export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.Protocol {
   const {
     id,
@@ -347,6 +356,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     preferKernel?: 'soft' | 'lung' | 'bone'
   ): Rule[] => {
     const rules: Rule[] = [
+      notAllInOneRule(),
       {
         attribute: regionAttribute,
         required: true,
@@ -381,6 +391,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     // unsatisfied here and would be wrongly disqualified if required. Scouts are
     // excluded by the SCOUT_WORDS description rule below instead of by frame count.
     const rules: Rule[] = [
+      notAllInOneRule(),
       { attribute: 'numImageFrames', constraint: { greaterThan: { value: seriesFloor } } },
     ];
     if (excludeScouts) {
@@ -457,6 +468,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     studyMatchingRules: [],
     seriesMatchingRules: [
       roleRule('current'),
+      notAllInOneRule(),
       { attribute: 'numImageFrames', weight: 5, constraint: { greaterThan: { value: seriesFloor } } },
       { attribute: 'SeriesDescription', weight: 5, constraint: { doesNotContainI: SCOUT_WORDS } },
       // Soft (not required): prefer a grayscale series over a derived color one as the
@@ -466,6 +478,20 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
         : []),
     ],
   };
+
+  // All-in-one composite selectors: the single concatenated scroll-through stack per
+  // study (built by loadRelevantPriors). Matched ONLY via the `pacsaiAllInOne` marker
+  // + role, so the composite never competes with the diagnostic plane/kernel
+  // selectors (which require `pacsaiAllInOne === 'series'`).
+  ROLES.forEach(role => {
+    displaySetSelectors[`${role}-allinone`] = {
+      studyMatchingRules: [],
+      seriesMatchingRules: [
+        roleRule(role),
+        { attribute: 'pacsaiAllInOne', required: true, constraint: { equals: { value: 'allinone' } } },
+      ],
+    };
+  });
 
   // Region-addressable overview selectors, one per (view, region): match a series
   // by spine region + plane + sequence keywords across ANY loaded study (no role
@@ -644,6 +670,42 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       { viewportOptions: compareViewportOptions, displaySets: [{ id: 'anyCurrent' }] },
     ],
   };
+
+  // All-in-one stage(s): one scrollable stack of the whole current study (every
+  // diagnostic series concatenated by series number) — and, when a prior exists, the
+  // prior's all-in-one beside it for a quick whole-study glance. INDEPENDENT scroll
+  // (no cross-study sync): the two concatenated stacks have different series/counts
+  // and no slice correspondence. `viewportType: 'stack'` forced — the mixed geometry
+  // must never attempt a volume. Appended LAST (before the safety catch-all) so it is
+  // the final stage you page to: present in every compare protocol, this is the
+  // default "append" browsing mode. The composite is built after the initial hang
+  // (same lifecycle as priors), so these stages stay `disabled` until it exists.
+  const allInOneViewport = (role: Role) => ({
+    viewportOptions: { toolGroupId: 'default', allowUnmatchedView: true, viewportType: 'stack' },
+    displaySets: [{ id: `${role}-allinone` }],
+  });
+  const allInOneStages = [
+    {
+      id: 'allinone-cp',
+      name: 'All-in-one (current/prior)',
+      stageActivation: {
+        enabled: { minViewportsMatched: 2 },
+        passive: { minViewportsMatched: 2 },
+      },
+      viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 2 } },
+      viewports: [allInOneViewport('current'), allInOneViewport('prior')],
+    },
+    {
+      id: 'allinone',
+      name: 'All-in-one',
+      stageActivation: {
+        enabled: { minViewportsMatched: 1 },
+        passive: { minViewportsMatched: 1 },
+      },
+      viewportStructure: { layoutType: 'grid', properties: { rows: 1, columns: 1 } },
+      viewports: [allInOneViewport('current')],
+    },
+  ];
 
   // Whole-region overview: one LEAD stage per view (sequence), in order — the
   // radiologist works down the sequence list (T2 sag, STIR sag, T1 sag, T1 +C),
@@ -888,7 +950,13 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       viewportOptions: { viewportType: 'stack', toolGroupId: 'default', allowUnmatchedView: true },
       displaySets: [{ id: `current-${selectors[0].key}`, matchedDisplaySetsIndex: -1 }],
     },
-    stages: [...overviewStages, ...comparisonStages, ...postCompareStages, safetyStage],
+    stages: [
+      ...overviewStages,
+      ...comparisonStages,
+      ...postCompareStages,
+      ...allInOneStages,
+      safetyStage,
+    ],
   } as Types.HangingProtocol.Protocol;
 }
 

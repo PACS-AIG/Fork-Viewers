@@ -1,0 +1,212 @@
+import { classes } from '@ohif/core';
+import getImageColor from '../utils/getImageColor';
+
+const { ImageSet } = classes;
+
+/**
+ * "All-in-one" composite display sets.
+ *
+ * A radiologist-convenience view: every diagnostic image series of a study,
+ * concatenated (in SeriesNumber order) into ONE scrollable stack, so the whole
+ * study can be reviewed in a single scroll instead of opening each series.
+ *
+ * The composite is a THIN WRAPPER, not fake data: its `images` are the REAL
+ * instance objects of the source series — each already carrying its own `.imageId`
+ * (assigned at store time), so every image keeps its genuine imageId. That means
+ * the same cornerstone cache entries (no duplicated pixels), and tools key on the
+ * same imageId as the native series view. Only the wrapping SeriesInstanceUID /
+ * displaySetInstanceUID are synthetic.
+ *
+ * Built per loaded study by `loadRelevantPriors` (current + priors + siblings) so a
+ * protocol can hang the current study's all-in-one beside the prior's. Matched in
+ * protocols via the `pacsaiAllInOne` custom attribute (see index.tsx); the study's
+ * REAL StudyInstanceUID means the existing `pacsaiRole` attribute classifies the
+ * composite current/prior automatically.
+ */
+
+/** Value the `pacsaiAllInOne` attribute returns for the composite (vs 'series'). */
+export const ALL_IN_ONE_MARKER = 'allinone';
+
+// SeriesNumber given to the composite so it sorts AFTER the real series in the
+// study browser's series list (a high sentinel, well above any real SeriesNumber).
+const ALL_IN_ONE_SERIES_NUMBER = 99999;
+
+// Non-image / non-stack modalities that must never enter the scroll-through:
+// structured reports, segmentations, presentation/key-object state, RT objects,
+// registration, dose/encapsulated docs, audio. (US is excluded separately — it is
+// an image modality, but cine/static ultrasound doesn't belong in a CT/MR scroll.)
+const NON_IMAGE_MODALITIES = new Set([
+  'SR', 'SEG', 'PR', 'KO', 'RTSTRUCT', 'RTPLAN', 'RTDOSE', 'RTRECORD', 'RWV',
+  'REG', 'FID', 'PLAN', 'DOC', 'AU', 'PMAP',
+]);
+
+// Non-diagnostic series dropped by SeriesDescription: scouts/topograms/localizers,
+// CTA bolus-tracking / monitoring, scanner patient-protocol / dose-report sheets.
+const NON_DIAGNOSTIC_RE =
+  /(topo|scout|localizer|localiser|monitoring|bolus|patient\s*protocol|dose\s*report)/i;
+
+/**
+ * Eligibility for the all-in-one scroll. "Drop junk" policy (rad's call): keep every
+ * diagnostic image series — INCLUDING derived reformats / MIPs — but drop:
+ *   - ultrasound (US) and non-image objects (SR/SEG/PR/KO/RT/…);
+ *   - scouts / localizers / monitoring / protocol & dose sheets (by description);
+ *   - confirmed COLOR series (perfusion maps, 3D-spin, RAPID summary — derived, and
+ *     they trip cornerstone's RGB render path);
+ *   - the 1-image junk series paired with CT/MR reformats. A lone CR/DX/MG/XA image
+ *     IS the diagnostic projection, so single-image sets are KEPT for those modalities.
+ */
+function isEligible(ds: any): boolean {
+  if (!ds || ds.isAllInOne || ds.unsupported) {
+    return false;
+  }
+  // SEG / RTSTRUCT / parametric-map overlays.
+  if (ds.isDerivedDisplaySet || ds.isOverlayDisplaySet) {
+    return false;
+  }
+  const images = ds.images ?? ds.instances ?? [];
+  if (!images.length) {
+    return false;
+  }
+  const mod = String(ds.Modality ?? '').toUpperCase();
+  if (mod === 'US' || NON_IMAGE_MODALITIES.has(mod)) {
+    return false;
+  }
+  if (NON_DIAGNOSTIC_RE.test(String(ds.SeriesDescription ?? ''))) {
+    return false;
+  }
+  const frames = ds.numImageFrames ?? images.length;
+  if ((mod === 'CT' || mod === 'MR') && frames <= 1) {
+    return false; // 1-image junk paired with cross-sectional reformats
+  }
+  if (getImageColor(ds) === 'rgb') {
+    return false; // derived color (perfusion maps / 3D-spin / RAPID summary)
+  }
+  return true;
+}
+
+/** SeriesNumber sort (asc), tie-broken by SeriesTime then SeriesInstanceUID. */
+function bySeries(a: any, b: any): number {
+  const an = Number(a?.SeriesNumber ?? 0);
+  const bn = Number(b?.SeriesNumber ?? 0);
+  if (an !== bn) {
+    return an - bn;
+  }
+  const at = String(a?.SeriesTime ?? '');
+  const bt = String(b?.SeriesTime ?? '');
+  if (at !== bt) {
+    return at < bt ? -1 : 1;
+  }
+  return String(a?.SeriesInstanceUID ?? '').localeCompare(String(b?.SeriesInstanceUID ?? ''));
+}
+
+/** Deterministic composite UID for a study, so a rebuild replaces (never duplicates). */
+function compositeUID(studyUID: string): string {
+  return `${studyUID}.pacsai-allinone`;
+}
+
+/**
+ * Build (or refresh) the all-in-one composite for one study from its eligible
+ * source display sets. Idempotent: skips when an up-to-date composite already
+ * exists; rebuilds (delete + re-add) when more source series have streamed in
+ * (tracked via `allInOneSourceCount`). Returns the composite UID, or undefined
+ * when the study has no eligible series (e.g. a pure-US study).
+ */
+function buildForStudy(
+  studyUID: string,
+  sources: any[],
+  displaySetService: any,
+  dataSource: any
+): string | undefined {
+  const sorted = [...sources].sort(bySeries);
+  // Concatenate the REAL instances in series order; each source's images are already
+  // InstanceNumber-sorted by its SOP class handler, so we preserve that order.
+  const instances = sorted.flatMap(ds => Array.from(ds.images ?? ds.instances ?? []));
+  if (!instances.length) {
+    return undefined;
+  }
+
+  const uid = compositeUID(studyUID);
+  const existing = displaySetService.getDisplaySetByUID(uid);
+  if (existing) {
+    if (existing.allInOneSourceCount === instances.length) {
+      return uid; // up to date — nothing streamed in since last build
+    }
+    // A series streamed in (or changed) — rebuild from scratch with the full set.
+    // (The composite is only rendered once loading settles — it's the LAST stage —
+    // so this delete/re-add doesn't race a live viewport in practice.)
+    displaySetService.deleteDisplaySet(uid);
+  }
+
+  const first: any = instances[0];
+  const imageSet: any = new ImageSet(instances);
+  // Resolve imageIds through the data source so multi-frame instances expand into
+  // per-frame imageIds correctly, and thumbnails/prefetch have them immediately (the
+  // stack render path would otherwise set them lazily on first view).
+  const imageIds = dataSource.getImageIdsForDisplaySet(imageSet);
+  imageSet.setAttributes({
+    displaySetInstanceUID: uid,
+    SeriesInstanceUID: uid,
+    StudyInstanceUID: studyUID,
+    SeriesDate: first.SeriesDate,
+    SeriesTime: first.SeriesTime,
+    SeriesNumber: ALL_IN_ONE_SERIES_NUMBER,
+    Modality: first.Modality,
+    SOPClassUID: first.SOPClassUID,
+    SOPClassHandlerId: '@ohif/extension-default.sopClassHandlerModule.stack',
+    SeriesDescription: `All-in-one (${sorted.length} series)`,
+    numImageFrames: imageIds.length,
+    // Mixed geometry/modality => stack, never a volume. (The all-in-one stage also
+    // forces viewportType 'stack', so this is belt-and-suspenders.)
+    isReconstructable: false,
+    // Marker read by the `pacsaiAllInOne` attribute + the refresh check above.
+    isAllInOne: true,
+    allInOneSourceCount: instances.length,
+    // FALSE so the tracked study-browser panel does not treat this background-built
+    // set as a user "jump-to" (which would self-scroll the panel + auto-expand it).
+    madeInClient: false,
+  });
+  imageSet.imageIds = imageIds;
+  displaySetService.addDisplaySets(imageSet);
+  return uid;
+}
+
+/**
+ * Build/refresh the all-in-one composite for EVERY loaded study (current, priors,
+ * siblings). Call before re-hanging so the all-in-one stage can match the current
+ * study's composite beside the prior's. Cheap + idempotent — safe to call on each
+ * re-hang.
+ */
+export function syncAllInOneDisplaySets({ servicesManager, extensionManager }: withAppTypes): void {
+  const { displaySetService } = servicesManager?.services ?? {};
+  const [dataSource] = extensionManager?.getActiveDataSource?.() ?? [];
+  if (!displaySetService || typeof dataSource?.getImageIdsForDisplaySet !== 'function') {
+    return;
+  }
+
+  const byStudy = new Map<string, any[]>();
+  for (const ds of displaySetService.getActiveDisplaySets()) {
+    if (!isEligible(ds)) {
+      continue;
+    }
+    const uid = ds.StudyInstanceUID;
+    if (!uid) {
+      continue;
+    }
+    const list = byStudy.get(uid);
+    if (list) {
+      list.push(ds);
+    } else {
+      byStudy.set(uid, [ds]);
+    }
+  }
+
+  byStudy.forEach((sources, studyUID) => {
+    try {
+      buildForStudy(studyUID, sources, displaySetService, dataSource);
+    } catch (error) {
+      console.warn('[pacsai-hp] failed to build all-in-one for study', studyUID, error);
+    }
+  });
+}
+
+export default syncAllInOneDisplaySets;
