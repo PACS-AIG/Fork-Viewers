@@ -21,6 +21,7 @@ import type { StudyLike } from './types';
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
 import syncAllInOneDisplaySets from '../allinone/buildAllInOneDisplaySet';
+import { getBrowsingMode, protocolIdForMode } from '../allinone/browsingMode';
 
 /**
  * Auto-loads the most relevant prior study/studies for the active study and
@@ -328,9 +329,11 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       const currentStudy = DicomMetadataStore.getStudy(currentStudyUID);
       const activeDisplaySets = displaySetService.getActiveDisplaySets();
       if (currentStudy) {
+        // Honor the browsing mode: append -> this compare protocol (all-in-one last
+        // stage); allinone -> the all-in-one-only protocol; manual -> stock default.
         hangingProtocolService.run(
           { studies: [currentStudy], displaySets: activeDisplaySets, activeStudy: currentStudy },
-          protocol.id
+          protocolIdForMode(getBrowsingMode(), protocol.id) ?? protocol.id
         );
       }
       // Dump the current study's series + planned stages so a no-prior / no-sibling
@@ -392,20 +395,25 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         dumpSeries(activeDisplaySets, currentStudyUID, priorUIDs, log);
         log('ordered studies for run()', [currentStudyUID, ...extraUIDs]);
       }
+      // Honor the browsing mode for which protocol to hang: append -> this matched
+      // compare protocol (all-in-one as its last stage); allinone -> the dedicated
+      // all-in-one-only protocol; manual -> stock default. Prior discovery above used
+      // the compare protocol's policy regardless, so priors are loaded either way.
+      const appliedProtocolId = protocolIdForMode(getBrowsingMode(), protocol.id) ?? protocol.id;
       hangingProtocolService.run(
         {
           studies: orderedStudies,
           displaySets: activeDisplaySets,
           activeStudy: orderedStudies[0],
         },
-        protocol.id
+        appliedProtocolId
       );
 
       // Debug: log the full planned protocol — every stage with the series each
       // viewport's selector resolves to (replays the matcher's rule eval, so it is
       // deterministic and independent of grid render timing).
       if (DEBUG) {
-        const planned = hangingProtocolService.getProtocolById?.(protocol.id) ?? protocol;
+        const planned = hangingProtocolService.getProtocolById?.(appliedProtocolId) ?? protocol;
         logPlannedStages(planned, activeDisplaySets, currentStudyUID, log);
       }
     };

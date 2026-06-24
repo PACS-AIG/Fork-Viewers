@@ -13,6 +13,7 @@ import hpCompareCTAAbdPelvis from './protocols/hpCompareCTAAbdPelvis';
 import hpCompareCTPerfusion from './protocols/hpCompareCTPerfusion';
 import hpCompareMRBrain from './protocols/hpCompareMRBrain';
 import hpCompareMRAbdomen from './protocols/hpCompareMRAbdomen';
+import hpAllInOne from './protocols/hpAllInOne';
 
 const protocols = [
   // Generic per-modality (lower weight, fallbacks for their modality)
@@ -42,6 +43,9 @@ const protocols = [
   hpCompareMRBrain,
   // MR abdomen / MRCP: sequence-based (T2 / T1 Dixon / DWI / MRCP), out-weights generic MR.
   hpCompareMRAbdomen,
+  // All-in-one only (browsing Mode 2): never auto-matched (empty rules); forced by
+  // the browsing-mode toolbar control. Hangs just the all-in-one composite stack(s).
+  hpAllInOne,
 ];
 
 function getHangingProtocolModule() {

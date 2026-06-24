@@ -155,6 +155,7 @@ function modeFactory({ modeConfiguration }) {
       toolbarService.addButtons([...toolbarButtons, ...moreTools]);
       toolbarService.createButtonSection('primary', [
         'SessionStudies',
+        'BrowsingMode',
         'MeasurementTools',
         'Zoom',
         'Pan',
@@ -314,6 +315,8 @@ function modeFactory({ modeConfiguration }) {
       '@pacsai/compareCT',
       '@pacsai/compareMR',
       '@pacsai/compareCR',
+      // All-in-one only (browsing Mode 2): never auto-matched; forced by the toolbar.
+      '@pacsai/allInOne',
       'default',
     ],
     // Order is important in sop class handlers when two handlers both use

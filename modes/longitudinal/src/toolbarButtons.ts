@@ -239,6 +239,13 @@ const toolbarButtons: Button[] = [
     uiType: 'pacsai.sessionSwitcher',
     props: {},
   },
+  {
+    // All-in-one browsing-mode selector (pacsai-hp): append / all-in-one only /
+    // manual. Persists the choice and re-hangs the loaded studies accordingly.
+    id: 'BrowsingMode',
+    uiType: 'pacsai.browsingMode',
+    props: {},
+  },
 ];
 
 export default toolbarButtons;

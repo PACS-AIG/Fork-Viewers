@@ -1,7 +1,11 @@
 import SessionStudyDropdown from './toolbar/SessionStudyDropdown';
+import BrowsingModeDropdown from './toolbar/BrowsingModeDropdown';
 
 /** Toolbar uiType id for the same-session study switcher. */
 export const SESSION_SWITCHER_UITYPE = 'pacsai.sessionSwitcher';
+
+/** Toolbar uiType id for the all-in-one browsing-mode selector. */
+export const BROWSING_MODE_UITYPE = 'pacsai.browsingMode';
 
 /**
  * Registers the `pacsai.sessionSwitcher` toolbar uiType — a dropdown listing the
@@ -19,6 +23,14 @@ export default function getToolbarModule({ commandsManager, servicesManager }: w
       name: SESSION_SWITCHER_UITYPE,
       defaultComponent: (props: Record<string, any>) =>
         SessionStudyDropdown({ ...props, commandsManager, servicesManager }),
+    },
+    {
+      // All-in-one browsing-mode selector (append / all-in-one only / manual).
+      // Selecting a mode persists it and re-hangs the loaded studies via the
+      // `setBrowsingMode` command.
+      name: BROWSING_MODE_UITYPE,
+      defaultComponent: (props: Record<string, any>) =>
+        BrowsingModeDropdown({ ...props, commandsManager, servicesManager }),
     },
     {
       // Disable the next/previous-stage buttons when there is nothing to navigate

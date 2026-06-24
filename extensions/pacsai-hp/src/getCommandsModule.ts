@@ -1,5 +1,10 @@
 import { Types, DicomMetadataStore } from '@ohif/core';
 import loadRelevantPriors from './priors/loadRelevantPriors';
+import {
+  setBrowsingMode as persistBrowsingMode,
+  protocolIdForMode,
+  type BrowsingMode,
+} from './allinone/browsingMode';
 
 const getCommandsModule = ({
   servicesManager,
@@ -58,11 +63,46 @@ const getCommandsModule = ({
       });
       loadRelevantPriors({ servicesManager, extensionManager });
     },
+
+    /**
+     * Switch the all-in-one browsing mode (toolbar control). Persists the choice,
+     * then re-hangs the ALREADY-LOADED studies with the mode's protocol — no
+     * re-query: priors/siblings were discovered once under the auto-matched compare
+     * protocol and stay loaded, so this is a pure re-hang. 'append' auto-selects the
+     * best compare protocol (now ending in the all-in-one stage); 'allinone' forces
+     * the dedicated all-in-one protocol; 'manual' forces the stock default.
+     */
+    setBrowsingMode: ({ mode }: { mode?: BrowsingMode }) => {
+      if (!mode) {
+        return;
+      }
+      persistBrowsingMode(mode);
+      const { hangingProtocolService, displaySetService } = servicesManager.services;
+      const displaySets = displaySetService.getActiveDisplaySets();
+      if (!displaySets?.length) {
+        return;
+      }
+      const activeStudyUID = hangingProtocolService?.getState?.()?.activeStudyUID;
+      const studyUIDs = [...new Set(displaySets.map((ds: any) => ds.StudyInstanceUID))];
+      const studies = studyUIDs
+        .map((uid: string) => DicomMetadataStore.getStudy(uid))
+        .filter(Boolean);
+      if (!studies.length) {
+        return;
+      }
+      const activeStudy =
+        studies.find((s: any) => s.StudyInstanceUID === activeStudyUID) ?? studies[0];
+      // 'append' => undefined => engine auto-selects the active study's compare
+      // protocol; 'allinone'/'manual' => the forced protocol id.
+      const protocolId = protocolIdForMode(mode, undefined);
+      hangingProtocolService.run({ studies, displaySets, activeStudy }, protocolId);
+    },
   };
 
   const definitions = {
     loadRelevantPriors: actions.loadRelevantPriors,
     focusSessionStudy: actions.focusSessionStudy,
+    setBrowsingMode: actions.setBrowsingMode,
   };
 
   return {
