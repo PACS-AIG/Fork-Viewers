@@ -15,12 +15,13 @@ const { createSynchronizer } = SynchronizerManager;
  * so current and prior all-in-ones have different lengths AND interleave planes
  * differently — a plain proportional sync (`pacsaiscroll`) would put a sagittal slice
  * opposite an axial one. Instead, for the current image's plane (from its orientation)
- * it moves the prior to the prior image OF THE SAME PLANE nearest the current's overall
- * (proportional) position — so scrolling sagittals shows sagittals, axials show axials,
- * while tracking position monotonically. Picking the nearest single same-plane image
- * (rather than sweeping the whole same-plane group) avoids leaping across the prior's
- * several same-plane series, which the series-number-sorted stack interleaves. Falls
- * back to a plain proportional map when a plane can't be determined or the prior lacks it.
+ * it sweeps the prior's LARGEST contiguous run of that plane, in proportion to where the
+ * user is within the current's images of that plane. So scrolling the current's
+ * sagittals sweeps the prior's main sagittal series in step — neither pane waits for the
+ * other to finish a plane (proportional WITHIN plane, not whole-stack), and it stays
+ * smooth (one contiguous run, no leaping across the prior's separate same-plane series,
+ * which the series-number-sorted stack interleaves). Falls back to a plain proportional
+ * map when a plane can't be determined or the prior lacks it.
  *
  * Registered as the `pacsaiallinonescroll` sync type and attached to the all-in-one
  * current|prior compare stage (see buildCompareProtocol / hpAllInOne).
@@ -138,33 +139,52 @@ export default function createAllInOneScrollSynchronizer(
       return;
     }
 
-    const plane = planesFor(srcIds)[srcIdx];
+    const srcPlanes = planesFor(srcIds);
+    const plane = srcPlanes[srcIdx];
     const tgtPlanes = planesFor(tgtIds);
 
-    // Source's proportional whole-stack position, expressed in target index space.
-    const prop = srcIds.length > 1 ? (srcIdx / (srcIds.length - 1)) * (tgtIds.length - 1) : 0;
-
-    // Plane-matched: pick the target image OF THE SAME PLANE nearest that position. This
-    // keeps the prior on the source's plane while tracking position monotonically —
-    // rather than sweeping across the prior's several same-plane series, which leaps
-    // around because the all-in-one is series-number-sorted (each plane recurs in
-    // non-contiguous blocks).
     let tgtIdx = -1;
     if (plane) {
-      let best = Infinity;
-      for (let i = 0; i < tgtPlanes.length; i++) {
-        if (tgtPlanes[i] === plane) {
-          const d = Math.abs(i - prop);
-          if (d < best) {
-            best = d;
-            tgtIdx = i;
-          }
+      // Where the user is within ALL the source's images of this plane (0..1).
+      const srcGroup: number[] = [];
+      for (let i = 0; i < srcPlanes.length; i++) {
+        if (srcPlanes[i] === plane) {
+          srcGroup.push(i);
         }
       }
+      const srcPos = Math.max(0, srcGroup.indexOf(srcIdx));
+      const frac = srcGroup.length > 1 ? srcPos / (srcGroup.length - 1) : 0;
+
+      // Sweep the LARGEST contiguous run of the same plane in the target, proportionally.
+      // Proportional-WITHIN-plane (not whole-stack) means neither pane waits for the
+      // other to finish a plane; using one contiguous run (not every same-plane image)
+      // keeps it smooth — no leaping between the target's separate same-plane series,
+      // which the series-number-sorted stack interleaves.
+      let start = -1;
+      let len = 0;
+      let bestStart = -1;
+      let bestLen = 0;
+      for (let i = 0; i < tgtPlanes.length; i++) {
+        if (tgtPlanes[i] === plane) {
+          start = start < 0 ? i : start;
+          len += 1;
+          if (len > bestLen) {
+            bestLen = len;
+            bestStart = start;
+          }
+        } else {
+          start = -1;
+          len = 0;
+        }
+      }
+      if (bestLen > 0) {
+        tgtIdx = bestStart + Math.round(frac * (bestLen - 1));
+      }
     }
-    // Fallback: plane unknown, or the prior has none of this plane — plain proportional.
+    // Fallback: plane unknown, or the target has none of it — plain proportional.
     if (tgtIdx < 0) {
-      tgtIdx = Math.min(tgtIds.length - 1, Math.max(0, Math.round(prop)));
+      const frac = srcIds.length > 1 ? srcIdx / (srcIds.length - 1) : 0;
+      tgtIdx = Math.min(tgtIds.length - 1, Math.max(0, Math.round(frac * (tgtIds.length - 1))));
     }
 
     if (DEBUG_SYNC && Date.now() - lastSyncLog > 800) {
