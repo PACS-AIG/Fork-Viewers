@@ -14,12 +14,13 @@ const { createSynchronizer } = SynchronizerManager;
  * An all-in-one stack concatenates every series of a study (sorted by series number),
  * so current and prior all-in-ones have different lengths AND interleave planes
  * differently — a plain proportional sync (`pacsaiscroll`) would put a sagittal slice
- * opposite an axial one. Instead this groups each stack's images BY PLANE (from
- * ImageOrientationPatient) and maps within the group: when the current image is the
- * k-th of its sagittal images, the prior jumps to the proportionally-k-th of ITS
- * sagittal images — so scrolling sagittals shows sagittals, axials show axials, etc.
- * Falls back to a plain proportional map (the pacsaiscroll behavior) when a plane
- * can't be determined or the prior has none of it, so the panes always scroll together.
+ * opposite an axial one. Instead, for the current image's plane (from its orientation)
+ * it moves the prior to the prior image OF THE SAME PLANE nearest the current's overall
+ * (proportional) position — so scrolling sagittals shows sagittals, axials show axials,
+ * while tracking position monotonically. Picking the nearest single same-plane image
+ * (rather than sweeping the whole same-plane group) avoids leaping across the prior's
+ * several same-plane series, which the series-number-sorted stack interleaves. Falls
+ * back to a plain proportional map when a plane can't be determined or the prior lacks it.
  *
  * Registered as the `pacsaiallinonescroll` sync type and attached to the all-in-one
  * current|prior compare stage (see buildCompareProtocol / hpAllInOne).
@@ -86,23 +87,17 @@ function planesFor(imageIds: string[]): Array<string | undefined> {
 const DEBUG_SYNC = true;
 let lastSyncLog = 0;
 
-/** Global indices of the images whose plane equals `plane`, in stack order. */
-function planeGroup(planes: Array<string | undefined>, plane: string): number[] {
-  const group: number[] = [];
-  for (let i = 0; i < planes.length; i++) {
-    if (planes[i] === plane) {
-      group.push(i);
-    }
-  }
-  return group;
-}
-
 export default function createAllInOneScrollSynchronizer(
   synchronizerName: string,
   _options?: Record<string, unknown>
 ): Synchronizer {
-  // Guard against the ping-pong that target updates could otherwise cause.
+  // Ping-pong guards: `updating` covers synchronous re-entry; `lastProgrammatic`
+  // covers the ASYNC echo — jumpToSlice fires STACK_NEW_IMAGE after `updating` has
+  // reset, so we also ignore the event that lands a viewport exactly where we just
+  // put it (the plane-matched round-trip isn't an exact fixed point, so the idempotent
+  // check alone let the panes nudge each other endlessly).
   let updating = false;
+  const lastProgrammatic = new Map<string, { index: number; time: number }>();
 
   const callback = (
     _synchronizer: Synchronizer,
@@ -133,32 +128,50 @@ export default function createAllInOneScrollSynchronizer(
     }
 
     const srcIdx = source.getCurrentImageIdIndex();
-    const srcPlanes = planesFor(srcIds);
-    const plane = srcPlanes[srcIdx];
-    const srcGroup = plane ? planeGroup(srcPlanes, plane) : [];
-    const tgtGroup = plane ? planeGroup(planesFor(tgtIds), plane) : [];
 
-    let tgtIdx: number;
-    if (plane && srcGroup.length && tgtGroup.length) {
-      // Plane-grouped: map the current image's position WITHIN its plane group to the
-      // target's same-plane group (sagittal↔sagittal, axial↔axial, …).
-      const srcPos = Math.max(0, srcGroup.indexOf(srcIdx));
-      const frac = srcGroup.length > 1 ? srcPos / (srcGroup.length - 1) : 0;
-      const tgtPos = Math.min(tgtGroup.length - 1, Math.max(0, Math.round(frac * (tgtGroup.length - 1))));
-      tgtIdx = tgtGroup[tgtPos];
-    } else {
-      // Fallback: the plane couldn't be determined (or the target has none of this
-      // plane) — keep the panes moving together with a plain proportional map (the
-      // pacsaiscroll behavior) rather than not syncing at all.
-      const frac = srcIds.length > 1 ? srcIdx / (srcIds.length - 1) : 0;
-      tgtIdx = Math.min(tgtIds.length - 1, Math.max(0, Math.round(frac * (tgtIds.length - 1))));
+    // Echo suppression: ignore the STACK_NEW_IMAGE we caused by jumping THIS viewport
+    // (lands on the index we just set, within a short window) so the bidirectional sync
+    // doesn't ping-pong and jerk the pane the user is scrolling.
+    const echo = lastProgrammatic.get(sourceViewport.viewportId);
+    if (echo && echo.index === srcIdx && Date.now() - echo.time < 600) {
+      lastProgrammatic.delete(sourceViewport.viewportId);
+      return;
+    }
+
+    const plane = planesFor(srcIds)[srcIdx];
+    const tgtPlanes = planesFor(tgtIds);
+
+    // Source's proportional whole-stack position, expressed in target index space.
+    const prop = srcIds.length > 1 ? (srcIdx / (srcIds.length - 1)) * (tgtIds.length - 1) : 0;
+
+    // Plane-matched: pick the target image OF THE SAME PLANE nearest that position. This
+    // keeps the prior on the source's plane while tracking position monotonically —
+    // rather than sweeping across the prior's several same-plane series, which leaps
+    // around because the all-in-one is series-number-sorted (each plane recurs in
+    // non-contiguous blocks).
+    let tgtIdx = -1;
+    if (plane) {
+      let best = Infinity;
+      for (let i = 0; i < tgtPlanes.length; i++) {
+        if (tgtPlanes[i] === plane) {
+          const d = Math.abs(i - prop);
+          if (d < best) {
+            best = d;
+            tgtIdx = i;
+          }
+        }
+      }
+    }
+    // Fallback: plane unknown, or the prior has none of this plane — plain proportional.
+    if (tgtIdx < 0) {
+      tgtIdx = Math.min(tgtIds.length - 1, Math.max(0, Math.round(prop)));
     }
 
     if (DEBUG_SYNC && Date.now() - lastSyncLog > 800) {
       lastSyncLog = Date.now();
       console.log('[pacsai-hp] allinone-sync', {
         plane,
-        grouped: !!(plane && srcGroup.length && tgtGroup.length),
+        planeMatched: plane ? tgtPlanes[tgtIdx] === plane : false,
         srcIdx,
         srcCount: srcIds.length,
         tgtCount: tgtIds.length,
@@ -171,6 +184,9 @@ export default function createAllInOneScrollSynchronizer(
       return;
     }
 
+    // Remember this programmatic move so the target's resulting STACK_NEW_IMAGE (which
+    // fires async, after `updating` resets) is recognized as our echo and ignored.
+    lastProgrammatic.set(targetViewport.viewportId, { index: tgtIdx, time: Date.now() });
     updating = true;
     try {
       // jumpToSlice (the scrollbar's call) fires STACK_VIEWPORT_SCROLL so the scrollbar
