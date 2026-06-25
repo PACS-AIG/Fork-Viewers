@@ -1,6 +1,7 @@
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
 import getImageColor from '../utils/getImageColor';
+import { ALL_IN_ONE_MARKER } from '../allinone/buildAllInOneDisplaySet';
 import { getStudyRole } from './roleRegistry';
 import { getSpineRegion } from './metadata';
 
@@ -49,6 +50,11 @@ function attrValue(d: AnyDS, attr: string, activeStudyUID: string | undefined, s
       // excludeColorSeries protocols (CTA/CTA-chest) add a required pacsaiColor==='mono'
       // rule; without this the replay fails it for every series and shows (none).
       return getImageColor(d);
+    case 'pacsaiAllInOne':
+      // All-in-one stages (allinone-cp / allinone) require pacsaiAllInOne==='allinone';
+      // without this the replay fails it and falsely shows those stages disabled/(none)
+      // even when the real engine matched the composites. Mirrors the index.tsx callback.
+      return d?.isAllInOne ? ALL_IN_ONE_MARKER : 'series';
     default:
       return d?.[attr];
   }
