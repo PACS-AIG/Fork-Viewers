@@ -110,15 +110,16 @@ type BuildStatus = 'created' | 'updated' | 'unchanged' | 'skipped';
 /**
  * Build (or refresh) the all-in-one composite for one study from its eligible
  * source display sets. Idempotent: 'unchanged' when an up-to-date composite already
- * exists; 'updated' (rebuilt via delete + re-add) when more source series have
- * streamed in since last build (tracked via `allInOneSourceCount`); 'created' on
- * first build; 'skipped' when the study has no eligible series (e.g. a pure-US study).
+ * exists; 'updated' (grown IN PLACE — see below) when more source series have streamed
+ * in since last build (tracked via `allInOneSourceCount`); 'created' on first build;
+ * 'skipped' when the study has no eligible series (e.g. a pure-US study).
  */
 function buildForStudy(
   studyUID: string,
   sources: any[],
   displaySetService: any,
-  dataSource: any
+  dataSource: any,
+  cornerstoneCacheService: any
 ): BuildStatus {
   const sorted = [...sources].sort(bySeries);
   // Concatenate the REAL instances in series order; each source's images are already
@@ -134,11 +135,26 @@ function buildForStudy(
     if (existing.allInOneSourceCount === instances.length) {
       return 'unchanged'; // up to date — nothing streamed in since last build
     }
-    // A series streamed in (or changed) — rebuild from scratch with the full set.
-    // (The composite is the LAST stage, so this delete/re-add normally happens while
-    // it isn't the displayed viewport; a grown composite's stage is already enabled,
-    // so the auto-refresh leaves it to re-match on navigation rather than re-hanging.)
-    displaySetService.deleteDisplaySet(uid);
+    // More series streamed in — GROW IN PLACE. Do NOT delete + re-add: that blanks the
+    // pane whenever the all-in-one is on screen as a study streams in (always the case
+    // in "all-in-one only" mode, where it leads). Mutate the SAME displaySet object the
+    // viewport holds — its `images` array stays mutable even though the property is
+    // read-only — then refresh imageIds/count, drop the stale cornerstone stack-imageId
+    // cache, and invalidate so a live viewport recomputes its stack in place.
+    existing.images.length = 0;
+    existing.images.push(...instances);
+    if (existing.instances && existing.instances !== existing.images) {
+      existing.instances.length = 0;
+      existing.instances.push(...instances);
+    }
+    existing.instance = instances[0];
+    existing.imageIds = dataSource.getImageIdsForDisplaySet(existing);
+    existing.numImageFrames = existing.imageIds.length;
+    existing.allInOneSourceCount = instances.length;
+    existing.SeriesDescription = `All-in-one (${sorted.length} series)`;
+    cornerstoneCacheService?.stackImageIds?.delete?.(uid);
+    displaySetService.setDisplaySetMetadataInvalidated?.(uid, true);
+    return 'updated';
   }
 
   const first: any = instances[0];
@@ -171,7 +187,7 @@ function buildForStudy(
   });
   imageSet.imageIds = imageIds;
   displaySetService.addDisplaySets(imageSet);
-  return existing ? 'updated' : 'created';
+  return 'created';
 }
 
 /**
@@ -189,7 +205,7 @@ export function syncAllInOneDisplaySets({
   extensionManager,
 }: withAppTypes): { created: number; updated: number } {
   const result = { created: 0, updated: 0 };
-  const { displaySetService } = servicesManager?.services ?? {};
+  const { displaySetService, cornerstoneCacheService } = servicesManager?.services ?? {};
   const [dataSource] = extensionManager?.getActiveDataSource?.() ?? [];
   if (!displaySetService || typeof dataSource?.getImageIdsForDisplaySet !== 'function') {
     return result;
@@ -214,7 +230,7 @@ export function syncAllInOneDisplaySets({
 
   byStudy.forEach((sources, studyUID) => {
     try {
-      const status = buildForStudy(studyUID, sources, displaySetService, dataSource);
+      const status = buildForStudy(studyUID, sources, displaySetService, dataSource, cornerstoneCacheService);
       if (status === 'created') {
         result.created++;
       } else if (status === 'updated') {
