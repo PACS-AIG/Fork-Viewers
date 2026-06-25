@@ -18,7 +18,8 @@ const { createSynchronizer } = SynchronizerManager;
  * ImageOrientationPatient) and maps within the group: when the current image is the
  * k-th of its sagittal images, the prior jumps to the proportionally-k-th of ITS
  * sagittal images — so scrolling sagittals shows sagittals, axials show axials, etc.
- * If the prior has no images of the current plane, it's left where it is.
+ * Falls back to a plain proportional map (the pacsaiscroll behavior) when a plane
+ * can't be determined or the prior has none of it, so the panes always scroll together.
  *
  * Registered as the `pacsaiallinonescroll` sync type and attached to the all-in-one
  * current|prior compare stage (see buildCompareProtocol / hpAllInOne).
@@ -81,6 +82,10 @@ function planesFor(imageIds: string[]): Array<string | undefined> {
   return planes;
 }
 
+// Throttled debug logging to diagnose the sync (flip off once confirmed working).
+const DEBUG_SYNC = true;
+let lastSyncLog = 0;
+
 /** Global indices of the images whose plane equals `plane`, in stack order. */
 function planeGroup(planes: Array<string | undefined>, plane: string): number[] {
   const group: number[] = [];
@@ -130,26 +135,36 @@ export default function createAllInOneScrollSynchronizer(
     const srcIdx = source.getCurrentImageIdIndex();
     const srcPlanes = planesFor(srcIds);
     const plane = srcPlanes[srcIdx];
-    if (!plane) {
-      return;
+    const srcGroup = plane ? planeGroup(srcPlanes, plane) : [];
+    const tgtGroup = plane ? planeGroup(planesFor(tgtIds), plane) : [];
+
+    let tgtIdx: number;
+    if (plane && srcGroup.length && tgtGroup.length) {
+      // Plane-grouped: map the current image's position WITHIN its plane group to the
+      // target's same-plane group (sagittal↔sagittal, axial↔axial, …).
+      const srcPos = Math.max(0, srcGroup.indexOf(srcIdx));
+      const frac = srcGroup.length > 1 ? srcPos / (srcGroup.length - 1) : 0;
+      const tgtPos = Math.min(tgtGroup.length - 1, Math.max(0, Math.round(frac * (tgtGroup.length - 1))));
+      tgtIdx = tgtGroup[tgtPos];
+    } else {
+      // Fallback: the plane couldn't be determined (or the target has none of this
+      // plane) — keep the panes moving together with a plain proportional map (the
+      // pacsaiscroll behavior) rather than not syncing at all.
+      const frac = srcIds.length > 1 ? srcIdx / (srcIds.length - 1) : 0;
+      tgtIdx = Math.min(tgtIds.length - 1, Math.max(0, Math.round(frac * (tgtIds.length - 1))));
     }
 
-    // Position of the current image within its same-plane group.
-    const srcGroup = planeGroup(srcPlanes, plane);
-    const srcPos = srcGroup.indexOf(srcIdx);
-    if (srcPos < 0) {
-      return;
+    if (DEBUG_SYNC && Date.now() - lastSyncLog > 800) {
+      lastSyncLog = Date.now();
+      console.log('[pacsai-hp] allinone-sync', {
+        plane,
+        grouped: !!(plane && srcGroup.length && tgtGroup.length),
+        srcIdx,
+        srcCount: srcIds.length,
+        tgtCount: tgtIds.length,
+        tgtIdx,
+      });
     }
-    const frac = srcGroup.length > 1 ? srcPos / (srcGroup.length - 1) : 0;
-
-    // Map proportionally into the target's same-plane group; if it has none of this
-    // plane, leave the target alone (can't show a plane the prior doesn't have).
-    const tgtGroup = planeGroup(planesFor(tgtIds), plane);
-    if (!tgtGroup.length) {
-      return;
-    }
-    const tgtPos = Math.min(tgtGroup.length - 1, Math.max(0, Math.round(frac * (tgtGroup.length - 1))));
-    const tgtIdx = tgtGroup[tgtPos];
 
     // Idempotent: if already there, do nothing (also stops the bidirectional ping-pong).
     if (tgtIdx === target.getCurrentImageIdIndex()) {
