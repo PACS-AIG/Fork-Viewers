@@ -1,5 +1,6 @@
 import { classes } from '@ohif/core';
 import getImageColor from '../utils/getImageColor';
+import getImagePlane from '../utils/getImagePlane';
 
 const { ImageSet } = classes;
 
@@ -7,8 +8,10 @@ const { ImageSet } = classes;
  * "All-in-one" composite display sets.
  *
  * A radiologist-convenience view: every diagnostic image series of a study,
- * concatenated (in SeriesNumber order) into ONE scrollable stack, so the whole
- * study can be reviewed in a single scroll instead of opening each series.
+ * concatenated into ONE scrollable stack (grouped by plane: axial → coronal →
+ * sagittal, SeriesNumber order within each plane), so the whole study can be
+ * reviewed in a single scroll instead of opening each series. The plane grouping
+ * also lets the current|prior all-in-one compare align planes (see the sync).
  *
  * The composite is a THIN WRAPPER, not fake data: its `images` are the REAL
  * instance objects of the source series — each already carrying its own `.imageId`
@@ -84,6 +87,13 @@ function isEligible(ds: any): boolean {
   return true;
 }
 
+// Plane group order for the scroll-through: axial, then coronal, then sagittal, then
+// anything whose plane can't be determined (kept last, in series order).
+const PLANE_ORDER: Record<string, number> = { axial: 0, coronal: 1, sagittal: 2 };
+function planeRank(plane: string | undefined): number {
+  return plane && plane in PLANE_ORDER ? PLANE_ORDER[plane] : 3;
+}
+
 /** SeriesNumber sort (asc), tie-broken by SeriesTime then SeriesInstanceUID. */
 function bySeries(a: any, b: any): number {
   const an = Number(a?.SeriesNumber ?? 0);
@@ -121,9 +131,24 @@ function buildForStudy(
   dataSource: any,
   cornerstoneCacheService: any
 ): BuildStatus {
-  const sorted = [...sources].sort(bySeries);
-  // Concatenate the REAL instances in series order; each source's images are already
-  // InstanceNumber-sorted by its SOP class handler, so we preserve that order.
+  // Group by plane (axial→coronal→sagittal), then SeriesNumber within each plane, so
+  // the composite scrolls one plane at a time. This is what lets the current|prior
+  // compare align planes: both stacks lay their planes out in the same contiguous
+  // order, so the within-plane sync keeps axial opposite axial, etc. (a plain
+  // SeriesNumber concatenation interleaves planes differently per study — the prior's
+  // axials can sit where the current's coronals are). Plane is computed ONCE per source
+  // here (not inside the comparator, which runs O(n log n) times); siblings = all
+  // sources, needed to disambiguate oblique coronal/sagittal reformats.
+  const planeRankOf = new Map<any, number>();
+  for (const ds of sources) {
+    planeRankOf.set(ds, planeRank(getImagePlane(ds, sources)));
+  }
+  const sorted = [...sources].sort((a, b) => {
+    const pr = (planeRankOf.get(a) ?? 3) - (planeRankOf.get(b) ?? 3);
+    return pr !== 0 ? pr : bySeries(a, b);
+  });
+  // Concatenate the REAL instances in plane-then-series order; each source's images are
+  // already InstanceNumber-sorted by its SOP class handler, so we preserve that order.
   const instances = sorted.flatMap(ds => Array.from(ds.images ?? ds.instances ?? []));
   if (!instances.length) {
     return 'skipped';
