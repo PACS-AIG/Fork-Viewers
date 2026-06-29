@@ -1,4 +1,5 @@
-import { cache, imageLoadPoolManager, imageLoader, Enums } from '@cornerstonejs/core';
+import { cache, eventTarget, imageLoadPoolManager, imageLoader, Enums } from '@cornerstonejs/core';
+import { setPrefetchSet, markPrefetchLoaded } from './prefetchProgress';
 
 /**
  * Background prefetcher for the VISIBLE viewports.
@@ -105,13 +106,20 @@ function initViewportPrefetch(
 
     // Gather each displayed stack's still-needed imageIds, then enqueue round-robin
     // so every visible viewport advances together instead of one filling first.
+    // `allImageIds` is the full (unfiltered) set = the progress denominator the chip
+    // reports; `stacks` is the still-needed subset we actually queue.
+    const allImageIds: string[] = [];
     const stacks: string[][] = [];
     new Set(visibleUIDs).forEach((uid: string) => {
-      const imageIds = getImageIds(uid).filter(id => !isPending(id));
-      if (imageIds.length) {
-        stacks.push(imageIds);
+      const ids = getImageIds(uid);
+      ids.forEach(id => allImageIds.push(id));
+      const needed = ids.filter(id => !isPending(id));
+      if (needed.length) {
+        stacks.push(needed);
       }
     });
+
+    setPrefetchSet(allImageIds);
 
     const maxLen = stacks.reduce((m, s) => Math.max(m, s.length), 0);
     for (let i = 0; i < maxLen; i++) {
@@ -128,6 +136,12 @@ function initViewportPrefetch(
     clearTimeout(timer);
     timer = setTimeout(prefetchVisibleViewports, SETTLE_DEBOUNCE_MS);
   };
+
+  // Advance the shared progress store as images finish loading (prefetched or
+  // user-driven — either way the visible layout is now more complete).
+  eventTarget.addEventListener(Enums.Events.IMAGE_LOADED, (evt: any) => {
+    markPrefetchLoaded(evt?.detail?.image?.imageId);
+  });
 
   const { EVENTS } = viewportGridService;
   // VIEWPORTS_READY = a fresh study open — force a re-run even if the displaySet UIDs

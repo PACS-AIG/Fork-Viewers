@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { cache, eventTarget, Enums } from '@cornerstonejs/core';
 import { Icons } from '@ohif/ui-next';
+import { subscribePrefetchProgress, PrefetchProgress } from '../../prefetchProgress';
 
 const { IMAGE_LOADED } = Enums.Events;
 
@@ -27,10 +28,25 @@ const { IMAGE_LOADED } = Enums.Events;
  * reliable loaded-count for stacks, whereas volumes load through a separate cache
  * and would read here as perpetually unloaded. Volume viewports simply get no
  * indicator (they render progressively anyway).
+ *
+ * PREFETCH-AWARE FALLBACK: on a fast server the background prefetcher
+ * (initViewportPrefetch) warms this pane's images before it even mounts, so the
+ * own-stack count above seeds at 100% and the chip never shows — even though the
+ * rest of the visible layout (other compare panes, or a huge all-in-one composite)
+ * is still streaming. To keep feedback in that case, when this viewport's OWN stack
+ * is already complete we fall back to the shared prefetch-progress store and show
+ * "Prefetching X% (n/N)" for the whole visible layout. That fallback is rendered
+ * only on the ACTIVE viewport so a multi-pane layout shows a single chip, not one
+ * per pane. The own-stack "Loading…" always wins when present (it's the pane the
+ * user is actually looking at / scrolling).
  */
 function ViewportLoadingProgress({ viewportId, element, viewportData, servicesManager }: withAppTypes) {
-  const { cornerstoneViewportService } = servicesManager.services;
+  const { cornerstoneViewportService, viewportGridService } = servicesManager.services;
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [prefetch, setPrefetch] = useState<PrefetchProgress | null>(null);
+  const [isActive, setIsActive] = useState(
+    () => viewportGridService?.getActiveViewportId?.() === viewportId
+  );
   // Mutable so the IMAGE_LOADED handler reads the latest set without re-subscribing.
   const stateRef = useRef<{ imageIds: Set<string>; loaded: Set<string>; total: number }>({
     imageIds: new Set(),
@@ -100,11 +116,32 @@ function ViewportLoadingProgress({ viewportId, element, viewportData, servicesMa
     };
   }, [element, viewportData, viewportId, cornerstoneViewportService]);
 
-  if (!progress) {
+  // Track the shared background-prefetch progress (the whole visible layout).
+  useEffect(() => subscribePrefetchProgress(setPrefetch), []);
+
+  // Track whether this is the active viewport so only one prefetch chip shows.
+  useEffect(() => {
+    if (!viewportGridService) {
+      return;
+    }
+    const sync = () => setIsActive(viewportGridService.getActiveViewportId() === viewportId);
+    sync();
+    const { unsubscribe } = viewportGridService.subscribe(
+      viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
+      sync
+    );
+    return () => unsubscribe();
+  }, [viewportGridService, viewportId]);
+
+  // Own stack still streaming wins (this is the pane being viewed). Otherwise, on the
+  // active viewport, surface the background prefetch for the rest of the layout.
+  const active = progress ?? (isActive ? prefetch : null);
+  if (!active) {
     return null;
   }
+  const isPrefetch = !progress;
 
-  const percentComplete = Math.floor((progress.loaded / progress.total) * 100);
+  const percentComplete = Math.floor((active.loaded / active.total) * 100);
 
   // Compact corner chip — non-blocking, so the first image stays fully visible
   // while the rest of the series streams in behind it. Sits just above the
@@ -114,7 +151,8 @@ function ViewportLoadingProgress({ viewportId, element, viewportData, servicesMa
       <div className="flex items-center gap-2 text-xs text-white">
         <Icons.LoadingOHIFMark className="h-4 w-4 text-white" />
         <span>
-          Loading {percentComplete}% ({progress.loaded}/{progress.total})
+          {isPrefetch ? 'Prefetching' : 'Loading'} {percentComplete}% ({active.loaded}/
+          {active.total})
         </span>
       </div>
       <div className="h-0.5 w-full overflow-hidden rounded bg-white/20">
