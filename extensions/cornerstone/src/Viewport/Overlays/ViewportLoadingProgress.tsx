@@ -136,6 +136,20 @@ function ViewportLoadingProgress({ viewportId, element, viewportData, servicesMa
   // Own stack still streaming wins (this is the pane being viewed). Otherwise, on the
   // active viewport, surface the background prefetch for the rest of the layout.
   const active = progress ?? (isActive ? prefetch : null);
+
+  // Bringup debug: log the active pane's render decision only when it changes.
+  const lastDecision = useRef<string>('');
+  if (isActive) {
+    const decision = active
+      ? `${progress ? 'Loading' : 'Prefetching'} ${active.loaded}/${active.total}`
+      : `hidden (own=${progress ? 'loading' : 'done'} prefetch=${prefetch ? `${prefetch.loaded}/${prefetch.total}` : 'null'})`;
+    if (decision !== lastDecision.current) {
+      lastDecision.current = decision;
+      // eslint-disable-next-line no-console
+      console.log(`[pacsai-prefetch] chip(${viewportId}) ${decision}`);
+    }
+  }
+
   if (!active) {
     return null;
   }

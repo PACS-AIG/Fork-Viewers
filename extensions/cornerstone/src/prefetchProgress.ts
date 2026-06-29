@@ -18,6 +18,10 @@ import { cache } from '@cornerstonejs/core';
 
 export type PrefetchProgress = { loaded: number; total: number };
 
+// Bringup debug: flip to false once the prod chip is confirmed. Logs every set/
+// transition and exposes `window.__pacsaiPrefetch()` for on-demand inspection.
+const DEBUG = true;
+
 let tracked = new Set<string>();
 let loaded = new Set<string>();
 const listeners = new Set<(p: PrefetchProgress | null) => void>();
@@ -28,6 +32,15 @@ function snapshot(): PrefetchProgress | null {
     return null;
   }
   return { loaded: loaded.size, total: tracked.size };
+}
+
+if (DEBUG && typeof window !== 'undefined') {
+  (window as any).__pacsaiPrefetch = () => ({
+    snapshot: snapshot(),
+    tracked: tracked.size,
+    loaded: loaded.size,
+    listeners: listeners.size,
+  });
 }
 
 function emit(): void {
@@ -58,6 +71,14 @@ export function setPrefetchSet(imageIds: string[]): void {
       loaded.add(id);
     }
   });
+  if (DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `[pacsai-prefetch] set total=${tracked.size} alreadyCached=${loaded.size} -> chip ${
+        snapshot() ? 'WILL show' : 'hidden (all cached / empty)'
+      }`
+    );
+  }
   emit();
 }
 
