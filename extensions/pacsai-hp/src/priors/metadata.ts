@@ -63,17 +63,51 @@ export function getSpineRegion(text: string): BodyPart | undefined {
   return undefined;
 }
 
+/**
+ * Ancillary / non-diagnostic modalities that ride along with a real series but
+ * must never define a study's modality. The common offender is a plain CXR
+ * stored with a Presentation State as "PR\CR": naively taking the first token
+ * yields 'PR', so the study reads as a different modality than the current CR
+ * and a genuine prior CXR gets demoted below an older one. When a study lists
+ * several modalities we prefer the first DIAGNOSTIC one; a study that is ONLY
+ * an ancillary type (e.g. a standalone SR) still falls back to that type.
+ */
+const NON_DIAGNOSTIC_MODALITIES = new Set([
+  'PR', // presentation state
+  'SR', // structured report
+  'KO', // key object selection
+  'SEG', // segmentation
+  'REG', // registration
+  'RTSTRUCT',
+  'RTPLAN',
+  'RTDOSE',
+  'RTRECORD',
+  'PLAN',
+  'FID', // fiducials
+  'DOC', // encapsulated document
+  'AU', // audio
+  'PMAP', // parametric map
+  'OT', // "other"
+]);
+
+function pickDiagnosticModality(mods: string[]): string | undefined {
+  const cleaned = mods.map(m => m.trim().toUpperCase()).filter(Boolean);
+  if (!cleaned.length) {
+    return undefined;
+  }
+  return cleaned.find(m => !NON_DIAGNOSTIC_MODALITIES.has(m)) ?? cleaned[0];
+}
+
 export function getModality(study: StudyLike): string | undefined {
-  if (study.Modality) {
-    return String(study.Modality).toUpperCase();
+  // Modality may be a single value, ModalitiesInStudy an array or a
+  // backslash/comma-delimited string ("PR\\CR"); normalize all to the
+  // study's diagnostic modality.
+  const raw = study.Modality ?? study.ModalitiesInStudy;
+  if (Array.isArray(raw) && raw.length) {
+    return pickDiagnosticModality(raw.map(String));
   }
-  const m = study.ModalitiesInStudy;
-  if (Array.isArray(m) && m.length) {
-    return String(m[0]).toUpperCase();
-  }
-  if (typeof m === 'string' && m.length) {
-    // ModalitiesInStudy may be a backslash-delimited string.
-    return m.split(/[\\,]/)[0].trim().toUpperCase();
+  if (typeof raw === 'string' && raw.length) {
+    return pickDiagnosticModality(raw.split(/[\\,]/));
   }
   return undefined;
 }

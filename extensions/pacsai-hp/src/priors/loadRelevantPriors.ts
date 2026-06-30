@@ -188,6 +188,43 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     const curDate = parseStudyDate(current);
     const curDateTime = parseStudyDateTime(current);
 
+    // Rank QUALIFYING priors (rad spec): prefer the SAME body part, then the SAME
+    // modality, then the MOST RECENT (StudyDate descending); the additive relevance
+    // score is only the final tiebreak. Recency is therefore primary WITHIN the
+    // compatible group, instead of the old pure score sort letting an indication
+    // keyword or a coarse recency bucket pick an older prior. `ref` is the study a
+    // prior is compared against (the opened study, or a spine region's session study).
+    const makeRanker = (ref: StudyLike) => {
+      const refBody = getBodyPart(ref);
+      const refMod = getModality(ref);
+      const tierOf = (prior: StudyLike): number => {
+        const sameBody = refBody !== 'unknown' && getBodyPart(prior) === refBody;
+        const sameMod = refMod !== undefined && getModality(prior) === refMod;
+        if (sameBody && sameMod) {
+          return 0;
+        }
+        if (sameBody) {
+          return 1;
+        }
+        return 2; // cross-body — kept only as a last resort (see CROSS_BODY_PART)
+      };
+      return (
+        a: { prior: StudyLike; score: number },
+        b: { prior: StudyLike; score: number }
+      ): number => {
+        const tierDelta = tierOf(a.prior) - tierOf(b.prior);
+        if (tierDelta !== 0) {
+          return tierDelta; // better (lower) tier first
+        }
+        const da = parseStudyDateTime(a.prior) ?? -Infinity;
+        const db = parseStudyDateTime(b.prior) ?? -Infinity;
+        if (da !== db) {
+          return db - da; // most recent first
+        }
+        return b.score - a.score; // relevance only breaks ties
+      };
+    };
+
     // Two studies belong to the same concurrent SESSION when their acquisition
     // timestamps are within SESSION_WINDOW_MS of each other (interval-based, not
     // same-calendar-day — so a pair straddling midnight still counts as one session).
@@ -283,10 +320,15 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           .filter(s => getBodyPart(s) === region)
           .map(prior => ({ prior, score: scorePrior({ current: sessionStudy, prior }, policy.scorers) }))
           .filter(({ score }) => score >= policy.minScore)
-          .sort((a, b) => b.score - a.score);
+          .sort(makeRanker(sessionStudy));
         log(
           `region ${region}: ${ranked.length} prior candidate(s)`,
-          ranked.map(({ prior, score }) => ({ score, desc: prior.StudyDescription, date: prior.StudyDate }))
+          ranked.map(({ prior, score }) => ({
+            score,
+            desc: prior.StudyDescription,
+            date: prior.StudyDate,
+            mod: getModality(prior),
+          }))
         );
         if (ranked.length) {
           priorUIDs.push(ranked[0].prior.StudyInstanceUID);
@@ -305,13 +347,25 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
           score,
           StudyDescription: prior.StudyDescription,
           StudyDate: prior.StudyDate,
+          mod: getModality(prior),
+          body: getBodyPart(prior),
         }))
       );
-      priorUIDs = scored
-        .filter(({ score }) => score >= policy.minScore)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, policy.maxPriors)
-        .map(({ prior }) => prior.StudyInstanceUID);
+      const ranked = scored.filter(({ score }) => score >= policy.minScore).sort(makeRanker(current));
+      log(
+        'qualifying priors ranked (same-body > same-modality > most-recent > score)',
+        ranked.map(({ prior, score }) => ({
+          uid: prior.StudyInstanceUID,
+          score,
+          StudyDate: prior.StudyDate,
+          mod: getModality(prior),
+          body: getBodyPart(prior),
+        }))
+      );
+      priorUIDs = ranked.slice(0, policy.maxPriors).map(({ prior }) => prior.StudyInstanceUID);
+      if (priorUIDs.length) {
+        log(`selected prior: ${priorUIDs[0]}`);
+      }
     }
 
     // Register roles BEFORE any (re)hang so the role-based current/prior selectors,
