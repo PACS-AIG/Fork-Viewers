@@ -58,6 +58,10 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
   viewportGridResizeObserver: ResizeObserver | null;
   viewportsDisplaySets: Map<string, string[]> = new Map();
   beforeResizePositionPresentations: Map<string, PositionPresentation> = new Map();
+  // Viewports whose initial "fit image to viewport" could not run correctly yet
+  // because their canvas was still 0x0 (panels/grid not laid out). The size-gated
+  // resize path (performResize) re-fits these once the container has a real size.
+  viewportsNeedingInitialFit: Set<string> = new Set();
 
   // Some configs
   enableResizeDetector: true;
@@ -192,6 +196,7 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     // clean up
     this.viewportsById.delete(viewportId);
     this.viewportsDisplaySets.delete(viewportId);
+    this.viewportsNeedingInitialFit.delete(viewportId);
   }
 
   /**
@@ -662,6 +667,12 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
       if (flipHorizontal) {
         viewport.setCamera({ flipHorizontal: true });
       }
+
+      // cs3D's setStack auto-fits the image to the canvas. If the canvas was
+      // still 0x0 when this ran (panels/grid settling, worst for secondary panes
+      // that mount last), that fit lands zoomed-in/off-center and the viewport
+      // looks blank/black. Re-fit now if the canvas is real, else defer.
+      this._scheduleInitialFit(viewport, presentations);
     });
   }
 
@@ -860,6 +871,10 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     }
 
     viewport.render();
+
+    // Same 0x0-canvas race as stacks: size-gate the initial fit (no-op when an
+    // explicit stored camera is being applied).
+    this._scheduleInitialFit(viewport, presentations);
 
     this._broadcastEvent(this.EVENTS.VIEWPORT_VOLUMES_CHANGED, {
       viewportInfo,
@@ -1075,6 +1090,13 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
 
       // Store the current position presentations for each viewport.
       viewports.forEach(({ id: viewportId }) => {
+        // Viewports still awaiting their first valid fit have no meaningful
+        // camera to preserve (theirs was computed against a 0x0 canvas). Skip
+        // capture/restore for them — they get a fresh resetCamera below.
+        if (this.viewportsNeedingInitialFit.has(viewportId)) {
+          return;
+        }
+
         const presentation = this._getPositionPresentation(viewportId);
 
         // During a resize, the slice index should remain unchanged. This is a temporary fix for
@@ -1097,6 +1119,20 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
         });
       });
 
+      // Size-gated initial fit: the engine has now resized to real dimensions,
+      // so recompute a fresh "fit image to viewport" for any viewport whose
+      // first fit ran against a 0x0 canvas. Clears the flag once it succeeds.
+      if (this.viewportsNeedingInitialFit.size) {
+        Array.from(this.viewportsNeedingInitialFit).forEach(viewportId => {
+          const vp = this.getCornerstoneViewport(viewportId) as
+            | Types.IStackViewport
+            | Types.IVolumeViewport;
+          if (vp && this._fitCameraIfReady(vp)) {
+            this.viewportsNeedingInitialFit.delete(viewportId);
+          }
+        });
+      }
+
       // Resize and render the rendering engine again.
       renderingEngine.resize(isImmediate);
       renderingEngine.render();
@@ -1104,6 +1140,57 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
       // This can happen if the resize is too close to navigation or shutdown
       console.warn('Caught resize exception', e);
     }
+  }
+
+  /**
+   * Decides how to establish the initial "fit image to viewport" for a freshly
+   * loaded viewport, avoiding the race where cs3D's auto-fit runs against a 0x0
+   * canvas (panels/grid still settling) and leaves the camera zoomed-in and
+   * off-center so the viewport looks blank/black.
+   *
+   * - If an explicit camera is being applied (positionPresentation, e.g. measurement
+   *   navigation or returning to a previously-viewed viewport), that wins — do nothing.
+   * - If the canvas already has a real size, refit immediately.
+   * - Otherwise flag it so the size-driven resize path (performResize) refits once
+   *   the container settles. We do NOT keep the flag after a successful fit, so a
+   *   later resize never resets the user's pan/zoom.
+   */
+  private _scheduleInitialFit(
+    viewport: Types.IStackViewport | Types.IVolumeViewport,
+    presentations: Presentations = {}
+  ): void {
+    if (presentations?.positionPresentation?.viewPresentation) {
+      this.viewportsNeedingInitialFit.delete(viewport.id);
+      return;
+    }
+
+    if (this._fitCameraIfReady(viewport)) {
+      this.viewportsNeedingInitialFit.delete(viewport.id);
+    } else {
+      this.viewportsNeedingInitialFit.add(viewport.id);
+    }
+  }
+
+  /**
+   * Recomputes the fit-to-viewport camera, but only once the canvas has a real
+   * (non-zero) size — resetCamera fits against the canvas, so fitting a 0x0
+   * canvas is exactly the bug we are guarding against. Returns whether it fit.
+   */
+  private _fitCameraIfReady(
+    viewport: Types.IStackViewport | Types.IVolumeViewport
+  ): boolean {
+    const canvas = viewport?.canvas;
+    if (!canvas || canvas.width === 0 || canvas.height === 0) {
+      return false;
+    }
+
+    try {
+      viewport.resetCamera();
+      viewport.render();
+    } catch (e) {
+      console.warn('Initial camera fit failed', e);
+    }
+    return true;
   }
 
   private resetGridResizeTimeout() {
