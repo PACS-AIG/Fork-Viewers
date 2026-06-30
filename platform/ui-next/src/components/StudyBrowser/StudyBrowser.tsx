@@ -22,6 +22,11 @@ const StudyBrowser = ({
   viewPresets,
   ThumbnailMenuItems,
   StudyMenuItems,
+  // Optional: (studyInstanceUid) => 'current' | 'prior' | 'sibling' | undefined.
+  // When provided, each row shows a colored role dot (green current / amber prior)
+  // and the current/report-target row is highlighted. Supplied by the longitudinal
+  // mode (backed by the pacsai-hp comparison-role registry); absent elsewhere.
+  studyRoleResolver,
 }: withAppTypes) => {
   const getTabContent = () => {
     const tabData = tabs.find(tab => tab.name === activeTabName);
@@ -31,6 +36,7 @@ const StudyBrowser = ({
     return tabData?.studies?.map(
       ({ studyInstanceUid, date, description, numInstances, modalities, displaySets }) => {
         const isExpanded = expandedStudyInstanceUIDs.includes(studyInstanceUid);
+        const studyRole = studyRoleResolver ? studyRoleResolver(studyInstanceUid) : undefined;
         return (
           <React.Fragment key={studyInstanceUid}>
             <StudyItem
@@ -41,6 +47,7 @@ const StudyBrowser = ({
               displaySets={displaySets}
               modalities={modalities}
               isActive={isExpanded}
+              studyRole={studyRole}
               onClick={() => onClickStudy(studyInstanceUid)}
               onClickThumbnail={onClickThumbnail}
               onDoubleClickThumbnail={onDoubleClickThumbnail}
@@ -132,6 +139,7 @@ StudyBrowser.propTypes = {
     })
   ),
   StudyMenuItems: PropTypes.func,
+  studyRoleResolver: PropTypes.func,
 };
 
 export { StudyBrowser };

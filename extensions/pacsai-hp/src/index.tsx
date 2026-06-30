@@ -4,7 +4,10 @@ import { id } from './id';
 import getHangingProtocolModule from './getHangingProtocolModule';
 import getCommandsModule from './getCommandsModule';
 import getToolbarModule from './getToolbarModule';
-import { priorOverlayItem, PRIOR_OVERLAY_ITEM_ID } from './overlays/priorOverlayItem';
+import {
+  studyRoleOverlayItem,
+  STUDY_ROLE_OVERLAY_ITEM_ID,
+} from './overlays/studyRoleOverlayItem';
 import {
   seriesTypeOverlayItem,
   SERIES_TYPE_OVERLAY_ITEM_ID,
@@ -192,11 +195,12 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
 
 export default pacsaiHpExtension;
 export {
-  priorOverlayItem,
-  PRIOR_OVERLAY_ITEM_ID,
+  studyRoleOverlayItem,
+  STUDY_ROLE_OVERLAY_ITEM_ID,
   seriesTypeOverlayItem,
   SERIES_TYPE_OVERLAY_ITEM_ID,
   studyDescriptionOverlayItem,
   STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
   patientInfoOverlayItems,
+  getStudyRole,
 };

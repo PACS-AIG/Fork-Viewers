@@ -6,6 +6,13 @@ import { ThumbnailList } from '../ThumbnailList';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '../Accordion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../Tooltip';
 
+// Comparison-role dot: green = current (report target), amber = prior. Color is
+// reinforced by the row's date/description and a hover title (not color alone).
+const STUDY_ROLE_DOT: Record<string, { color: string; title: string }> = {
+  current: { color: '#34D399', title: 'Current study (report target)' },
+  prior: { color: '#FBBF24', title: 'Prior study' },
+};
+
 const StudyItem = ({
   date,
   description,
@@ -23,7 +30,9 @@ const StudyItem = ({
   ThumbnailMenuItems,
   StudyMenuItems,
   StudyInstanceUID,
+  studyRole,
 }: withAppTypes) => {
+  const roleDot = studyRole ? STUDY_ROLE_DOT[studyRole] : undefined;
   return (
     <Accordion
       type="single"
@@ -38,15 +47,28 @@ const StudyItem = ({
       onValueChange={() => onClick()}
     >
       <AccordionItem value="study-item">
-        <AccordionTrigger className={classnames('hover:bg-accent bg-popover group w-full rounded')}>
+        <AccordionTrigger
+          className={classnames('hover:bg-accent bg-popover group w-full rounded', {
+            'border-l-2 border-l-[#34D399]': studyRole === 'current',
+          })}
+        >
           <div className="flex h-[40px] w-full flex-row overflow-hidden">
             <div className="flex w-full flex-row items-center justify-between">
               <div className="flex min-w-0 flex-col items-start text-[13px]">
                 <Tooltip>
                   <TooltipContent>{date}</TooltipContent>
                   <TooltipTrigger className="w-full">
-                    <div className="h-[18px] w-full max-w-[160px] overflow-hidden truncate whitespace-nowrap text-left text-white">
-                      {date}
+                    <div className="flex h-[18px] w-full max-w-[160px] items-center gap-1.5 text-left">
+                      {roleDot && (
+                        <span
+                          title={roleDot.title}
+                          className="inline-block h-2 w-2 flex-none rounded-full"
+                          style={{ backgroundColor: roleDot.color }}
+                        />
+                      )}
+                      <span className="overflow-hidden truncate whitespace-nowrap text-white">
+                        {date}
+                      </span>
                     </div>
                   </TooltipTrigger>
                 </Tooltip>
@@ -109,6 +131,7 @@ StudyItem.propTypes = {
   viewPreset: PropTypes.string,
   StudyMenuItems: PropTypes.func,
   StudyInstanceUID: PropTypes.string,
+  studyRole: PropTypes.oneOf(['current', 'prior', 'sibling']),
 };
 
 export { StudyItem };

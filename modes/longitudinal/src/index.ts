@@ -1,10 +1,11 @@
 import { hotkeys } from '@ohif/core';
 import i18n from 'i18next';
 import {
-  priorOverlayItem,
+  studyRoleOverlayItem,
   seriesTypeOverlayItem,
   studyDescriptionOverlayItem,
   patientInfoOverlayItems,
+  getStudyRole,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
@@ -91,17 +92,35 @@ function modeFactory({ modeConfiguration }) {
      * Lifecycle hooks
      */
     onModeEnter: function ({ servicesManager, extensionManager, commandsManager }: withAppTypes) {
-      const { measurementService, toolbarService, toolGroupService, customizationService } =
-        servicesManager.services;
+      const {
+        measurementService,
+        toolbarService,
+        toolGroupService,
+        customizationService,
+        hangingProtocolService,
+      } = servicesManager.services;
 
       measurementService.clearMeasurements();
 
-      // Add the top-right viewport overlay badges: yellow "PRIOR" (on prior
-      // viewports) and a cyan series-type tag (AXIAL/CORONAL/SAGITTAL · SOFT/BONE).
-      // Idempotent so re-entering the mode doesn't duplicate them.
+      // Study-browser left rail: resolve each study's comparison role
+      // (current / prior / sibling) from the pacsai-hp role registry, so each row
+      // shows a green (current/report target) or amber (prior) status dot and the
+      // report-target row is highlighted. activeStudyUID is read live per call so
+      // the resolver stays correct across re-hangs and session-study switches.
+      customizationService.setCustomizations({
+        'studyBrowser.studyRoleResolver': {
+          $set: (studyInstanceUID: string) =>
+            getStudyRole(studyInstanceUID, hangingProtocolService.getState?.()?.activeStudyUID),
+        },
+      });
+
+      // Add the top-right viewport overlay badges: a green "CURRENT" / amber
+      // "PRIOR · date · interval" study-role tag and a cyan series-type tag
+      // (AXIAL/CORONAL/SAGITTAL · SOFT/BONE). Idempotent so re-entering the mode
+      // doesn't duplicate them.
       const topRight = customizationService.getCustomization('viewportOverlay.topRight') || [];
       const existingIds = new Set(topRight.map((item: { id?: string }) => item?.id));
-      const toAdd = [priorOverlayItem, seriesTypeOverlayItem].filter(
+      const toAdd = [studyRoleOverlayItem, seriesTypeOverlayItem].filter(
         item => !existingIds.has(item.id)
       );
       if (toAdd.length) {

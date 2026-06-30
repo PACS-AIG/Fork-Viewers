@@ -522,6 +522,7 @@ export default function PanelStudyBrowserTracking({
         servicesManager={servicesManager}
         activeTabName={activeTabName}
         expandedStudyInstanceUIDs={expandedStudyInstanceUIDs}
+        studyRoleResolver={customizationService.getCustomization('studyBrowser.studyRoleResolver')}
         onClickStudy={_handleStudyClick}
         onClickTab={clickedTabName => {
           setActiveTabName(clickedTabName);
