@@ -229,7 +229,11 @@ function getDisplaySetsFromSeries(instances) {
       // If it looks like diffusion but we couldn't split, dump why (which b-value
       // tag is present/absent) so the vendor fallback can be tuned on a live case.
       const desc = stackableInstances[0].SeriesDescription || '';
-      if (stackableInstances[0].Modality === 'MR' && /\b(dwi|diff|dti|adc|b\d{2,4})\b/i.test(desc)) {
+      // Substring match (NOT \b): Siemens names like "AXIAL DIFFUSION_TRACEW" /
+      // "…DIFFUSION_ADC" have letters/underscores at the token edges, so word
+      // boundaries would miss them and hide the diagnostic on the very series we
+      // need it for.
+      if (stackableInstances[0].Modality === 'MR' && /diffus|dwi|dti|tracew|trace|adc/i.test(desc)) {
         console.log(
           `[pacsai-dwi] NOT split "${desc}" —`,
           describeDwiDetection(stackableInstances)
