@@ -12,9 +12,12 @@ import buildCompareProtocol from './buildCompareProtocol';
  *  - FLAIR is often "dark-fluid" / "tirm" (not the literal word "flair").
  *  - T2 must exclude FLAIR (dark-fluid), SWI/GRE and MIPs.
  *  - SWI/GRE is the susceptibility stage (exclude MIP overlays).
- *  - DWI is the trace image (exclude ADC / derived maps).
+ *  - DWI is the trace image (exclude ADC / derived maps). When the series is
+ *    split by b-value (see the DWI splitter), the DWI selector prefers the high-b
+ *    trace (b1000) over b0 via preferHighBValue.
  *
- * Stages, each current beside prior: T1, T2, FLAIR, SWI/GRE, DWI.
+ * Stages, each current beside prior: T1, T2, FLAIR, SWI/GRE, DWI. Plus a
+ * current-only "DWI (high-b) + ADC" pair — the restricted-diffusion read.
  */
 const FLAIR_WORDS = ['flair', 'dark-fluid', 'dark_fluid', 'darkfluid', 'tirm'];
 const SHARP_WORDS = ['swi', 'gre', 't2*', 'star', 'susc', 'hemo'];
@@ -57,6 +60,15 @@ export const hpCompareMRBrain = buildCompareProtocol({
       preferPlane: 'axial',
       keywords: ['dwi', 'diff', 'trace', 'tracew'],
       excludeKeywords: ['adc', 'exp', '_fa', 'mip'], // exclude ADC / derived maps
+      // When the series is split by b-value, hang the high-b trace (b1000), not b0.
+      preferHighBValue: true,
+    },
+    {
+      key: 'adc',
+      preferPlane: 'axial',
+      keywords: ['adc'],
+      // Exclude the exponential/eADC map and FA/MIP — read the true ADC.
+      excludeKeywords: ['eadc', 'exp', '_fa', 'mip'],
     },
   ],
   stages: [
@@ -66,6 +78,9 @@ export const hpCompareMRBrain = buildCompareProtocol({
     { name: 'SWI/GRE (current/prior)', selector: 'swi' },
     { name: 'DWI (current/prior)', selector: 'dwi' },
   ],
+  // Restricted-diffusion read: the high-b trace beside the ADC (current study).
+  // Auto-eligible only when both are present; otherwise pageable.
+  currentStages: [{ name: 'DWI (high-b) + ADC', selectors: ['dwi', 'adc'] }],
 });
 
 export default hpCompareMRBrain;

@@ -47,6 +47,13 @@ export const ROLE_ATTRIBUTE = 'pacsaiRole';
 /** Custom HP attribute id: color class (rgb/mono), to exclude derived color series. */
 export const COLOR_ATTRIBUTE = 'pacsaiColor';
 
+/**
+ * Custom HP attribute id: diffusion b-value of a (split) DWI displaySet, stamped
+ * by the DWI splitter (`diffusionBValue`). Lets a selector prefer the high-b trace
+ * (e.g. b1000) over b0; undefined for non-diffusion / unsplit series.
+ */
+export const BVALUE_ATTRIBUTE = 'pacsaiBValue';
+
 /** Custom HP attribute id: marks the synthetic all-in-one composite stack. */
 export const ALL_IN_ONE_ATTRIBUTE = 'pacsaiAllInOne';
 
@@ -124,6 +131,12 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       'Color class (rgb/mono)',
       getImageColor
     );
+
+    // Diffusion b-value of a split DWI displaySet, so the DWI stage can prefer the
+    // high-b trace (b1000) over b0. undefined for non-diffusion / unsplit series.
+    hangingProtocolService?.addCustomAttribute?.(BVALUE_ATTRIBUTE, 'Diffusion b-value', (
+      displaySet: any
+    ) => (typeof displaySet?.diffusionBValue === 'number' ? displaySet.diffusionBValue : undefined));
 
     // All-in-one composite marker: 'allinone' for the synthetic concatenated stack
     // (built by loadRelevantPriors), 'series' for every real series. Lets the

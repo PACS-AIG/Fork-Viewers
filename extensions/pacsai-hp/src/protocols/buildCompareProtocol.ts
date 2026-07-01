@@ -80,6 +80,14 @@ type SelectorDef = {
    * ImageType is absent or only reformats exist.
    */
   preferImageType?: string | string[];
+  /**
+   * Prefer (but do not require) the high-b diffusion trace via the `pacsaiBValue`
+   * attribute (stamped on split DWI displaySets). Adds graduated weight so b1000
+   * outranks b500 outranks b0 when a series is split by b-value; an unsplit trace
+   * (no b-value) still matches with no bonus. Use on the DWI selector so the stage
+   * hangs the high-b image the reader wants, not b0.
+   */
+  preferHighBValue?: boolean;
 };
 
 type StageDef = {
@@ -427,6 +435,13 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       // Weighted, NOT required: prefers this kernel class but still matches others,
       // so the pane falls back (e.g. soft axial when no lung-kernel recon exists).
       rules.push({ attribute: 'pacsaiKernel', weight: 10, constraint: { equals: { value: sel.preferKernel } } });
+    }
+    if (sel.preferHighBValue) {
+      // Weighted, NOT required: graduated so a split DWI trace ranks b1000 > b500 > b0
+      // (each threshold stacks), while an unsplit trace (no pacsaiBValue) still matches
+      // via keywords with no bonus. Keeps the DWI stage on the high-b image.
+      rules.push({ attribute: 'pacsaiBValue', weight: 20, constraint: { greaterThan: { value: 100 } } });
+      rules.push({ attribute: 'pacsaiBValue', weight: 20, constraint: { greaterThan: { value: 500 } } });
     }
     if (sel.keywords?.length) {
       rules.push({ attribute: 'SeriesDescription', required: true, constraint: { containsI: sel.keywords } });
