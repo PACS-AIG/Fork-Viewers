@@ -155,6 +155,16 @@ export type CompareConfig = {
    */
   currentStages?: Array<{ name: string; selectors: string[]; voi?: VOI }>;
   /**
+   * Place the `currentStages` groups AFTER the densest current-only overview stage
+   * instead of before it. Default (false) front-anchors them so they LEAD a no-prior
+   * study (e.g. CTA runoff → runoff reformats first). Set true when the overview
+   * should open first and the group is a secondary read one page right — e.g. a
+   * no-prior brain MR opens on the T1/T2/FLAIR(/DWI) overview, with the DWI+ADC pair
+   * next. Only affects the no-prior ordering; compare stages still lead when a prior
+   * exists.
+   */
+  currentGroupsAfterLeadView?: boolean;
+  /**
    * Tile up to N of the CURRENT study's images side by side in one stage — for
    * projection radiography (CR/DX), where a single "study" holds several distinct
    * single-image views (ankle AP/Lat/Obl, chest PA/Lat, …) the radiologist reads
@@ -338,6 +348,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     excludeColorSeries = false,
     currentView,
     currentStages,
+    currentGroupsAfterLeadView = false,
     tileCurrentImages,
     selectors,
     stages,
@@ -955,9 +966,22 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // No-prior path: pageable current-only groups, then multi-view tiling (projection
   // radiography), then the descending currentView fallback. Region-compare protocols
   // manage their own current-only views, so none of these apply there.
-  const postCompareStages = hasRegionCompare
-    ? []
-    : [...currentGroupStages, ...tileStages, ...fallbackStages];
+  let postCompareStages: any[];
+  if (hasRegionCompare) {
+    postCompareStages = [];
+  } else if (currentGroupsAfterLeadView && currentGroupStages.length && fallbackStages.length) {
+    // Overview leads a no-prior study; the pageable current groups sit right after
+    // the densest current-only view (so e.g. brain MR opens on the T1/T2/FLAIR
+    // overview and the DWI+ADC pair is one page right, not the opening view).
+    postCompareStages = [
+      fallbackStages[0],
+      ...currentGroupStages,
+      ...fallbackStages.slice(1),
+      ...tileStages,
+    ];
+  } else {
+    postCompareStages = [...currentGroupStages, ...tileStages, ...fallbackStages];
+  }
 
   const protocolMatchingRules: Rule[] = [
     {

@@ -81,6 +81,9 @@ export const hpCompareMRBrain = buildCompareProtocol({
   // Restricted-diffusion read: the high-b trace beside the ADC (current study).
   // Auto-eligible only when both are present; otherwise pageable.
   currentStages: [{ name: 'DWI (high-b) + ADC', selectors: ['dwi', 'adc'] }],
+  // A no-prior brain MR opens on the T1/T2/FLAIR overview, not on the DWI+ADC pair
+  // (which sits one page to the right). Compare stages still lead when a prior exists.
+  currentGroupsAfterLeadView: true,
 });
 
 export default hpCompareMRBrain;
