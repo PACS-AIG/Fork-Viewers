@@ -3,6 +3,7 @@ import { id } from './id';
 import getDisplaySetMessages from './getDisplaySetMessages';
 import getDisplaySetsFromUnsupportedSeries from './getDisplaySetsFromUnsupportedSeries';
 import { chartHandler } from './SOPClassHandlers/chartSOPClassHandler';
+import splitDwiInstances, { describeDwiDetection } from './utils/splitDwiInstances';
 
 const { isImage, sopClassDictionary, isDisplaySetReconstructable } = utils;
 const { ImageSet } = classes;
@@ -197,12 +198,50 @@ function getDisplaySetsFromSeries(instances) {
   });
 
   if (stackableInstances.length) {
-    const displaySet = makeDisplaySet(stackableInstances);
-    displaySet.setAttribute('studyInstanceUid', instances[0].StudyInstanceUID);
-    displaySet.setAttributes({
-      sopClassUids,
-    });
-    displaySets.push(displaySet);
+    // DWI: split a mixed diffusion series into one displaySet per b-value + ADC
+    // so each is its own labeled thumbnail. Returns null (no split) for
+    // non-diffusion series or when instances can't be confidently keyed.
+    const dwiGroups = splitDwiInstances(stackableInstances);
+
+    if (dwiGroups) {
+      const detected = dwiGroups.map(g => g.labelSuffix).join(', ');
+      console.log(
+        `[pacsai-dwi] split "${stackableInstances[0].SeriesDescription}" -> ${dwiGroups.length} groups: ${detected}`
+      );
+      dwiGroups.forEach(group => {
+        const displaySet = makeDisplaySet(group.instances);
+        displaySet.setAttribute('studyInstanceUid', instances[0].StudyInstanceUID);
+        const baseDescription = group.instances[0].SeriesDescription || '';
+        // Suffix the description so each split set is a distinct thumbnail, e.g.
+        // "AX DWI · b1000" / "AX DWI · ADC" (skip an ADC suffix if already named ADC).
+        const alreadyLabeled = group.isADC && /adc/i.test(baseDescription);
+        displaySet.setAttributes({
+          sopClassUids,
+          SeriesDescription: alreadyLabeled
+            ? baseDescription
+            : `${baseDescription} · ${group.labelSuffix}`.trim(),
+          diffusionBValue: group.bValue,
+          isADC: group.isADC,
+        });
+        displaySets.push(displaySet);
+      });
+    } else {
+      // If it looks like diffusion but we couldn't split, dump why (which b-value
+      // tag is present/absent) so the vendor fallback can be tuned on a live case.
+      const desc = stackableInstances[0].SeriesDescription || '';
+      if (stackableInstances[0].Modality === 'MR' && /\b(dwi|diff|dti|adc|b\d{2,4})\b/i.test(desc)) {
+        console.log(
+          `[pacsai-dwi] NOT split "${desc}" —`,
+          describeDwiDetection(stackableInstances)
+        );
+      }
+      const displaySet = makeDisplaySet(stackableInstances);
+      displaySet.setAttribute('studyInstanceUid', instances[0].StudyInstanceUID);
+      displaySet.setAttributes({
+        sopClassUids,
+      });
+      displaySets.push(displaySet);
+    }
   }
 
   return displaySets;
