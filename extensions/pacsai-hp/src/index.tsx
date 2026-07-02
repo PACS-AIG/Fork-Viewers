@@ -4,6 +4,7 @@ import { id } from './id';
 import getHangingProtocolModule from './getHangingProtocolModule';
 import getCommandsModule from './getCommandsModule';
 import getToolbarModule from './getToolbarModule';
+import getPanelModule from './getPanelModule';
 import {
   studyRoleOverlayItem,
   STUDY_ROLE_OVERLAY_ITEM_ID,
@@ -208,6 +209,7 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
   getHangingProtocolModule,
   getCommandsModule,
   getToolbarModule,
+  getPanelModule,
 };
 
 export default pacsaiHpExtension;

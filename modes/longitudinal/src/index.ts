@@ -37,6 +37,10 @@ const tracked = {
   viewport: '@ohif/extension-measurement-tracking.viewportModule.cornerstone-tracked',
 };
 
+const pacsai = {
+  studyInfoPanel: '@ohif/extension-pacsai-hp.panelModule.studyInfo',
+};
+
 const dicomsr = {
   sopClassHandler: '@ohif/extension-cornerstone-dicom-sr.sopClassHandlerModule.dicom-sr',
   sopClassHandler3D: '@ohif/extension-cornerstone-dicom-sr.sopClassHandlerModule.dicom-sr-3d',
@@ -362,8 +366,8 @@ function modeFactory({ modeConfiguration }) {
               leftPanels: [tracked.thumbnailList],
               leftPanelResizable: true,
               rightPanels: isSegPanelForced()
-                ? [cornerstone.segmentation, tracked.measurements]
-                : [tracked.measurements],
+                ? [pacsai.studyInfoPanel, cornerstone.segmentation, tracked.measurements]
+                : [pacsai.studyInfoPanel, tracked.measurements],
               rightPanelClosed: true,
               rightPanelResizable: true,
               viewports: [
