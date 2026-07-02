@@ -26,14 +26,27 @@
  *     callbacks are idempotent, and we only churn a binding when its element changed
  *     or it was missing.)
  *
- * Fix: after the layout settles, re-assert every pacsai binding, tracking WHICH
- * element each (syncGroup, viewport) binding was attached to. A binding is healthy
- * only if it exists AND was made against the pane's current element; otherwise
- * remove-then-re-add (remove splices the membership so add really re-attaches the
- * listener to the current element). Bindings left over from a previous stage (group
- * id not in the current hang) are removed so no ghost cross-stage sync survives.
- * getViewportInfo().getSyncGroups() always reflects the CURRENT hang. Debounced, and
- * a cheap no-op for layouts with no pacsai sync groups.
+ *  3. STALE viewportInfo (memo-blocked): OHIFCornerstoneViewport's React memo
+ *     comparator (`areEqual`) checks orientation / toolGroupId / viewportType /
+ *     displaySet imageIds but IGNORES syncGroups. A stage transition that keeps a
+ *     pane's viewportId AND displaySet (e.g. CT head: multi-WL 3-up pane 0 → axial
+ *     compare pane 0, both the current-axial series) is memo-equal, so the pane never
+ *     re-renders, setViewportData never runs, and cornerstoneViewportService's
+ *     viewportInfo keeps the PREVIOUS stage's viewportOptions. The pane stays bound to
+ *     the old stage's sync group while its partner pane binds the new one — two
+ *     different groups, deterministically dead sync (live-confirmed via the state
+ *     dump: pane 'default' want/bound `-multiwl-0` while the prior pane had
+ *     `-scroll-ax-0`). Therefore the want-truth below comes from the GRID state's
+ *     viewportOptions (the re-hang always updates those), NOT from viewportInfo.
+ *
+ * Fix: after the layout settles, re-assert every pacsai binding against the grid
+ * state's syncGroups, tracking WHICH element each (syncGroup, viewport) binding was
+ * attached to. A binding is healthy only if it exists AND was made against the pane's
+ * current element; otherwise remove-then-re-add (remove splices the membership so add
+ * really re-attaches the listener to the current element). Bindings whose group id is
+ * not wanted by the current grid state (previous stage's ghosts — incl. the stale
+ * viewportInfo binding of quirk 3) are removed. Debounced, and a cheap no-op for
+ * layouts with no pacsai sync groups.
  */
 
 // Matches SCROLL_SYNC_TYPE / ALL_IN_ONE_SCROLL_SYNC_TYPE in index.tsx and the
@@ -74,13 +87,15 @@ function initScrollSyncBinding({
 
     const summary: Array<Record<string, unknown>> = [];
 
-    viewports.forEach((_viewport: any, viewportId: string) => {
+    viewports.forEach((gridViewport: any, viewportId: string) => {
       try {
         const info = cornerstoneViewportService.getViewportInfo(viewportId);
         if (!info) {
           return;
         }
-        const wanted = (info.getSyncGroups?.() ?? []).filter((g: any) =>
+        // Want-truth = the GRID's viewportOptions (always updated by a re-hang), NOT
+        // viewportInfo.getSyncGroups() — viewportInfo can be memo-stale (quirk 3).
+        const wanted = (gridViewport?.viewportOptions?.syncGroups ?? []).filter((g: any) =>
           PACSAI_SCROLL_SYNC_TYPES.includes(g?.type)
         );
         const renderingEngineId = info.getRenderingEngineId?.();
