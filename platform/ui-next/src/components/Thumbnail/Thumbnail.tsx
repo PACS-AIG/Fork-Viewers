@@ -25,6 +25,7 @@ const Thumbnail = ({
   onDoubleClick,
   thumbnailType,
   modality,
+  sliceThickness,
   viewPreset = 'thumbnails',
   isHydratedForDerivedDisplaySet = false,
   isTracked = false,
@@ -156,6 +157,9 @@ const Thumbnail = ({
                 <div>{numInstances}</div>
               </div>
             </div>
+            {sliceThickness ? (
+              <div className="text-muted-foreground text-[11px]">{sliceThickness}</div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -306,6 +310,7 @@ Thumbnail.propTypes = {
   onDoubleClick: PropTypes.func.isRequired,
   viewPreset: PropTypes.string,
   modality: PropTypes.string,
+  sliceThickness: PropTypes.string,
   isHydratedForDerivedDisplaySet: PropTypes.bool,
   isTracked: PropTypes.bool,
   onClickUntrack: PropTypes.func,

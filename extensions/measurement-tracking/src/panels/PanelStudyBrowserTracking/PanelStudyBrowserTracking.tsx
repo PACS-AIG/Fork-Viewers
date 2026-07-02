@@ -621,6 +621,8 @@ function _mapDisplaySets(
       const { displaySetInstanceUID } = ds;
       const loadingProgress = displaySetLoadingState?.[displaySetInstanceUID];
 
+      const sliceThickness = Number(ds.instances?.[0]?.SliceThickness ?? ds.SliceThickness);
+
       const thumbnailProps = {
         displaySetInstanceUID,
         description: ds.SeriesDescription,
@@ -628,6 +630,11 @@ function _mapDisplaySets(
         modality: ds.Modality,
         seriesDate: formatDate(ds.SeriesDate),
         numInstances: ds.numImageFrames,
+        // Compact caption on the series card (CT/MR triage aid); omitted when
+        // the tag is absent (CR/US/documents).
+        sliceThickness: Number.isFinite(sliceThickness)
+          ? `${sliceThickness.toFixed(1)}mm`
+          : undefined,
         loadingProgress,
         countIcon: ds.countIcon,
         messages: ds.messages,

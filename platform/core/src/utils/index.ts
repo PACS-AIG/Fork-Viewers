@@ -40,6 +40,7 @@ import { splitComma, getSplitParam } from './splitComma';
 import { createStudyBrowserTabs } from './createStudyBrowserTabs';
 import { sopClassDictionary } from './sopClassDictionary';
 import * as MeasurementFilters from './measurementFilters';
+import { parseDicomAge, deriveAgeFromDob } from './dicomAge';
 
 // Commented out unused functionality.
 // Need to implement new mechanism for derived displaySets using the displaySetManager.
@@ -60,6 +61,8 @@ const utils = {
   formatDate,
   formatTime,
   formatPN,
+  parseDicomAge,
+  deriveAgeFromDob,
   b64toBlob,
   urlUtil,
   imageIdToURI,
@@ -120,6 +123,8 @@ export {
   generateAcceptHeader,
   createStudyBrowserTabs,
   MeasurementFilters,
+  parseDicomAge,
+  deriveAgeFromDob,
 };
 
 export default utils;
