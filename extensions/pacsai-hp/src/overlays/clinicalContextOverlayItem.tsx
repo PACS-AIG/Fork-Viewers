@@ -123,7 +123,10 @@ function ClinicalContextLine({
 
   return (
     <div
-      className="overlay-item flex flex-row"
+      // pl-1 mirrors the ml-1 indent the base `ohif.overlayItem` puts on its
+      // value span, so this line left-aligns with the stock top-left items
+      // (date / series / study description) rendered beneath it.
+      className="overlay-item flex flex-row pl-1"
       data-cy="clinical-context"
       // Hover-to-expand on a truncated indication needs pointer events; the
       // hit area is one ~12px text line in the corner, outside the anatomy.
