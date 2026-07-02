@@ -403,8 +403,10 @@ const OHIFCornerstoneViewport = React.memo(
             servicesManager={servicesManager}
           />
         </div>
-        {/* top offset of 24px to account for ViewportActionCorners. */}
-        <div className="absolute top-[24px] w-full">
+        {/* top offset of 24px to account for ViewportActionCorners.
+            pointer-events-none: the Notification is now a compact right-anchored
+            card, so the rest of this full-width strip must stay click-through. */}
+        <div className="pointer-events-none absolute top-[24px] w-full">
           {viewportDialogState.viewportId === viewportId && (
             <Notification
               id="viewport-notification"
