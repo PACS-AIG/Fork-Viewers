@@ -55,8 +55,15 @@ function Header({
       isSticky={isSticky}
       {...props}
     >
-      <div className="relative h-[48px] items-center">
-        <div className="absolute left-0 top-1/2 flex -translate-y-1/2 items-center">
+      {/* In-flow flex layout (was four absolutely-positioned blocks): the
+          centered toolbar could slide under the right-side patient chip on
+          narrower windows since absolute siblings don't constrain each other.
+          Now the toolbar zone is the flexible one (flex-1, min-w-0, scrolls
+          when genuinely too tight) and left/right zones stay in flow, so
+          overlap is impossible. Trade-off: the toolbar centers within the
+          remaining space rather than the exact viewport center. */}
+      <div className="flex h-[48px] items-center">
+        <div className="flex shrink-0 items-center">
           <div
             className={classNames(
               'mr-3 inline-flex items-center',
@@ -70,12 +77,14 @@ function Header({
               {WhiteLabeling?.createLogoComponentFn?.(React, props) || <Icons.OHIFLogo />}
             </div>
           </div>
+          {Secondary ? <div className="ml-6 h-8">{Secondary}</div> : null}
         </div>
-        <div className="absolute top-1/2 left-[250px] h-8 -translate-y-1/2">{Secondary}</div>
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transform">
-          <div className="flex items-center justify-center space-x-2">{children}</div>
+        <div className="flex min-w-0 flex-1 items-center justify-center px-2">
+          <div className="flex items-center justify-center space-x-2 overflow-x-auto">
+            {children}
+          </div>
         </div>
-        <div className="absolute right-0 top-1/2 flex -translate-y-1/2 select-none items-center">
+        <div className="flex shrink-0 select-none items-center">
           {PatientInfo}
           <div className="border-primary-dark mx-1.5 h-[25px] border-r"></div>
           <div className="flex-shrink-0">

@@ -112,7 +112,9 @@ function HeaderPatientInfo({ servicesManager, appConfig }: withAppTypes) {
 
   return (
     <div
-      className="hover:bg-primary-dark flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5"
+      // max-w keeps a long name/description from starving the toolbar zone —
+      // both text lines truncate; full values live in the Study Info drawer.
+      className="hover:bg-primary-dark flex max-w-[380px] cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5"
       onClick={openStudyInfo}
       title="Open Study Info"
       data-cy="header-study-chip"
