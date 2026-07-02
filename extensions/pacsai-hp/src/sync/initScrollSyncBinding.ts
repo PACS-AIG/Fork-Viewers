@@ -4,21 +4,36 @@
  *
  * Stage viewport `syncGroups` (types `pacsaiscroll` / `pacsaiallinonescroll`) are
  * applied in OHIFCornerstoneViewport's ELEMENT_ENABLED handler
- * (addViewportToSyncGroup). That binding is RACY for any stage reached via a re-hang:
- * the study first hangs a current-only / no-sync stage (priors not yet discovered,
- * composites not yet built), then loadRelevantPriors / the auto-refresh re-hangs into
- * the synced stage. When the grid keeps a viewport's element across that transition
- * (same viewportId), ELEMENT_ENABLED does NOT re-fire, so the stage's syncGroups are
- * never applied to that pane — leaving one (or both) panes unbound and the sync
- * silently dead. Timing-dependent => intermittent ("current/prior scroll sync dead on
- * some loads"). Originally diagnosed + fixed for the all-in-one sync only; the compare
- * stages' `pacsaiscroll` groups hit the identical race.
+ * (addViewportToSyncGroup). Two cs3d Synchronizer quirks make that binding fragile
+ * across the prior-discovery / composite re-hangs:
  *
- * Fix: after the layout settles, re-assert the binding — for every visible viewport
- * that carries a pacsai scroll syncGroup but is NOT currently in that synchronizer,
- * add it. getViewportInfo().getSyncGroups() always reflects the CURRENT hang, so this
- * never resurrects a previous stage's groups. Idempotent (skips already-bound
- * viewports), debounced, and a cheap no-op for layouts with no pacsai sync groups.
+ *  1. NEVER-BOUND (race): when the grid keeps a pane's element across a stage
+ *     transition (same viewportId), ELEMENT_ENABLED does not re-fire, so the new
+ *     stage's syncGroups are never applied to that pane.
+ *
+ *  2. BOUND-BUT-DEAD (stale element): cs3d attaches the scroll event listener to the
+ *     viewport's ELEMENT at add time (`addSource` → element.addEventListener), and its
+ *     membership guard makes `addSource` a NO-OP when the viewport is already listed —
+ *     WITHOUT re-attaching the listener. If a pane's element is recreated while its
+ *     membership lingers (the ELEMENT_DISABLED auto-remove can miss when the viewport
+ *     is already gone from the rendering engine at disable time), the listener dies
+ *     with the old element and NOTHING can heal it: OHIF's ELEMENT_ENABLED
+ *     re-application no-ops on the membership guard, and a naive "skip if bound"
+ *     rebinder is fooled the same way. Deterministically dead sync for that hang.
+ *     (removeSource also can't detach the real listener — it was added as a fresh
+ *     `_onEvent.bind(this)` but removed as `_eventHandler` — so remove+re-add can
+ *     leave a duplicate listener on the SAME element. Harmless here: the pacsai sync
+ *     callbacks are idempotent, and we only churn a binding when its element changed
+ *     or it was missing.)
+ *
+ * Fix: after the layout settles, re-assert every pacsai binding, tracking WHICH
+ * element each (syncGroup, viewport) binding was attached to. A binding is healthy
+ * only if it exists AND was made against the pane's current element; otherwise
+ * remove-then-re-add (remove splices the membership so add really re-attaches the
+ * listener to the current element). Bindings left over from a previous stage (group
+ * id not in the current hang) are removed so no ghost cross-stage sync survives.
+ * getViewportInfo().getSyncGroups() always reflects the CURRENT hang. Debounced, and
+ * a cheap no-op for layouts with no pacsai sync groups.
  */
 
 // Matches SCROLL_SYNC_TYPE / ALL_IN_ONE_SCROLL_SYNC_TYPE in index.tsx and the
@@ -45,41 +60,100 @@ function initScrollSyncBinding({
     return;
   }
 
+  // Element each (syncGroupId, viewportId) binding was last attached to. cs3d wires
+  // the event listener to the element at add time, so "still a member" does NOT mean
+  // "still listening" — only a binding made against the pane's CURRENT element is.
+  const attachedElements = new Map<string, HTMLElement>();
+  const bindingKey = (syncId: string, viewportId: string) => `${syncId}|${viewportId}`;
+
   const reassert = () => {
     const { viewports } = viewportGridService.getState() ?? {};
     if (!viewports?.size) {
       return;
     }
 
+    const summary: Array<Record<string, unknown>> = [];
+
     viewports.forEach((_viewport: any, viewportId: string) => {
       try {
         const info = cornerstoneViewportService.getViewportInfo(viewportId);
-        const groups = (info?.getSyncGroups?.() ?? []).filter((g: any) =>
+        if (!info) {
+          return;
+        }
+        const wanted = (info.getSyncGroups?.() ?? []).filter((g: any) =>
           PACSAI_SCROLL_SYNC_TYPES.includes(g?.type)
         );
-        if (!groups.length) {
+        const renderingEngineId = info.getRenderingEngineId?.();
+
+        const pacsaiSynchronizers = PACSAI_SCROLL_SYNC_TYPES.flatMap(
+          t => syncGroupService.getSynchronizersOfType?.(t) ?? []
+        ).filter(Boolean);
+        const boundIds = pacsaiSynchronizers
+          .filter(
+            (s: any) =>
+              s.hasSourceViewport?.(renderingEngineId, viewportId) ||
+              s.hasTargetViewport?.(renderingEngineId, viewportId)
+          )
+          .map((s: any) => s.id);
+
+        if (!wanted.length && !boundIds.length) {
           return; // no pacsai-synced pane — nothing to do
         }
 
-        const renderingEngineId = info.getRenderingEngineId?.();
-        const bound = syncGroupService.getSynchronizersForViewport?.(viewportId) ?? [];
+        const element = cornerstoneViewportService.getCornerstoneViewport?.(viewportId)
+          ?.element as HTMLElement | undefined;
+        const wantedIds = new Set(wanted.map((g: any) => g.id ?? g.type));
+        const healed: string[] = [];
+        const unbound: string[] = [];
 
-        groups.forEach((group: any) => {
+        // Drop bindings left over from a previous stage — ghost cross-stage syncs.
+        boundIds
+          .filter(id => !wantedIds.has(id))
+          .forEach(id => {
+            syncGroupService.removeViewportFromSyncGroup(viewportId, renderingEngineId, id);
+            attachedElements.delete(bindingKey(id, viewportId));
+            unbound.push(id);
+          });
+
+        wanted.forEach((group: any) => {
           const id = group.id ?? group.type;
-          if (bound.some((s: any) => s?.id === id)) {
-            return; // already bound — leave it
+          if (!element) {
+            return; // pane not enabled yet — ELEMENT_ENABLED will bind it on mount
           }
+          const key = bindingKey(id, viewportId);
+          if (boundIds.includes(id) && attachedElements.get(key) === element) {
+            return; // bound against the current element — healthy, leave it
+          }
+          // Missing, or bound against a previous/unknown element (listener dead or
+          // unverifiable). Remove first: cs3d addSource no-ops on an existing member
+          // WITHOUT re-attaching the element listener — membership must be spliced
+          // for the add to really re-wire.
+          syncGroupService.removeViewportFromSyncGroup(viewportId, renderingEngineId, id);
           syncGroupService.addViewportToSyncGroup(viewportId, renderingEngineId, group);
-          if (DEBUG) {
-            console.log('[pacsai-hp] scroll-sync rebound', { viewportId, id, type: group.type });
-          }
+          attachedElements.set(key, element);
+          healed.push(id);
         });
+
+        if (DEBUG) {
+          summary.push({
+            viewportId,
+            want: [...wantedIds],
+            bound: boundIds,
+            healed,
+            unbound,
+            hasElement: !!element,
+          });
+        }
       } catch (e) {
         if (DEBUG) {
           console.warn('[pacsai-hp] scroll-sync rebind skipped', viewportId, e);
         }
       }
     });
+
+    if (DEBUG && summary.length) {
+      console.log('[pacsai-hp] scroll-sync state', summary);
+    }
   };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
