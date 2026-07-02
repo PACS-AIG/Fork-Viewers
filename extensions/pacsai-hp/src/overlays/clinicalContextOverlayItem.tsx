@@ -133,9 +133,23 @@ function ClinicalContextLine({
       style={{ pointerEvents: truncated !== indication ? 'auto' : 'none', whiteSpace: 'nowrap' }}
       title={truncated !== indication ? indication ?? undefined : undefined}
     >
-      {ageSex ? <span style={{ fontWeight: 600 }}>{ageSex}</span> : null}
-      {ageSex && truncated ? <span style={{ margin: '0 4px' }}>·</span> : null}
-      {truncated ? <span>{truncated}</span> : null}
+      {ageSex ? <span style={{ fontWeight: 600, flex: '0 0 auto' }}>{ageSex}</span> : null}
+      {ageSex && truncated ? <span style={{ margin: '0 4px', flex: '0 0 auto' }}>·</span> : null}
+      {truncated ? (
+        // minWidth:0 lets the indication shrink and ellipsize inside the 40%-
+        // capped overlay corner on narrow viewports (flex children otherwise
+        // refuse to shrink below their content and get hard-clipped).
+        <span
+          style={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {truncated}
+        </span>
+      ) : null}
     </div>
   );
 }

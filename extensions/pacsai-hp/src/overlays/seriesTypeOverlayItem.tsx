@@ -137,7 +137,20 @@ export const seriesTypeOverlayItem = {
     return (
       <span
         data-cy="series-type-indicator"
-        style={{ color: '#5DE2E7', fontWeight: 'bold', letterSpacing: '0.05em' }}
+        // inline-block so the framework's span ellipsis rule
+        // (CustomizableViewportOverlay.css) actually applies on narrow
+        // viewports — text-overflow does nothing on plain inline elements.
+        style={{
+          color: '#5DE2E7',
+          fontWeight: 'bold',
+          letterSpacing: '0.05em',
+          display: 'inline-block',
+          maxWidth: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          verticalAlign: 'bottom',
+        }}
       >
         {parts.map((part, i) => (
           <React.Fragment key={i}>

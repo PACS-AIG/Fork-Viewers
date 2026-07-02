@@ -104,6 +104,7 @@ function Tag({ color, label }: { color: string; label: string }) {
         letterSpacing: '0.04em',
         textTransform: 'uppercase',
         whiteSpace: 'nowrap',
+        maxWidth: '100%',
       }}
     >
       <span
@@ -115,7 +116,21 @@ function Tag({ color, label }: { color: string; label: string }) {
           flex: '0 0 auto',
         }}
       />
-      {label}
+      {/* Own span so it can shrink: the overlay corner is capped at 40% of the
+          viewport width (CustomizableViewportOverlay.css) and a flex child's
+          min-width defaults to its content, so a bare text node gets hard-
+          CLIPPED on narrow viewports instead of ellipsized. minWidth:0 +
+          ellipsis degrades to "CURRENT · JUN 1…" gracefully. */}
+      <span
+        style={{
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </span>
     </span>
   );
 }
