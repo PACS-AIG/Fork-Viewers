@@ -1,5 +1,6 @@
 import SessionStudyDropdown from './toolbar/SessionStudyDropdown';
 import BrowsingModeDropdown from './toolbar/BrowsingModeDropdown';
+import activeViewportHasCT from './utils/activeViewportHasCT';
 
 /** Toolbar uiType id for the same-session study switcher. */
 export const SESSION_SWITCHER_UITYPE = 'pacsai.sessionSwitcher';
@@ -16,6 +17,9 @@ export const BROWSING_MODE_UITYPE = 'pacsai.browsingMode';
  */
 /** Evaluator id: disables a stage-nav button unless the active protocol has >1 reachable stage. */
 export const MULTI_STAGE_EVALUATOR = 'evaluate.pacsai.multiStage';
+
+/** Evaluator id: disables a button unless the active viewport is showing CT (HU-calibrated). */
+export const CT_ONLY_EVALUATOR = 'evaluate.pacsai.ctOnly';
 
 export default function getToolbarModule({ commandsManager, servicesManager }: withAppTypes) {
   return [
@@ -54,6 +58,19 @@ export default function getToolbarModule({ commandsManager, servicesManager }: w
         return {
           disabled,
           disabledText: disabled ? 'No other hanging protocol stages for this study' : undefined,
+        };
+      },
+    },
+    {
+      // HU-flavored tools (HU probe) only make sense on CT — the only modality
+      // whose pixels are Hounsfield-calibrated. Disabled (not hidden) elsewhere
+      // so the toolbar layout stays stable.
+      name: CT_ONLY_EVALUATOR,
+      evaluate: () => {
+        const disabled = !activeViewportHasCT(servicesManager);
+        return {
+          disabled,
+          disabledText: disabled ? 'HU values require a CT viewport' : undefined,
         };
       },
     },

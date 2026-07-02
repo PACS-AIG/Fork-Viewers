@@ -117,6 +117,12 @@ const modeHotkeys = [
     keys: ['d'],
     isEditable: true,
   },
+  {
+    commandName: 'openHotkeysHelp',
+    label: 'Show Keyboard Shortcuts',
+    keys: ['?'],
+    isEditable: true,
+  },
 ];
 
 function modeFactory({ modeConfiguration }) {

@@ -58,10 +58,22 @@ const toolbarButtons: Button[] = [
           evaluate: 'evaluate.cornerstoneTool',
         }),
         createButton({
+          // Single-point HU readout while dragging; leaves no annotation.
+          // CT-gated: HU is only meaningful on Hounsfield-calibrated pixels
+          // (the annotation Probe in More Tools stays available for other
+          // modalities and shows modality-appropriate units).
+          id: 'DragProbe',
+          icon: 'tool-probe',
+          label: 'HU Probe',
+          tooltip: 'HU Probe (drag on a CT image; no annotation left behind)',
+          commands: setToolActiveToolbar,
+          evaluate: ['evaluate.cornerstoneTool', 'evaluate.pacsai.ctOnly'],
+        }),
+        createButton({
           id: 'EllipticalROI',
           icon: 'tool-ellipse',
           label: 'Ellipse',
-          tooltip: 'Ellipse ROI',
+          tooltip: 'Ellipse ROI (mean · SD · min/max · area; HU on CT)',
           commands: setToolActiveToolbar,
           evaluate: 'evaluate.cornerstoneTool',
         }),

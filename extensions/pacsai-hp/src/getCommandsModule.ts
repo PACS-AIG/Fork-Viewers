@@ -3,11 +3,14 @@ import loadRelevantPriors from './priors/loadRelevantPriors';
 import { setBrowsingMode as persistBrowsingMode, type BrowsingMode } from './allinone/browsingMode';
 import { rehangForMode } from './allinone/rehang';
 import { toggleClinicalContextVisibility } from './clinicalContext/clinicalContextStore';
+import activeViewportHasCT from './utils/activeViewportHasCT';
+import HotkeysHelp from './components/HotkeysHelp';
 
 const getCommandsModule = ({
   servicesManager,
   extensionManager,
   commandsManager,
+  hotkeysManager,
 }: Types.Extensions.ExtensionParams): Types.Extensions.CommandsModule => {
   const actions = {
     /**
@@ -94,16 +97,24 @@ const getCommandsModule = ({
      * WL corner menu, whose preset table is already keyed by modality.
      */
     setCtWindowLevel: (props: { window: string; level: string }) => {
-      const { viewportGridService, displaySetService } = servicesManager.services;
-      const activeViewportId = viewportGridService.getActiveViewportId();
-      const uids = viewportGridService.getDisplaySetsUIDsForViewport(activeViewportId) ?? [];
-      const isCT = uids.some(
-        (uid: string) => displaySetService.getDisplaySetByUID(uid)?.Modality === 'CT'
-      );
-      if (!isCT) {
+      if (!activeViewportHasCT(servicesManager)) {
         return;
       }
       commandsManager.runCommand('setWindowLevel', props);
+    },
+
+    /**
+     * Read-only shortcut sheet (`?`). Reads the LIVE bindings from
+     * hotkeysManager at open time, so user-customized keys show correctly.
+     */
+    openHotkeysHelp: () => {
+      const { uiModalService } = servicesManager.services;
+      uiModalService.show({
+        title: 'Keyboard Shortcuts',
+        content: HotkeysHelp,
+        contentProps: { hotkeyDefinitions: hotkeysManager?.hotkeyDefinitions },
+        containerDimensions: 'w-[560px] max-w-[90vw]',
+      });
     },
   };
 
@@ -113,6 +124,7 @@ const getCommandsModule = ({
     setBrowsingMode: actions.setBrowsingMode,
     toggleClinicalContextOverlay: actions.toggleClinicalContextOverlay,
     setCtWindowLevel: actions.setCtWindowLevel,
+    openHotkeysHelp: actions.openHotkeysHelp,
   };
 
   return {
