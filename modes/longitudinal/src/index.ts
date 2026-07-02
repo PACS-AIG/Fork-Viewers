@@ -98,7 +98,10 @@ const isSegPanelForced = () =>
 // (localStorage 'hotkey-definitions', written by the User Preferences dialog)
 // still override these at runtime — reset preferences to pick up changes.
 const ctWlPresetHotkeys = ctWindowLevelPresets.slice(0, 9).map((preset, index) => ({
-  commandName: 'setWindowLevel',
+  // setCtWindowLevel (pacsai-hp), NOT the raw setWindowLevel: these are CT
+  // HU windows, so the command no-ops on non-CT viewports (on CR/DX they
+  // wash the image out to white).
+  commandName: 'setCtWindowLevel',
   commandOptions: { window: preset.window, level: preset.level },
   label: `W/L: ${preset.description}`,
   keys: [`${index + 1}`],

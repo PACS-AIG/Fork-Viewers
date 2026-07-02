@@ -7,6 +7,7 @@ import { toggleClinicalContextVisibility } from './clinicalContext/clinicalConte
 const getCommandsModule = ({
   servicesManager,
   extensionManager,
+  commandsManager,
 }: Types.Extensions.ExtensionParams): Types.Extensions.CommandsModule => {
   const actions = {
     /**
@@ -84,6 +85,26 @@ const getCommandsModule = ({
      * subscription. Bound to a hotkey in the app config.
      */
     toggleClinicalContextOverlay: () => toggleClinicalContextVisibility(),
+
+    /**
+     * Modality-gated wrapper around `setWindowLevel` for the 1-9 preset
+     * hotkeys: the preset values are CT Hounsfield-unit windows, meaningless
+     * on CR/DX/MR/US pixels (on an X-ray they wash the image out to white),
+     * so this is a no-op unless the ACTIVE viewport is showing CT. Mirrors the
+     * WL corner menu, whose preset table is already keyed by modality.
+     */
+    setCtWindowLevel: (props: { window: string; level: string }) => {
+      const { viewportGridService, displaySetService } = servicesManager.services;
+      const activeViewportId = viewportGridService.getActiveViewportId();
+      const uids = viewportGridService.getDisplaySetsUIDsForViewport(activeViewportId) ?? [];
+      const isCT = uids.some(
+        (uid: string) => displaySetService.getDisplaySetByUID(uid)?.Modality === 'CT'
+      );
+      if (!isCT) {
+        return;
+      }
+      commandsManager.runCommand('setWindowLevel', props);
+    },
   };
 
   const definitions = {
@@ -91,6 +112,7 @@ const getCommandsModule = ({
     focusSessionStudy: actions.focusSessionStudy,
     setBrowsingMode: actions.setBrowsingMode,
     toggleClinicalContextOverlay: actions.toggleClinicalContextOverlay,
+    setCtWindowLevel: actions.setCtWindowLevel,
   };
 
   return {
