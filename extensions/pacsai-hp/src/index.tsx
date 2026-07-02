@@ -32,7 +32,7 @@ import { getStudyRole } from './priors/roleRegistry';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
-import initAllInOneScrollSyncBinding from './allinone/initAllInOneScrollSyncBinding';
+import initScrollSyncBinding from './sync/initScrollSyncBinding';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -200,10 +200,11 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
 
     // Re-assert the all-in-one compare scroll-sync binding after each layout settles.
     // The stage's syncGroups are applied at ELEMENT_ENABLED, but the late-built
-    // composites mean the 2-up is often reached by transitioning from a no-sync stage
-    // while the grid keeps a viewport's element — so that pane never re-binds and the
-    // sync silently dies (intermittent). This rebinds any unbound all-in-one pane.
-    initAllInOneScrollSyncBinding({ servicesManager });
+    // re-hangs mean synced stages are often reached by transitioning from a no-sync
+    // stage while the grid keeps a viewport's element — so that pane never re-binds
+    // and the sync silently dies (intermittent). This rebinds any unbound pane for
+    // BOTH pacsai sync types (compare/multi-WL `pacsaiscroll` + all-in-one).
+    initScrollSyncBinding({ servicesManager });
   },
 
   getHangingProtocolModule,
