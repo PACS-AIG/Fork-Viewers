@@ -90,6 +90,32 @@ const SEG_PANEL_MODALITIES = new Set(['SEG', 'RTSTRUCT']);
 const isSegPanelForced = () =>
   (window as any)?.PACSAI_FLAGS?.enableSegmentationPanel === true;
 
+// Hotkeys: OHIF binds the MODE's `hotkeys` array (Mode.tsx setDefaultHotKeys) —
+// `hotkeys` in the app config (config.js) is never consumed in this version, so
+// customizations must live here. Keys 1-9 apply the first nine CT W/L presets
+// from the same table that feeds the viewport window-level menu (single source
+// of truth), replacing OHIF's five stock W/L bindings. NOTE: user-saved hotkeys
+// (localStorage 'hotkey-definitions', written by the User Preferences dialog)
+// still override these at runtime — reset preferences to pick up changes.
+const ctWlPresetHotkeys = ctWindowLevelPresets.slice(0, 9).map((preset, index) => ({
+  commandName: 'setWindowLevel',
+  commandOptions: { window: preset.window, level: preset.level },
+  label: `W/L: ${preset.description}`,
+  keys: [`${index + 1}`],
+  isEditable: true,
+}));
+
+const modeHotkeys = [
+  ...hotkeys.defaults.hotkeyBindings.filter(binding => binding.commandName !== 'setWindowLevel'),
+  ...ctWlPresetHotkeys,
+  {
+    commandName: 'toggleClinicalContextOverlay',
+    label: 'Toggle Clinical Context Overlay',
+    keys: ['d'],
+    isEditable: true,
+  },
+];
+
 function modeFactory({ modeConfiguration }) {
   let _activatePanelTriggersSubscriptions = [];
   let _segPanelSubscription = null;
@@ -410,7 +436,7 @@ function modeFactory({ modeConfiguration }) {
       dicomsr.sopClassHandler,
       dicomRT.sopClassHandler,
     ],
-    hotkeys: [...hotkeys.defaults.hotkeyBindings],
+    hotkeys: modeHotkeys,
     ...modeConfiguration,
   };
 }
