@@ -41,6 +41,7 @@ import { createStudyBrowserTabs } from './createStudyBrowserTabs';
 import { sopClassDictionary } from './sopClassDictionary';
 import * as MeasurementFilters from './measurementFilters';
 import { parseDicomAge, deriveAgeFromDob } from './dicomAge';
+import { getPacsaiTheme, applyPacsaiTheme, togglePacsaiTheme } from './pacsaiTheme';
 
 // Commented out unused functionality.
 // Need to implement new mechanism for derived displaySets using the displaySetManager.
@@ -63,6 +64,9 @@ const utils = {
   formatPN,
   parseDicomAge,
   deriveAgeFromDob,
+  getPacsaiTheme,
+  applyPacsaiTheme,
+  togglePacsaiTheme,
   b64toBlob,
   urlUtil,
   imageIdToURI,
@@ -125,6 +129,9 @@ export {
   MeasurementFilters,
   parseDicomAge,
   deriveAgeFromDob,
+  getPacsaiTheme,
+  applyPacsaiTheme,
+  togglePacsaiTheme,
 };
 
 export default utils;

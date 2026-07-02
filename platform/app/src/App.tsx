@@ -12,7 +12,12 @@ import {
   CommandsManager,
   HotkeysManager,
   ServiceProvidersManager,
+  utils,
 } from '@ohif/core';
+
+// Apply the persisted PACS AI theme (dark / warm night) before first paint so
+// both the study list and the viewer honor it without a flash.
+utils.applyPacsaiTheme();
 import {
   DialogProvider,
   Modal,

@@ -473,8 +473,22 @@ function WorkList({
   const hasStudies = numOfStudies > 0;
   const versionNumber = process.env.VERSION_NUMBER;
   const commitHash = process.env.COMMIT_HASH;
+  // Re-render after a theme toggle so the menu label flips day <-> night.
+  const [themeTick, setThemeTick] = useState(0);
 
   const menuOptions = [
+    {
+      // Same switcher as the viewer header; persisted, chrome-only.
+      title:
+        utils.getPacsaiTheme() === 'night'
+          ? 'Day theme (navy chrome)'
+          : 'Night theme (warm chrome)',
+      icon: 'settings',
+      onClick: () => {
+        utils.togglePacsaiTheme();
+        setThemeTick(themeTick + 1);
+      },
+    },
     {
       title: t('Header:About'),
       icon: 'info',

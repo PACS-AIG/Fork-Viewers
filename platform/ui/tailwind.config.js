@@ -36,54 +36,58 @@ module.exports = {
       initial: 'initial',
       inherit: 'inherit',
 
+      /* Chrome tokens are rgb(var()) so the runtime theme switcher
+         (utils/pacsaiTheme + html.pacsai-theme-night) can swap the whole
+         chrome; triplets are defined in platform/ui/src/tailwind.css.
+         The <alpha-value> form keeps Tailwind opacity modifiers working. */
       aqua: {
-        pale: '#8EA4B8', // secondary text
+        pale: 'rgb(var(--pacs-text-2) / <alpha-value>)', // secondary text
       },
 
       primary: {
-        light: '#31D7FF', // accent cyan
-        main: '#2F80FF', // accent-strong blue
-        dark: '#0A1628', // panel
-        active: '#2F80FF', // accent-strong blue
+        light: 'rgb(var(--pacs-accent) / <alpha-value>)', // accent (cyan / night amber)
+        main: 'rgb(var(--pacs-accent-strong) / <alpha-value>)',
+        dark: 'rgb(var(--pacs-panel) / <alpha-value>)',
+        active: 'rgb(var(--pacs-accent-strong) / <alpha-value>)',
       },
       inputfield: {
-        main: '#1E3A5C',
-        disabled: '#16283E',
-        focus: '#31D7FF',
-        placeholder: '#63798D',
+        main: 'rgb(var(--pacs-border-strong) / <alpha-value>)',
+        disabled: 'rgb(var(--pacs-input-disabled) / <alpha-value>)',
+        focus: 'rgb(var(--pacs-accent) / <alpha-value>)',
+        placeholder: 'rgb(var(--pacs-text-muted) / <alpha-value>)',
       },
 
       secondary: {
-        light: '#1E3A5C', // steel border/outline
-        main: '#10243B', // surface-active
-        dark: '#0E1C31', // panel-elevated
-        active: '#0D2036',
+        light: 'rgb(var(--pacs-border-strong) / <alpha-value>)', // steel border/outline
+        main: 'rgb(var(--pacs-surface-active) / <alpha-value>)',
+        dark: 'rgb(var(--pacs-panel-elev) / <alpha-value>)',
+        active: 'rgb(var(--pacs-surface-hover) / <alpha-value>)',
       },
 
       indigo: {
-        dark: '#0C1B30',
+        dark: 'rgb(var(--pacs-panel-low) / <alpha-value>)',
       },
 
       common: {
-        bright: '#EAF6FF',
-        light: '#8EA4B8',
-        main: '#EAF6FF', // primary text — never pure white
-        dark: '#63798D',
-        active: '#10243B',
+        bright: 'rgb(var(--pacs-text) / <alpha-value>)',
+        light: 'rgb(var(--pacs-text-2) / <alpha-value>)',
+        main: 'rgb(var(--pacs-text) / <alpha-value>)', // primary text — never pure white
+        dark: 'rgb(var(--pacs-text-muted) / <alpha-value>)',
+        active: 'rgb(var(--pacs-surface-active) / <alpha-value>)',
       },
       bkg: {
-        low: '#050B14', // app shell
-        med: '#0A1628', // panel
-        full: '#0E1C31', // panel-elevated
+        low: 'rgb(var(--pacs-shell) / <alpha-value>)', // app shell
+        med: 'rgb(var(--pacs-panel) / <alpha-value>)',
+        full: 'rgb(var(--pacs-panel-elev) / <alpha-value>)',
       },
       info: {
-        primary: '#EAF6FF',
-        secondary: '#8EA4B8',
+        primary: 'rgb(var(--pacs-text) / <alpha-value>)',
+        secondary: 'rgb(var(--pacs-text-2) / <alpha-value>)',
       },
       actions: {
-        primary: '#2F80FF',
-        highlight: '#31D7FF',
-        hover: 'rgba(47, 128, 255, 0.2)',
+        primary: 'rgb(var(--pacs-accent-strong) / <alpha-value>)',
+        highlight: 'rgb(var(--pacs-accent) / <alpha-value>)',
+        hover: 'rgb(var(--pacs-accent-strong) / 0.2)',
       },
       customgreen: {
         100: '#20E6A8',
@@ -195,8 +199,8 @@ module.exports = {
         800: '#434190',
         900: '#3c366b',
         // NOTE: this later `indigo` ramp overrides the earlier PACS AI block,
-        // so `indigo-dark` must be remapped HERE (panel-adjacent navy).
-        dark: '#0C1B30',
+        // so `indigo-dark` must be remapped HERE (panel-adjacent, theme-aware).
+        dark: 'rgb(var(--pacs-panel-low) / <alpha-value>)',
       },
       purple: {
         100: '#faf5ff',
