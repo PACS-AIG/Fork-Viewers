@@ -141,7 +141,9 @@ export const seriesTypeOverlayItem = {
         // (CustomizableViewportOverlay.css) actually applies on narrow
         // viewports — text-overflow does nothing on plain inline elements.
         style={{
-          color: '#5DE2E7',
+          // Theme accent (cyan in dark, amber in night) — follows the runtime
+          // theme switcher, unlike the semantic CURRENT/PRIOR role colors.
+          color: 'rgb(var(--pacs-accent))',
           fontWeight: 'bold',
           letterSpacing: '0.05em',
           display: 'inline-block',
