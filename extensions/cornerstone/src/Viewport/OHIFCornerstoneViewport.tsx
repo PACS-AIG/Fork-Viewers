@@ -610,6 +610,24 @@ function areEqual(prevProps, nextProps) {
     return false;
   }
 
+  // A hanging-protocol stage transition can keep a pane's viewportId AND displaySets
+  // while changing only the per-pane displaySetOptions (e.g. a VOI preset) or the
+  // syncGroups; without these checks the pane never re-renders and setViewportData
+  // never applies the new stage's options. Compared by VALUE: the grid reducer
+  // re-creates both objects on every hang, so an identity check would defeat the
+  // memo entirely.
+  if (
+    !_areSameByValue(prevProps.viewportOptions?.syncGroups, nextProps.viewportOptions?.syncGroups)
+  ) {
+    console.debug('OHIFCornerstoneViewport: Rerender caused by: syncGroups change');
+    return false;
+  }
+
+  if (!_areSameByValue(prevProps.displaySetOptions, nextProps.displaySetOptions)) {
+    console.debug('OHIFCornerstoneViewport: Rerender caused by: displaySetOptions change');
+    return false;
+  }
+
   const prevDisplaySets = prevProps.displaySets;
   const nextDisplaySets = nextProps.displaySets;
 
@@ -649,6 +667,21 @@ function areEqual(prevProps, nextProps) {
   }
 
   return true;
+}
+
+// Value equality for small plain-data option structures (displaySetOptions,
+// syncGroups). Producers build them with stable key order, so serialized equality
+// is reliable; anything non-serializable falls through to "changed", which only
+// costs a re-render.
+function _areSameByValue(prev, next) {
+  if (prev === next) {
+    return true;
+  }
+  try {
+    return JSON.stringify(prev ?? null) === JSON.stringify(next ?? null);
+  } catch (e) {
+    return false;
+  }
 }
 
 // Helper function to check if display sets have changed

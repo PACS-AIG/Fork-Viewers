@@ -38,6 +38,9 @@
  *     dump: pane 'default' want/bound `-multiwl-0` while the prior pane had
  *     `-scroll-ax-0`). Therefore the want-truth below comes from the GRID state's
  *     viewportOptions (the re-hang always updates those), NOT from viewportInfo.
+ *     (Since fixed at the root: areEqual now value-compares syncGroups AND
+ *     displaySetOptions, so such transitions re-render and setViewportData runs.
+ *     The grid-state want-truth is kept as defense in depth.)
  *
  * Fix: after the layout settles, re-assert every pacsai binding against the grid
  * state's syncGroups, tracking WHICH element each (syncGroup, viewport) binding was
