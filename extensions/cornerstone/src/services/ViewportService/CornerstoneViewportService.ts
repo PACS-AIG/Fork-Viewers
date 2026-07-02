@@ -627,6 +627,33 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
       properties.colormap = colormap ?? properties.colormap;
     }
 
+    // Register the hanging-protocol-ASSIGNED presentation (voi/invert/colormap
+    // from displaySetOptions — e.g. the Lung pane of a multi-window stage) as the
+    // viewport's cs3d DEFAULT properties, so Reset restores the pane's intended
+    // window rather than the series-metadata VOI. Derived only from the protocol
+    // options — never from a user presentation — and a no-op when the stage
+    // assigns nothing.
+    {
+      const { voi, voiInverted, colormap } = displaySetOptions[0] ?? {};
+      const protocolDefaults: Record<string, unknown> = {};
+      if (voi && (voi.windowWidth || voi.windowCenter)) {
+        const { lower, upper } = csUtils.windowLevel.toLowHighRange(
+          voi.windowWidth,
+          voi.windowCenter
+        );
+        protocolDefaults.voiRange = { lower, upper };
+      }
+      if (voiInverted !== undefined) {
+        protocolDefaults.invert = voiInverted;
+      }
+      if (colormap !== undefined) {
+        protocolDefaults.colormap = colormap;
+      }
+      if (Object.keys(protocolDefaults).length) {
+        viewport.setDefaultProperties?.(protocolDefaults);
+      }
+    }
+
     viewport.element.addEventListener(csEnums.Events.VIEWPORT_NEW_IMAGE_SET, evt => {
       const { element } = evt.detail;
 
@@ -858,6 +885,12 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
 
     volumesProperties.forEach(({ properties, volumeId }) => {
       viewport.setProperties(properties, volumeId);
+      // As with stacks: protocol-assigned properties become the cs3d DEFAULTS so
+      // Reset restores the pane's intended window (volumesProperties is derived
+      // purely from displaySetOptions, never from a user presentation).
+      if (Object.keys(properties).length) {
+        viewport.setDefaultProperties?.(properties, volumeId);
+      }
     });
 
     this.setPresentations(viewport.id, presentations, viewportInfo);

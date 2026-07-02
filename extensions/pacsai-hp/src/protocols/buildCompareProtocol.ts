@@ -28,6 +28,7 @@ export const WINDOW = {
   softTissue: { windowWidth: 400, windowCenter: 40 },
   bone: { windowWidth: 2000, windowCenter: 500 },
   brain: { windowWidth: 80, windowCenter: 40 },
+  subdural: { windowWidth: 215, windowCenter: 75 },
   cta: { windowWidth: 700, windowCenter: 100 },
 } as const;
 
@@ -164,6 +165,24 @@ export type CompareConfig = {
    * exists.
    */
   currentGroupsAfterLeadView?: boolean;
+  /**
+   * Multi-WINDOW stages ("all-in-one CT"): ONE current series — the selector's best
+   * match — tiled into N linked-scroll panes, EACH at its own CT window (e.g. the
+   * head axial as Brain | Subdural | Bone). Unlike `stages`/`currentStages`, which
+   * pair DIFFERENT series, every pane here renders the SAME displaySet (no
+   * matchedDisplaySetsIndex) with an independent per-pane VOI, so a study with a
+   * single soft recon still offers every read window side by side. Scroll is linked
+   * (one shared `pacsaiscroll` id — trivially correct, identical stacks); W/L stays
+   * per-pane (no VOI sync group), and the pane's preset is registered as its cs3d
+   * DEFAULT so Reset restores the intended window, not the metadata VOI. Placed with
+   * the pageable current-only groups (after compare stages / after the lead view when
+   * `currentGroupsAfterLeadView`). Not emitted for region-compare protocols.
+   */
+  multiWlStages?: Array<{
+    name: string;
+    selector: string;
+    panes: Array<{ name: string; voi: VOI }>;
+  }>;
   /**
    * Tile up to N of the CURRENT study's images side by side in one stage — for
    * projection radiography (CR/DX), where a single "study" holds several distinct
@@ -349,6 +368,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     currentView,
     currentStages,
     currentGroupsAfterLeadView = false,
+    multiWlStages,
     tileCurrentImages,
     selectors,
     stages,
@@ -702,6 +722,55 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     })
     .filter(Boolean);
 
+  // Multi-window stages: the SAME current series in N linked-scroll panes, each
+  // at its own window (see CompareConfig.multiWlStages). All panes reference the
+  // same selector with NO matchedDisplaySetsIndex, so the engine re-uses the one
+  // best match (index-tiling is what the pageable groups above do — deliberately
+  // not this). One shared scroll-sync id across the panes; per-pane VOI via
+  // displaySetOptions so W/L stays independent. Auto-eligible only when the
+  // series exists (enabled = all panes matched — same series, so all-or-none).
+  const multiWlStageDefs = (multiWlStages ?? [])
+    .map((mw, i) => {
+      if (!mw.panes?.length || !selectors.some(s => s.key === mw.selector)) {
+        return null;
+      }
+      return {
+        id: `multi-wl-${i}`,
+        name: mw.name,
+        stageActivation: {
+          enabled: { minViewportsMatched: mw.panes.length },
+          passive: { minViewportsMatched: 1 },
+        },
+        viewportStructure: {
+          layoutType: 'grid',
+          properties: { rows: 1, columns: mw.panes.length },
+        },
+        viewports: mw.panes.map((pane, paneIndex) => ({
+          viewportOptions: {
+            ...compareViewportOptions,
+            syncGroups: [
+              { type: 'pacsaiscroll', id: `${id}-multiwl-${i}`, source: true, target: true },
+            ],
+          },
+          displaySets: [
+            {
+              id: `current-${mw.selector}`,
+              options: {
+                voi: pane.voi,
+                // Stable per-pane LUT-presentation key: the presentation id
+                // serializes options VALUE-BLIND (`voi=[object Object]`), so
+                // without this the panes would collide and only be told apart
+                // by an order-based index. With it, a manual W/L on the Bone
+                // pane is remembered for the Bone pane specifically.
+                id: `multiwl-${i}-${paneIndex}`,
+              },
+            },
+          ],
+        })),
+      };
+    })
+    .filter(Boolean);
+
   // Guaranteed last-resort stage so the protocol NEVER fails to hang.
   // `passive: minViewportsMatched 0` means it is never 'disabled' (matches how
   // the stock `default` protocol stays applicable even with 0 matched viewports),
@@ -976,11 +1045,12 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     postCompareStages = [
       fallbackStages[0],
       ...currentGroupStages,
+      ...multiWlStageDefs,
       ...fallbackStages.slice(1),
       ...tileStages,
     ];
   } else {
-    postCompareStages = [...currentGroupStages, ...tileStages, ...fallbackStages];
+    postCompareStages = [...currentGroupStages, ...multiWlStageDefs, ...tileStages, ...fallbackStages];
   }
 
   const protocolMatchingRules: Rule[] = [

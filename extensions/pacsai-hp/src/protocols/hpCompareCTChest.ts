@@ -48,6 +48,20 @@ export const hpCompareCTChest = buildCompareProtocol({
     { name: 'Reformats (cor + sag)', selectors: ['cor', 'sag'] },
     { name: 'Axial MIP', selectors: ['mip'] },
   ],
+  // "All-in-one CT": the ONE soft axial in two linked-scroll panes at lung +
+  // mediastinal windows. Complements the kernel-based stages above — useful when
+  // the study has no dedicated lung-kernel recon (window-only lung on the soft
+  // series) or to compare windows on identical pixels.
+  multiWlStages: [
+    {
+      name: 'Lung · Mediastinum (one series)',
+      selector: 'axsoft',
+      panes: [
+        { name: 'Lung', voi: WINDOW.lung },
+        { name: 'Mediastinum', voi: WINDOW.softTissue },
+      ],
+    },
+  ],
 });
 
 export default hpCompareCTChest;

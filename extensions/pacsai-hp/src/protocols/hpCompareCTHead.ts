@@ -40,6 +40,22 @@ export const hpCompareCTHead = buildCompareProtocol({
     { name: 'Coronal (current/prior)', selector: 'cor', voi: WINDOW.brain },
     { name: 'Sagittal (current/prior)', selector: 'sag', voi: WINDOW.brain },
   ],
+  // "All-in-one CT": the ONE soft axial in three linked-scroll panes at the three
+  // head read windows. Complements the per-series stages above — subdural has no
+  // dedicated recon, and this works even when the study lacks a bone-kernel series
+  // (window-only bone on the soft recon; the sharp-kernel bone stage remains the
+  // proper bone read when present).
+  multiWlStages: [
+    {
+      name: 'Brain · Subdural · Bone (one series)',
+      selector: 'ax',
+      panes: [
+        { name: 'Brain', voi: WINDOW.brain },
+        { name: 'Subdural', voi: WINDOW.subdural },
+        { name: 'Bone', voi: WINDOW.bone },
+      ],
+    },
+  ],
 });
 
 export default hpCompareCTHead;
