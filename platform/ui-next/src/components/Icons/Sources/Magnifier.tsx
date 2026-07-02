@@ -12,7 +12,7 @@ const Magnifier = (props: IconProps) => (
     <g
       fill="none"
       fillRule="evenodd"
-      stroke="#3A3F99"
+      stroke="#1E3A5C"
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth="3"

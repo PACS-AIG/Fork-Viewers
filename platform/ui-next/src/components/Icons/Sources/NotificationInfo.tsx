@@ -14,7 +14,7 @@ export const NotificationInfo = (props: IconProps) => (
       fillRule="evenodd"
     >
       <circle
-        fill="#0944B3"
+        fill="#2F80FF"
         cx="12"
         cy="12"
         r="12"

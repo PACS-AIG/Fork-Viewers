@@ -97,19 +97,23 @@ module.exports = {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
       },
+      // NOTE: these three blocks are misnested (they'd need to live under
+      // extend.colors to do anything — the working bkg/info/actions classes
+      // come from the @ohif/ui preset). Kept in sync with the PACS AI palette
+      // anyway so they can't resurrect the old colors if the nesting is fixed.
       bkg: {
-        low: '#050615',
-        med: '#090C29',
-        full: '#041C4A',
+        low: '#050B14',
+        med: '#0A1628',
+        full: '#0E1C31',
       },
       info: {
-        primary: '#FFFFFF',
-        secondary: '#7BB2CE',
+        primary: '#EAF6FF',
+        secondary: '#8EA4B8',
       },
       actions: {
-        primary: '#348CFD',
-        highlight: '#5ACCE6',
-        hover: 'rgba(52, 140, 253, 0.2)',
+        primary: '#2F80FF',
+        highlight: '#31D7FF',
+        hover: 'rgba(47, 128, 255, 0.2)',
       },
     },
   },

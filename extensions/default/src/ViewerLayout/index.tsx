@@ -9,7 +9,7 @@ import SidePanelWithServices from '../Components/SidePanelWithServices';
 import { Onboarding, ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@ohif/ui-next';
 import useResizablePanels from './ResizablePanelsHook';
 
-const resizableHandleClassName = 'mt-[1px] bg-black';
+const resizableHandleClassName = 'mt-[1px] bg-bkg-low';
 
 function ViewerLayout({
   // From Extension Module Params
@@ -61,10 +61,13 @@ function ViewerLayout({
    * is sized to our viewport.
    */
   useEffect(() => {
-    document.body.classList.add('bg-black');
+    // bkg-low (#050B14): the app SHELL is a very dark navy so the true-black
+    // viewports read as the brightest/deepest surface on screen; only the
+    // diagnostic canvas itself stays #000.
+    document.body.classList.add('bg-bkg-low');
     document.body.classList.add('overflow-hidden');
     return () => {
-      document.body.classList.remove('bg-black');
+      document.body.classList.remove('bg-bkg-low');
       document.body.classList.remove('overflow-hidden');
     };
   }, []);
@@ -138,11 +141,13 @@ function ViewerLayout({
         appConfig={appConfig}
       />
       <div
-        className="relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden bg-black"
+        className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
         style={{ height: 'calc(100vh - 52px)' }}
       >
         <React.Fragment>
-          {showLoadingIndicator && <LoadingIndicatorProgress className="h-full w-full bg-black" />}
+          {showLoadingIndicator && (
+            <LoadingIndicatorProgress className="bg-bkg-low h-full w-full" />
+          )}
           <ResizablePanelGroup {...resizablePanelGroupProps}>
             {/* LEFT SIDEPANELS */}
 

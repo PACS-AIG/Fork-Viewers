@@ -84,10 +84,10 @@ const CinePlayer: React.FC<CinePlayerProps> = ({
           step={1}
           containerClassName="mb-3 w-full"
           labelClassName="text-xs text-white"
-          leftColor="#3a3f99"
-          rightColor="#3a3f99"
+          leftColor="#1E3A5C"
+          rightColor="#1E3A5C"
           trackHeight="4px"
-          thumbColor="#348cfd"
+          thumbColor="#2F80FF"
           thumbColorOuter="#000000"
           showLabel={false}
         />

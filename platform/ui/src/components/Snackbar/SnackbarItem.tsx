@@ -48,7 +48,7 @@ const SnackbarItem = ({ options, onClose }) => {
         </div>
         <div
           onClick={handleClose}
-          className="relative left-[3px] top-[-3px] ml-auto flex h-5 w-5 items-center justify-center self-start rounded-full text-[#0944b3]"
+          className="relative left-[3px] top-[-3px] ml-auto flex h-5 w-5 items-center justify-center self-start rounded-full text-[#2F80FF]"
         >
           <Icons.ByName
             name="close"

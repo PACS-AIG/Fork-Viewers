@@ -4,30 +4,34 @@
 @tailwind components;
 @tailwind utilities;
 
-/* OHIF Theme */
+/* PACS AI Theme — same palette as platform/ui/tailwind.config.js (keep the two
+   in sync): shell #050B14, panel #0A1628, panel-elevated #0E1C31,
+   surface-active #10243B, text #EAF6FF, text-secondary #8EA4B8, accent cyan
+   #31D7FF, accent-strong blue #2F80FF, danger #FF5A7A. HSL values computed
+   from those hexes (colorsys), not eyeballed. */
 
 @layer base {
   :root {
-    --highlight: 191 74% 63%;
-    --background: 236 62% 5%;
-    --foreground: 0 0% 98%;
-    --card: 234 64% 10%;
-    --card-foreground: 0 0% 98%;
-    --popover: 219 90% 15%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 214 98% 60%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 214 66% 48%;
-    --secondary-foreground: 200 50% 84%;
-    --muted: 234 64% 10%;
-    --muted-foreground: 200 46% 65%;
-    --accent: 217 79% 24%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --highlight: 192 100% 60%; /* #31D7FF accent cyan */
+    --background: 216 60% 5%; /* #050B14 shell */
+    --foreground: 206 100% 96%; /* #EAF6FF text (never pure white) */
+    --card: 216 60% 10%; /* #0A1628 panel */
+    --card-foreground: 206 100% 96%;
+    --popover: 216 56% 12%; /* #0E1C31 panel-elevated */
+    --popover-foreground: 206 100% 96%;
+    --primary: 217 100% 59%; /* #2F80FF accent-strong */
+    --primary-foreground: 206 100% 96%;
+    --secondary: 212 57% 15%; /* #10243B surface-active */
+    --secondary-foreground: 209 23% 64%; /* #8EA4B8 text-secondary */
+    --muted: 216 60% 10%; /* #0A1628 panel */
+    --muted-foreground: 209 23% 64%; /* #8EA4B8 text-secondary */
+    --accent: 212 57% 15%; /* #10243B hover/selected surface */
+    --accent-foreground: 206 100% 96%;
+    --destructive: 348 100% 68%; /* #FF5A7A */
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 236 45% 21%;
-    --ring: 214 98% 60%;
+    --border: 208 43% 15%; /* #152635 ≈ border rgba(116,204,255,.14) over shell */
+    --input: 213 48% 16%; /* #16283E */
+    --ring: 192 100% 60%; /* #31D7FF focus ring */
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -51,26 +55,27 @@
     --error-text: hsl(360, 100%, 45%);
   }
 
+  /* .dark mirrors :root — the PACS AI theme is single-mode dark. */
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 234 64% 10%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 214 98% 60%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --background: 216 60% 5%;
+    --foreground: 206 100% 96%;
+    --card: 216 60% 10%;
+    --card-foreground: 206 100% 96%;
+    --popover: 216 56% 12%;
+    --popover-foreground: 206 100% 96%;
+    --primary: 217 100% 59%;
+    --primary-foreground: 206 100% 96%;
+    --secondary: 212 57% 15%;
+    --secondary-foreground: 209 23% 64%;
+    --muted: 216 60% 10%;
+    --muted-foreground: 209 23% 64%;
+    --accent: 212 57% 15%;
+    --accent-foreground: 206 100% 96%;
+    --destructive: 348 100% 68%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 236 45% 21%;
-    --ring: 214 98% 60%;
+    --border: 208 43% 15%;
+    --input: 213 48% 16%;
+    --ring: 192 100% 60%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;

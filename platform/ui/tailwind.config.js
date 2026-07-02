@@ -16,6 +16,18 @@ module.exports = {
     fontFamily: {
       inter: ['Inter', 'sans-serif'],
     },
+    /**
+     * PACS AI palette (2026-07): the stock OHIF token NAMES are kept so no
+     * component changes, but every value is remapped onto the PACS AI design
+     * tokens — a quiet navy-steel dark theme where the diagnostic image is the
+     * brightest thing on screen. Core tokens: shell #050B14, panel #0A1628,
+     * panel-elevated #0E1C31, surface-active #10243B, text #EAF6FF,
+     * text-secondary #8EA4B8, text-muted #63798D, accent cyan #31D7FF,
+     * accent-strong blue #2F80FF, success #20E6A8, warning #F6C14B,
+     * danger #FF5A7A. The ui-next shadcn HSL variables
+     * (platform/ui-next/src/tailwind.css) mirror the same palette — keep the
+     * two in sync. Viewports stay pure #000 (true black, diagnostic).
+     */
     colors: {
       overlay: 'rgba(0, 0, 0, 0.8)',
       transparent: 'transparent',
@@ -25,74 +37,74 @@ module.exports = {
       inherit: 'inherit',
 
       aqua: {
-        pale: '#7bb2ce',
+        pale: '#8EA4B8', // secondary text
       },
 
       primary: {
-        light: '#5acce6',
-        main: '#0944b3',
-        dark: '#090c29',
-        active: '#348cfd',
+        light: '#31D7FF', // accent cyan
+        main: '#2F80FF', // accent-strong blue
+        dark: '#0A1628', // panel
+        active: '#2F80FF', // accent-strong blue
       },
       inputfield: {
-        main: '#3a3f99',
-        disabled: '#2b166b',
-        focus: '#5acce6',
-        placeholder: '#39383f',
+        main: '#1E3A5C',
+        disabled: '#16283E',
+        focus: '#31D7FF',
+        placeholder: '#63798D',
       },
 
       secondary: {
-        light: '#3a3f99',
-        main: '#2b166b',
-        dark: '#041c4a',
-        active: '#1f1f27',
+        light: '#1E3A5C', // steel border/outline
+        main: '#10243B', // surface-active
+        dark: '#0E1C31', // panel-elevated
+        active: '#0D2036',
       },
 
       indigo: {
-        dark: '#0b1a42',
+        dark: '#0C1B30',
       },
 
       common: {
-        bright: '#e1e1e1',
-        light: '#a19fad',
-        main: '#fff',
-        dark: '#726f7e',
-        active: '#2c3074',
+        bright: '#EAF6FF',
+        light: '#8EA4B8',
+        main: '#EAF6FF', // primary text — never pure white
+        dark: '#63798D',
+        active: '#10243B',
       },
       bkg: {
-        low: '#050615',
-        med: '#090C29',
-        full: '#041C4A',
+        low: '#050B14', // app shell
+        med: '#0A1628', // panel
+        full: '#0E1C31', // panel-elevated
       },
       info: {
-        primary: '#FFFFFF',
-        secondary: '#7BB2CE',
+        primary: '#EAF6FF',
+        secondary: '#8EA4B8',
       },
       actions: {
-        primary: '#348CFD',
-        highlight: '#5ACCE6',
-        hover: 'rgba(52, 140, 253, 0.2)',
+        primary: '#2F80FF',
+        highlight: '#31D7FF',
+        hover: 'rgba(47, 128, 255, 0.2)',
       },
       customgreen: {
-        100: '#05D97C',
-        200: '#0FD97C',
+        100: '#20E6A8',
+        200: '#20E6A8',
       },
 
       customblue: {
-        10: '#0A163F',
-        20: '#0B1F54',
-        30: '#09286e',
-        40: '#0E307F',
-        50: '#0F3A94',
-        80: '#1454D4',
-        100: '#c4fdff',
-        200: '#38daff',
-        300: '#1D204D',
-        400: '#90A0C1',
+        10: '#0C1B30',
+        20: '#10243B',
+        30: '#153252',
+        40: '#1A3E66',
+        50: '#1F4A7A',
+        80: '#2F80FF',
+        100: '#C9F2FF',
+        200: '#31D7FF',
+        300: '#10243B',
+        400: '#8EA4B8',
       },
 
       customgray: {
-        100: '#262943',
+        100: '#22344C',
       },
 
       gray: {
@@ -182,7 +194,9 @@ module.exports = {
         700: '#4c51bf',
         800: '#434190',
         900: '#3c366b',
-        dark: '#0b1a42',
+        // NOTE: this later `indigo` ramp overrides the earlier PACS AI block,
+        // so `indigo-dark` must be remapped HERE (panel-adjacent navy).
+        dark: '#0C1B30',
       },
       purple: {
         100: '#faf5ff',

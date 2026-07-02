@@ -216,7 +216,7 @@ const InputDoubleRange: React.FC<InputDoubleRangeProps> = ({
         <div
           className="h-[3px] w-full rounded-lg"
           style={{
-            background: `linear-gradient(to right, #3a3f99 0%, #3a3f99 ${rangeValuePercentageStart}%, #5acce6 ${rangeValuePercentageStart}%, #5acce6 ${rangeValuePercentageEnd}%, #3a3f99 ${rangeValuePercentageEnd}%, #3a3f99 100%)`,
+            background: `linear-gradient(to right, #1E3A5C 0%, #1E3A5C ${rangeValuePercentageStart}%, #31D7FF ${rangeValuePercentageStart}%, #31D7FF ${rangeValuePercentageEnd}%, #1E3A5C ${rangeValuePercentageEnd}%, #1E3A5C 100%)`,
           }}
         ></div>
         <div

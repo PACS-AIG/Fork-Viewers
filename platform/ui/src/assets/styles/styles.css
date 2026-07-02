@@ -27,12 +27,12 @@
 .ohif-scrollbar::-webkit-scrollbar-thumb {
   @apply rounded;
   @apply bg-secondary-dark;
-  background-color: #041c4a;
+  background-color: #0E1C31;
 }
 
 .ohif-scrollbar::-webkit-scrollbar-thumb:window-inactive {
   @apply bg-secondary-dark;
-  background-color: #041c4a;
+  background-color: #0E1C31;
 }
 
 /* INVISIBLE SCROLLBAR */

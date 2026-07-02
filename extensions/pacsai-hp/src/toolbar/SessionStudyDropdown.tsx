@@ -66,9 +66,9 @@ function SessionStudyDropdown({ commandsManager, servicesManager }: Record<strin
         // Extra right padding leaves room for the native arrow; ellipsis clips the rest.
         padding: '0 22px 0 8px',
         margin: '0 6px',
-        background: '#041c4a',
-        color: '#e6f1ff',
-        border: '1px solid #155bb5',
+        background: '#0E1C31',
+        color: '#EAF6FF',
+        border: '1px solid #1E3A5C',
         borderRadius: 4,
         fontSize: 13,
         lineHeight: '34px',

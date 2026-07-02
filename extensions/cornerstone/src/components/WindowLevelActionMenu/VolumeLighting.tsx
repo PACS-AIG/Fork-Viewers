@@ -26,7 +26,7 @@ export function VolumeLighting({
 
   const calculateBackground = value => {
     const percentage = ((value - 0) / (1 - 0)) * 100;
-    return `linear-gradient(to right, #5acce6 0%, #5acce6 ${percentage}%, #3a3f99 ${percentage}%, #3a3f99 100%)`;
+    return `linear-gradient(to right, #31D7FF 0%, #31D7FF ${percentage}%, #1E3A5C ${percentage}%, #1E3A5C 100%)`;
   };
 
   useEffect(() => {
@@ -68,8 +68,8 @@ export function VolumeLighting({
             step={0.1}
             style={{
               background: calculateBackground(ambient),
-              '--thumb-inner-color': '#5acce6',
-              '--thumb-outer-color': '#090c29',
+              '--thumb-inner-color': '#31D7FF',
+              '--thumb-outer-color': '#0A1628',
             }}
           />
         )}
@@ -99,8 +99,8 @@ export function VolumeLighting({
             step={0.1}
             style={{
               background: calculateBackground(diffuse),
-              '--thumb-inner-color': '#5acce6',
-              '--thumb-outer-color': '#090c29',
+              '--thumb-inner-color': '#31D7FF',
+              '--thumb-outer-color': '#0A1628',
             }}
           />
         )}
@@ -131,8 +131,8 @@ export function VolumeLighting({
             step={0.1}
             style={{
               background: calculateBackground(specular),
-              '--thumb-inner-color': '#5acce6',
-              '--thumb-outer-color': '#090c29',
+              '--thumb-inner-color': '#31D7FF',
+              '--thumb-outer-color': '#0A1628',
             }}
           />
         )}
