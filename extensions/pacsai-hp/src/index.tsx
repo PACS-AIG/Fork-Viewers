@@ -17,6 +17,10 @@ import {
   STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
 } from './overlays/studyDescriptionOverlayItem';
 import { patientInfoOverlayItems } from './overlays/patientInfoOverlayItems';
+import {
+  clinicalContextOverlayItem,
+  CLINICAL_CONTEXT_OVERLAY_ITEM_ID,
+} from './overlays/clinicalContextOverlayItem';
 import createScrollSyncSynchronizer from './sync/createScrollSyncSynchronizer';
 import createAllInOneScrollSynchronizer from './sync/createAllInOneScrollSynchronizer';
 import getImagePlane from './utils/getImagePlane';
@@ -215,5 +219,7 @@ export {
   studyDescriptionOverlayItem,
   STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
   patientInfoOverlayItems,
+  clinicalContextOverlayItem,
+  CLINICAL_CONTEXT_OVERLAY_ITEM_ID,
   getStudyRole,
 };

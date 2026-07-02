@@ -5,12 +5,14 @@ import {
   seriesTypeOverlayItem,
   studyDescriptionOverlayItem,
   patientInfoOverlayItems,
+  clinicalContextOverlayItem,
   getStudyRole,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
 import toolbarButtons from './toolbarButtons';
 import moreTools from './moreTools';
+import ctWindowLevelPresets from './ctWindowLevelPresets';
 
 // Allow this mode by excluding non-imaging modalities such as SR, SEG
 // Also, SM is not a simple imaging modalities, so exclude it.
@@ -80,8 +82,18 @@ const extensionDependencies = {
   '@ohif/extension-pacsai-hp': '^3.0.0',
 };
 
+// Segmentation is not part of the default diagnostic read, so its panel is kept
+// out of the layout unless segmentation data is actually present (or the site
+// forces it on via `window.PACSAI_FLAGS.enableSegmentationPanel`). Loading and
+// viewing SEG/RTSTRUCT series stays fully supported — only the panel is lazy.
+const SEG_PANEL_MODALITIES = new Set(['SEG', 'RTSTRUCT']);
+const isSegPanelForced = () =>
+  (window as any)?.PACSAI_FLAGS?.enableSegmentationPanel === true;
+
 function modeFactory({ modeConfiguration }) {
   let _activatePanelTriggersSubscriptions = [];
+  let _segPanelSubscription = null;
+  let _segPanelAdded = false;
   return {
     // TODO: We're using this as a route segment
     // We should not be.
@@ -98,9 +110,29 @@ function modeFactory({ modeConfiguration }) {
         toolGroupService,
         customizationService,
         hangingProtocolService,
+        displaySetService,
+        panelService,
       } = servicesManager.services;
 
       measurementService.clearMeasurements();
+
+      // Segmentation panel is excluded from the default layout; re-add it the
+      // moment a SEG/RTSTRUCT displaySet exists in the session so real
+      // segmentation data is never orphaned from its UI.
+      const addSegPanelIfNeeded = (displaySets = []) => {
+        if (_segPanelAdded) {
+          return;
+        }
+        if (displaySets.some(ds => SEG_PANEL_MODALITIES.has(ds?.Modality))) {
+          _segPanelAdded = true;
+          panelService.addPanel(panelService.PanelPosition.Right, cornerstone.segmentation);
+        }
+      };
+      _segPanelAdded = isSegPanelForced(); // already in the static layout — never double-add
+      _segPanelSubscription = displaySetService.subscribe(
+        displaySetService.EVENTS.DISPLAY_SETS_ADDED,
+        ({ displaySetsAdded = [] } = {}) => addSegPanelIfNeeded(displaySetsAdded)
+      );
 
       // Study-browser left rail: resolve each study's comparison role
       // (current / prior / sibling) from the pacsai-hp role registry, so each row
@@ -111,6 +143,17 @@ function modeFactory({ modeConfiguration }) {
         'studyBrowser.studyRoleResolver': {
           $set: (studyInstanceUID: string) =>
             getStudyRole(studyInstanceUID, hangingProtocolService.getState?.()?.activeStudyUID),
+        },
+      });
+
+      // Radiologist-tuned CT window/level presets for the per-viewport
+      // window-level action menu. Merged over the stock table so the other
+      // modalities' presets (PT) are preserved.
+      const stockWlPresets =
+        customizationService.getCustomization('cornerstone.windowLevelPresets') || {};
+      customizationService.setCustomizations({
+        'cornerstone.windowLevelPresets': {
+          $set: { ...stockWlPresets, CT: ctWindowLevelPresets },
         },
       });
 
@@ -149,11 +192,16 @@ function modeFactory({ modeConfiguration }) {
             }
           : item
       );
-      const topLeftItems = topLeftPatched.some(
+      let topLeftItems = topLeftPatched.some(
         (item: { id?: string }) => item?.id === studyDescriptionOverlayItem.id
       )
         ? topLeftPatched
         : [...topLeftPatched, studyDescriptionOverlayItem];
+      // (3) Clinical context (age · sex · indication) leads the top-left column —
+      // the read-shaping facts stay in view on the image. Idempotent.
+      if (!topLeftItems.some((item: { id?: string }) => item?.id === clinicalContextOverlayItem.id)) {
+        topLeftItems = [clinicalContextOverlayItem, ...topLeftItems];
+      }
       customizationService.setCustomizations({
         'viewportOverlay.topLeft': { $set: topLeftItems },
       });
@@ -239,6 +287,10 @@ function modeFactory({ modeConfiguration }) {
       _activatePanelTriggersSubscriptions.forEach(sub => sub.unsubscribe());
       _activatePanelTriggersSubscriptions = [];
 
+      _segPanelSubscription?.unsubscribe();
+      _segPanelSubscription = null;
+      _segPanelAdded = false;
+
       uiDialogService.dismissAll();
       uiModalService.hide();
       toolGroupService.destroy();
@@ -274,7 +326,9 @@ function modeFactory({ modeConfiguration }) {
             props: {
               leftPanels: [tracked.thumbnailList],
               leftPanelResizable: true,
-              rightPanels: [cornerstone.segmentation, tracked.measurements],
+              rightPanels: isSegPanelForced()
+                ? [cornerstone.segmentation, tracked.measurements]
+                : [tracked.measurements],
               rightPanelClosed: true,
               rightPanelResizable: true,
               viewports: [

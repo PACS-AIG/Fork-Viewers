@@ -2,6 +2,7 @@ import { Types, DicomMetadataStore } from '@ohif/core';
 import loadRelevantPriors from './priors/loadRelevantPriors';
 import { setBrowsingMode as persistBrowsingMode, type BrowsingMode } from './allinone/browsingMode';
 import { rehangForMode } from './allinone/rehang';
+import { toggleClinicalContextVisibility } from './clinicalContext/clinicalContextStore';
 
 const getCommandsModule = ({
   servicesManager,
@@ -76,12 +77,20 @@ const getCommandsModule = ({
       persistBrowsingMode(mode);
       rehangForMode(servicesManager);
     },
+
+    /**
+     * Show/hide the on-image clinical-context overlay (age · sex · indication).
+     * Preference persists across sessions; the overlay re-renders via the store
+     * subscription. Bound to a hotkey in the app config.
+     */
+    toggleClinicalContextOverlay: () => toggleClinicalContextVisibility(),
   };
 
   const definitions = {
     loadRelevantPriors: actions.loadRelevantPriors,
     focusSessionStudy: actions.focusSessionStudy,
     setBrowsingMode: actions.setBrowsingMode,
+    toggleClinicalContextOverlay: actions.toggleClinicalContextOverlay,
   };
 
   return {
