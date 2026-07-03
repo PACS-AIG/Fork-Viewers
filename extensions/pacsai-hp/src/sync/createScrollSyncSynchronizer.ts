@@ -111,9 +111,13 @@ export default function createScrollSyncSynchronizer(
     // Echo suppression: ignore the STACK_NEW_IMAGE we caused by jumping THIS viewport
     // (lands on the index we just set, within a short window) so the bidirectional
     // sync doesn't ping-pong and jerk the pane the user is scrolling.
+    // NON-CONSUMING (expires by time, no delete-on-match): rebind cycles can leave
+    // duplicate element listeners (cs3d removeSource can't detach the real fn), so
+    // this callback may run several times per event — a single-shot delete would let
+    // the second invocation through to back-map the user's pane. A real user scroll
+    // lands on a different index and is never suppressed.
     const echo = lastProgrammatic.get(sourceViewport.viewportId);
     if (echo && echo.index === srcIdx && Date.now() - echo.time < 600) {
-      lastProgrammatic.delete(sourceViewport.viewportId);
       trace('echo suppressed', { viewportId: sourceViewport.viewportId, index: srcIdx });
       return;
     }

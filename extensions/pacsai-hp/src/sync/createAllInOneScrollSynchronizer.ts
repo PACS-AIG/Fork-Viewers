@@ -137,9 +137,23 @@ export default function createAllInOneScrollSynchronizer(
     // Echo suppression: ignore the STACK_NEW_IMAGE we caused by jumping THIS viewport
     // (lands on the index we just set, within a short window) so the bidirectional sync
     // doesn't ping-pong and jerk the pane the user is scrolling.
+    // NON-CONSUMING (expires by time, no delete-on-match): cs3d can't truly detach a
+    // synchronizer's element listener (removeSource removes the wrong fn ref), so
+    // stage-paging rebind cycles can leave DUPLICATE listeners that invoke this
+    // callback several times per event. A single-shot delete let the second
+    // invocation through to back-map the user's pane — which wrecked the within-plane
+    // mapping (rad-reported "plane-aware sync broken"). An expired-not-deleted entry
+    // suppresses every duplicate; a real user scroll lands on a different index and
+    // is never suppressed.
     const echo = lastProgrammatic.get(sourceViewport.viewportId);
     if (echo && echo.index === srcIdx && Date.now() - echo.time < 600) {
-      lastProgrammatic.delete(sourceViewport.viewportId);
+      if (DEBUG_SYNC && Date.now() - lastSyncLog > 800) {
+        lastSyncLog = Date.now();
+        console.log('[pacsai-hp] allinone-sync echo suppressed', {
+          viewportId: sourceViewport.viewportId,
+          index: srcIdx,
+        });
+      }
       return;
     }
 
