@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-import ViewportImageScrollbar from './ViewportImageScrollbar';
+import ViewportScrollMinimap from './ViewportScrollMinimap';
 import CustomizableViewportOverlay from './CustomizableViewportOverlay';
 import ViewportOrientationMarkers from './ViewportOrientationMarkers';
 import ViewportImageSliceLoadingIndicator from './ViewportImageSliceLoadingIndicator';
@@ -46,7 +46,9 @@ function CornerstoneOverlays(props: withAppTypes) {
 
   return (
     <div className="noselect">
-      <ViewportImageScrollbar
+      {/* PACS AI scroll minimap for multi-slice stacks; renders the classic
+          ViewportImageScrollbar itself for volume viewports (composition). */}
+      <ViewportScrollMinimap
         viewportId={viewportId}
         viewportData={viewportData}
         element={element}
