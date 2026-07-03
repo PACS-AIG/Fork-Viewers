@@ -6,14 +6,26 @@ const ActiveViewportBehavior = memo(
       servicesManager.services;
 
     const [activeViewportId, setActiveViewportId] = useState(viewportId);
+    // Re-run the cine check when the grid content changes too — hanging a new
+    // displaySet into the ALREADY-ACTIVE viewport doesn't change the active id, so
+    // without this a dynamic (4D) or US/XA series swapped into the active pane
+    // never auto-enabled the cine player (PACS AI fix).
+    const [gridTick, setGridTick] = useState(0);
 
     useEffect(() => {
       const subscription = viewportGridService.subscribe(
         viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
         ({ viewportId }) => setActiveViewportId(viewportId)
       );
+      const gridSubscription = viewportGridService.subscribe(
+        viewportGridService.EVENTS.GRID_STATE_CHANGED,
+        () => setGridTick(tick => tick + 1)
+      );
 
-      return () => subscription.unsubscribe();
+      return () => {
+        subscription.unsubscribe();
+        gridSubscription.unsubscribe();
+      };
     }, [viewportId, viewportGridService]);
 
     useEffect(() => {
@@ -48,6 +60,7 @@ const ActiveViewportBehavior = memo(
       }
     }, [
       activeViewportId,
+      gridTick,
       cineService,
       viewportGridService,
       displaySetService,
