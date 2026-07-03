@@ -33,6 +33,7 @@ import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
+import initMomentumScroll from './momentum/initMomentumScroll';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -205,6 +206,10 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     // and the sync silently dies (intermittent). This rebinds any unbound pane for
     // BOTH pacsai sync types (compare/multi-WL `pacsaiscroll` + all-in-one).
     initScrollSyncBinding({ servicesManager });
+
+    // Flick-and-coast wheel scrolling for stack viewports (kill switch:
+    // PACSAI_FLAGS.disableMomentumScroll; debug: PACSAI_DEBUG_MOMENTUM).
+    initMomentumScroll();
   },
 
   getHangingProtocolModule,
