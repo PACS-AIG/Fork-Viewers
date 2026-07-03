@@ -196,6 +196,17 @@ function modeFactory({ modeConfiguration }) {
         },
       });
 
+      // Auto-show the cine player for temporal clip modalities: the stock list is
+      // OT/US; this site also reads angio/fluoro runs (XA/RF). 4D/dynamic volumes
+      // are auto-detected separately (isDynamicVolume in ActiveViewportBehavior).
+      // Manual toggle for everything else stays in MoreTools > Cine.
+      const stockAutoCine = customizationService.getCustomization('autoCineModalities') || [];
+      customizationService.setCustomizations({
+        autoCineModalities: {
+          $set: [...new Set([...stockAutoCine, 'XA', 'RF'])],
+        },
+      });
+
       // Add the top-right viewport overlay badges: a green "CURRENT" / amber
       // "PRIOR · date · interval" study-role tag and a cyan series-type tag
       // (AXIAL/CORONAL/SAGITTAL · SOFT/BONE). Idempotent so re-entering the mode
