@@ -240,7 +240,8 @@ export default function PanelStudyBrowserTracking({
       dataSource,
       displaySetService,
       uiDialogService,
-      uiNotificationService
+      uiNotificationService,
+      getImageSrc
     );
 
     setDisplaySets(mappedDisplaySets);
@@ -333,7 +334,8 @@ export default function PanelStudyBrowserTracking({
           dataSource,
           displaySetService,
           uiDialogService,
-          uiNotificationService
+          uiNotificationService,
+          getImageSrc
         );
 
         setDisplaySets(mappedDisplaySets);
@@ -353,7 +355,8 @@ export default function PanelStudyBrowserTracking({
           dataSource,
           displaySetService,
           uiDialogService,
-          uiNotificationService
+          uiNotificationService,
+          getImageSrc
         );
 
         setDisplaySets(mappedDisplaySets);
@@ -605,7 +608,8 @@ function _mapDisplaySets(
   dataSource,
   displaySetService,
   uiDialogService,
-  uiNotificationService
+  uiNotificationService,
+  getImageSrc
 ) {
   const thumbnailDisplaySets = [];
   const thumbnailNoImageDisplaySets = [];
@@ -648,6 +652,19 @@ function _mapDisplaySets(
         },
         isTracked: trackedSeriesInstanceUIDs.includes(ds.SeriesInstanceUID),
         isHydratedForDerivedDisplaySet: ds.isHydrated,
+        // Hover-scrub source (multi-image image series only): lazy imageId list +
+        // the same renderer the static thumbnail uses. Resolved on first hover so
+        // mapping stays cheap. See ui-next useHoverScrub.
+        scrub:
+          componentType !== 'thumbnailNoImage' && ds.numImageFrames > 1 && getImageSrc
+            ? {
+                getImageIds: () => {
+                  const liveDisplaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
+                  return liveDisplaySet ? dataSource.getImageIdsForDisplaySet(liveDisplaySet) : [];
+                },
+                getImageSrc,
+              }
+            : undefined,
       };
 
       if (componentType === 'thumbnailNoImage') {

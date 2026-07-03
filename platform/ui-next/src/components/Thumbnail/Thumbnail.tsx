@@ -5,6 +5,7 @@ import { useDrag } from 'react-dnd';
 import { Icons } from '../Icons';
 import { DisplaySetMessageListTooltip } from '../DisplaySetMessageListTooltip';
 import { TooltipTrigger, TooltipContent, Tooltip } from '../Tooltip';
+import { useHoverScrub } from './useHoverScrub';
 
 /**
  * Display a thumbnail for a display set.
@@ -26,6 +27,7 @@ const Thumbnail = ({
   thumbnailType,
   modality,
   sliceThickness,
+  scrub,
   viewPreset = 'thumbnails',
   isHydratedForDerivedDisplaySet = false,
   isTracked = false,
@@ -48,6 +50,10 @@ const Thumbnail = ({
 
   const [lastTap, setLastTap] = useState(0);
 
+  // Hover-scrub (PACS AI): sweep the series by moving the mouse across the image.
+  // Thumbnail-local only — never drives a viewport (see useHoverScrub).
+  const { scrubDisplay, onScrubMove, onScrubLeave } = useHoverScrub(scrub);
+
   const handleTouchEnd = e => {
     const currentTime = new Date().getTime();
     const tapLength = currentTime - lastTap;
@@ -68,16 +74,27 @@ const Thumbnail = ({
         )}
       >
         <div className="h-[114px] w-[128px]">
-          <div className="relative">
-            {imageSrc ? (
+          <div
+            className="relative"
+            onMouseMove={scrub ? onScrubMove : undefined}
+            onMouseLeave={scrub ? onScrubLeave : undefined}
+          >
+            {imageSrc || scrubDisplay ? (
               <img
-                src={imageSrc}
+                src={scrubDisplay?.src ?? imageSrc}
                 alt={imageAltText}
                 className="h-[114px] w-[128px] rounded"
                 crossOrigin="anonymous"
               />
             ) : (
               <div className="bg-background h-[114px] w-[128px] rounded"></div>
+            )}
+
+            {/* hover-scrub position badge */}
+            {scrubDisplay && (
+              <div className="absolute top-0 left-0 rounded-br bg-black/60 px-[4px] py-[1px] text-[10px] leading-4 text-white">
+                {scrubDisplay.index + 1}/{scrubDisplay.count}
+              </div>
             )}
 
             {/* bottom left */}
@@ -311,6 +328,11 @@ Thumbnail.propTypes = {
   viewPreset: PropTypes.string,
   modality: PropTypes.string,
   sliceThickness: PropTypes.string,
+  /** Optional hover-scrub source ({ getImageIds, getImageSrc }) — see useHoverScrub. */
+  scrub: PropTypes.shape({
+    getImageIds: PropTypes.func.isRequired,
+    getImageSrc: PropTypes.func.isRequired,
+  }),
   isHydratedForDerivedDisplaySet: PropTypes.bool,
   isTracked: PropTypes.bool,
   onClickUntrack: PropTypes.func,
