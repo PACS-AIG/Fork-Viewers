@@ -55,6 +55,10 @@ function attrValue(d: AnyDS, attr: string, activeStudyUID: string | undefined, s
       // without this the replay fails it and falsely shows those stages disabled/(none)
       // even when the real engine matched the composites. Mirrors the index.tsx callback.
       return d?.isAllInOne ? ALL_IN_ONE_MARKER : 'series';
+    case 'pacsaiDynamic':
+      // 4D-source stages (SelectorDef.dynamic) require pacsaiDynamic==='dynamic';
+      // mirrors the index.tsx callback (same misleading-replay class as above).
+      return d?.isDynamicVolume ? 'dynamic' : 'static';
     default:
       return d?.[attr];
   }

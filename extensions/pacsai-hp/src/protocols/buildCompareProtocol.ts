@@ -63,6 +63,14 @@ type SelectorDef = {
    * falls back to the soft axial (read at a lung window) when the study has none.
    */
   preferKernel?: 'soft' | 'lung' | 'bone';
+  /**
+   * Require a time-resolved (4D / dynamic-volume) series via the `pacsaiDynamic`
+   * custom attribute — the raw perfusion / dynamic acquisition, which hangs as a
+   * cine-able dynamic volume. Vendor-name-proof (no keywords needed): detection is
+   * metadata-based, incl. the pacsai AcquisitionNumber fallback for series lacking
+   * standard temporal tags.
+   */
+  dynamic?: boolean;
   /** SeriesDescription must contain ANY of these (case-insensitive). Omit for "any image series". */
   keywords?: string[];
   /**
@@ -466,6 +474,12 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
       // Weighted, NOT required: prefers this kernel class but still matches others,
       // so the pane falls back (e.g. soft axial when no lung-kernel recon exists).
       rules.push({ attribute: 'pacsaiKernel', weight: 10, constraint: { equals: { value: sel.preferKernel } } });
+    }
+    if (sel.dynamic) {
+      // Required: only a time-resolved (4D) series matches — the cine-able raw
+      // source of a perfusion/dynamic study. 'static' for everything else, so this
+      // selector can never grab an ordinary series.
+      rules.push({ attribute: 'pacsaiDynamic', required: true, constraint: { equals: { value: 'dynamic' } } });
     }
     if (sel.preferHighBValue) {
       // Weighted, NOT required: graduated so a split DWI trace ranks b1000 > b500 > b0

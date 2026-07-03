@@ -65,6 +65,14 @@ export const BVALUE_ATTRIBUTE = 'pacsaiBValue';
 export const ALL_IN_ONE_ATTRIBUTE = 'pacsaiAllInOne';
 
 /**
+ * 'dynamic' when the displaySet is a time-resolved (4D) volume — a raw perfusion /
+ * dynamic acquisition (incl. ones detected via the pacsai AcquisitionNumber
+ * fallback, see perfusion/initPerfusion4DProvider) — else 'static'. Lets protocol
+ * selectors target the cine-able 4D source directly (SelectorDef.dynamic).
+ */
+export const DYNAMIC_ATTRIBUTE = 'pacsaiDynamic';
+
+/**
  * Custom HP attribute id: spine region + timepoint, e.g. `lumbar-session`,
  * `cervical-prior`. `session` = current/sibling (same acquisition session);
  * `prior` = a loaded comparison prior of that region. Drives both the whole-spine
@@ -137,6 +145,14 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       COLOR_ATTRIBUTE,
       'Color class (rgb/mono)',
       getImageColor
+    );
+
+    // Time-resolved (4D) class so protocols can hang the cine-able raw source of a
+    // perfusion study (SelectorDef.dynamic → the CT-perfusion 4D stage).
+    hangingProtocolService?.addCustomAttribute?.(
+      DYNAMIC_ATTRIBUTE,
+      'Time-resolved 4D class (dynamic/static)',
+      (displaySet: any) => (displaySet?.isDynamicVolume ? 'dynamic' : 'static')
     );
 
     // Diffusion b-value of a split DWI displaySet, so the DWI stage can prefer the

@@ -84,6 +84,13 @@ function isEligible(ds: any): boolean {
   if (getImageColor(ds) === 'rgb') {
     return false; // derived color (perfusion maps / 3D-spin / RAPID summary)
   }
+  if (ds.isDynamicVolume) {
+    // Raw time-resolved (4D) source, e.g. VPCT perfusion: as a flat stack it's N
+    // timepoints interleaved per slice — unreadable, and the composite wrapper
+    // masks the real series' dynamic behavior (volume viewport + auto-cine). The
+    // rad reads it via the protocol's cine stage / by hanging the series itself.
+    return false;
+  }
   return true;
 }
 

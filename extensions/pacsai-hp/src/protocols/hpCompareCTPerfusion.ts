@@ -41,6 +41,11 @@ export const hpCompareCTPerfusion = buildCompareProtocol({
     // Combined colored parameter-map panel and the one-page summary.
     { key: 'pmaps', keywords: ['parameter', 'colored'] },
     { key: 'summary', keywords: ['summary'], excludeKeywords: ['slices'] },
+    // The raw time-resolved acquisition (e.g. Siemens "VPCT DynMulti4D CTP") —
+    // matched by 4D metadata, not by name (vendor-proof), and hung as a dynamic
+    // volume: the viewport forces volume mode and the cine player auto-shows, so
+    // the rad can play the bolus transit. Never matches an ordinary series.
+    { key: 'source4d', dynamic: true },
   ],
   // Current|prior compare stages (rare for acute stroke, but supported with a prior) —
   // same convention order as the no-prior groups: summary first, then the decision
@@ -59,6 +64,9 @@ export const hpCompareCTPerfusion = buildCompareProtocol({
   // core-vs-penumbra pair, the mismatch alone, and the colored CBF/CBV/MTT/Tmax panel.
   currentStages: [
     { name: 'Perfusion CT-P summary', selectors: ['summary'] },
+    // Cine-able 4D source right after the summary (one Next click) — plays the
+    // bolus transit. Also the lead when a study has no RAPID outputs at all.
+    { name: 'Perfusion 4D source (cine)', selectors: ['source4d'] },
     { name: 'Perfusion maps (CBF + CBV + Tmax + Mismatch)', selectors: ['cbf', 'cbv', 'tmax', 'mismatch'] },
     { name: 'Perfusion CBF + Tmax (core / penumbra)', selectors: ['cbf', 'tmax'] },
     { name: 'Perfusion mismatch (CBF/Tmax)', selectors: ['mismatch'] },
