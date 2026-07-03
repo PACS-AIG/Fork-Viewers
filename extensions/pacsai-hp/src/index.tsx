@@ -34,6 +34,7 @@ import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
 import initMomentumScroll from './momentum/initMomentumScroll';
+import initPerfusion4DProvider from './perfusion/initPerfusion4DProvider';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -210,6 +211,11 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     // Flick-and-coast wheel scrolling for stack viewports (kill switch:
     // PACSAI_FLAGS.disableMomentumScroll; debug: PACSAI_DEBUG_MOMENTUM).
     initMomentumScroll();
+
+    // Synthetic TemporalPositionIdentifier (from AcquisitionNumber) for perfusion
+    // series lacking standard temporal tags → cs3d 4D detection + dynamic volume +
+    // auto-cine light up natively. Strict series shape check; see the module doc.
+    initPerfusion4DProvider();
   },
 
   getHangingProtocolModule,
