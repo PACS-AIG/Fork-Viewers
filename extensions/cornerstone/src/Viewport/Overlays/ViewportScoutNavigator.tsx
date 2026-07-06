@@ -45,10 +45,32 @@ const SCOUT_RE = /(topo|scout|localizer)/i;
 const PLANE_PREFERENCE = ['coronal', 'sagittal', 'axial'];
 const COLLAPSE_KEY = 'pacsai.scoutNavigator';
 const INSET_WIDTH = 132;
+const SCOUT_RENDER_RETRIES = 3;
+const SCOUT_RETRY_MS = 4000;
 
 const scoutSrcCache = new Map<string, string>(); // imageId -> dataURL (scouts are few)
 const warnedFailures = new Set<string>();
 const loggedPicks = new Set<string>(); // `${viewportId}|${imageId}` — one pick log each
+
+/** True when a rendered canvas is effectively all-black (VOI/decode failure). */
+function isCanvasBlank(canvas: HTMLCanvasElement): boolean {
+  try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !canvas.width || !canvas.height) {
+      return true;
+    }
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    // Any pixel meaningfully above black (tolerate decode noise) => not blank.
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 8 || data[i + 1] > 8 || data[i + 2] > 8) {
+        return false;
+      }
+    }
+    return true;
+  } catch (e) {
+    return false; // cannot inspect (tainted canvas?) — assume it rendered
+  }
+}
 
 // ---- geometry -------------------------------------------------------------------
 
@@ -154,6 +176,7 @@ function ViewportScoutNavigator(props: withAppTypes) {
     () => localStorage.getItem(COLLAPSE_KEY) === 'collapsed'
   );
   const [scoutSrc, setScoutSrc] = useState<string | null>(null);
+  const [renderFailed, setRenderFailed] = useState(false);
   const scoutImgRef = useRef<HTMLImageElement>(null);
 
   const disabled = flags().disableScoutNavigator === true;
@@ -264,8 +287,12 @@ function ViewportScoutNavigator(props: withAppTypes) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stack, viewportId, viewportGridService, displaySetService]);
 
-  // Render the scout image (cached dataURL).
+  // Render the scout image (cached dataURL) — with retries and blank detection.
+  // Rad-reported failure mode: one pane of a compare showed a BLACK inset even
+  // though its study had a topogram — the single silent loadImageToCanvas attempt
+  // failed (or rendered blank) and the empty placeholder read as "no scout".
   useEffect(() => {
+    setRenderFailed(false);
     if (!scout || collapsed) {
       return;
     }
@@ -274,25 +301,59 @@ function ViewportScoutNavigator(props: withAppTypes) {
       setScoutSrc(cached);
       return;
     }
+    setScoutSrc(null); // never show a previous scout under the new stack's line
     let cancelled = false;
-    const canvas = document.createElement('canvas');
-    csUtils
-      .loadImageToCanvas({ canvas, imageId: scout.imageId, thumbnail: true })
-      .then(() => {
-        const src = canvas.toDataURL();
-        scoutSrcCache.set(scout.imageId, src);
-        if (!cancelled) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const attempt = (n: number) => {
+      const canvas = document.createElement('canvas');
+      csUtils
+        .loadImageToCanvas({ canvas, imageId: scout.imageId, thumbnail: true })
+        .then(() => {
+          if (cancelled) {
+            return;
+          }
+          if (isCanvasBlank(canvas)) {
+            // Resolved but all-black — VOI/decode issue, not a fetch failure.
+            throw new Error('rendered a blank canvas (VOI/decode?)');
+          }
+          const src = canvas.toDataURL();
+          scoutSrcCache.set(scout.imageId, src);
           setScoutSrc(src);
-        }
-      })
-      .catch(e => {
-        if (!warnedFailures.has(scout.imageId)) {
-          warnedFailures.add(scout.imageId);
-          console.warn('[pacsai-scout] scout render failed', { imageId: scout.imageId, error: e });
-        }
-      });
+          if (verbose()) {
+            console.log('[pacsai-scout] scout rendered', { series: scout.desc, attempt: n });
+          }
+        })
+        .catch(e => {
+          if (cancelled) {
+            return;
+          }
+          if (n < SCOUT_RENDER_RETRIES) {
+            if (verbose()) {
+              console.log('[pacsai-scout] render retry scheduled', {
+                series: scout.desc,
+                attempt: n,
+                error: String(e?.message ?? e),
+              });
+            }
+            timer = setTimeout(() => attempt(n + 1), SCOUT_RETRY_MS);
+          } else {
+            setRenderFailed(true); // hide the inset — a black box reads as broken
+            if (!warnedFailures.has(scout.imageId)) {
+              warnedFailures.add(scout.imageId);
+              console.warn('[pacsai-scout] scout render failed after retries', {
+                imageId: scout.imageId,
+                series: scout.desc,
+                error: e,
+              });
+            }
+          }
+        });
+    };
+    attempt(1);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [scout, collapsed]);
 
@@ -306,7 +367,7 @@ function ViewportScoutNavigator(props: withAppTypes) {
     return slice ? sliceLineOn(scout.info, slice) : undefined;
   }, [scout, stack, imageIndex]);
 
-  if (disabled || !isStack || !scout || numberOfSlices < 2) {
+  if (disabled || !isStack || !scout || numberOfSlices < 2 || renderFailed) {
     return null;
   }
 
@@ -433,7 +494,20 @@ function ViewportScoutNavigator(props: withAppTypes) {
             draggable={false}
           />
         ) : (
-          <div style={{ width: '100%', height: 80 }} />
+          <div
+            style={{
+              width: '100%',
+              height: 80,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 9,
+              color: 'rgba(255,255,255,0.45)',
+              lineHeight: '12px',
+            }}
+          >
+            loading scout…
+          </div>
         )}
         {line && scoutSrc && (
           <svg
