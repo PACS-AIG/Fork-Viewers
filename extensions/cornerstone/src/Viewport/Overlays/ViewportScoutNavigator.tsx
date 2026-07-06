@@ -45,8 +45,14 @@ const SCOUT_RE = /(topo|scout|localizer)/i;
 const PLANE_PREFERENCE = ['coronal', 'sagittal', 'axial'];
 const COLLAPSE_KEY = 'pacsai.scoutNavigator';
 const INSET_WIDTH = 132;
-const SCOUT_RENDER_RETRIES = 3;
-const SCOUT_RETRY_MS = 4000;
+const SCOUT_RENDER_RETRIES = 4; // last attempt falls back to CPU rendering
+const SCOUT_RETRY_DELAY_MS = 2000;
+// loadImageToCanvas can HANG without settling (rad-observed: permanent 'loading
+// scout…' with no rejection — a queued request lost/stalled during the initial
+// load storm). Every attempt races this timeout; a timed-out attempt retries with
+// a FRESH request (by then the queue has drained / the rail already cached the
+// image, so retries are cheap and near-certain).
+const SCOUT_ATTEMPT_TIMEOUT_MS = 6000;
 
 const scoutSrcCache = new Map<string, string>(); // imageId -> dataURL (scouts are few)
 const warnedFailures = new Set<string>();
@@ -307,15 +313,32 @@ function ViewportScoutNavigator(props: withAppTypes) {
 
     const attempt = (n: number) => {
       const canvas = document.createElement('canvas');
-      csUtils
-        .loadImageToCanvas({ canvas, imageId: scout.imageId, thumbnail: true })
+      const render = csUtils
+        .loadImageToCanvas({
+          canvas,
+          imageId: scout.imageId,
+          thumbnail: true,
+          // Final attempt: alternate (CPU) render path, in case the shared GPU
+          // thumbnail pipeline is what's stalling/failing.
+          ...(n === SCOUT_RENDER_RETRIES ? { useCPURendering: true } : {}),
+        })
         .then(() => {
-          if (cancelled) {
-            return;
-          }
           if (isCanvasBlank(canvas)) {
             // Resolved but all-black — VOI/decode issue, not a fetch failure.
             throw new Error('rendered a blank canvas (VOI/decode?)');
+          }
+        });
+      const timeout = new Promise((_, rejectT) => {
+        timer = setTimeout(
+          () => rejectT(new Error(`timed out after ${SCOUT_ATTEMPT_TIMEOUT_MS}ms (request lost/stalled?)`)),
+          SCOUT_ATTEMPT_TIMEOUT_MS
+        );
+      });
+      Promise.race([render, timeout])
+        .then(() => {
+          clearTimeout(timer);
+          if (cancelled) {
+            return;
           }
           const src = canvas.toDataURL();
           scoutSrcCache.set(scout.imageId, src);
@@ -325,6 +348,7 @@ function ViewportScoutNavigator(props: withAppTypes) {
           }
         })
         .catch(e => {
+          clearTimeout(timer);
           if (cancelled) {
             return;
           }
@@ -336,7 +360,7 @@ function ViewportScoutNavigator(props: withAppTypes) {
                 error: String(e?.message ?? e),
               });
             }
-            timer = setTimeout(() => attempt(n + 1), SCOUT_RETRY_MS);
+            timer = setTimeout(() => attempt(n + 1), SCOUT_RETRY_DELAY_MS);
           } else {
             setRenderFailed(true); // hide the inset — a black box reads as broken
             if (!warnedFailures.has(scout.imageId)) {
