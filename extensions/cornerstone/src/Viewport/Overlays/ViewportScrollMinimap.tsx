@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
-import { Enums, VolumeViewport3D, utilities as csUtils, metaData } from '@cornerstonejs/core';
+import { Enums, VolumeViewport3D, utilities as csUtils } from '@cornerstonejs/core';
 import ViewportImageScrollbar from './ViewportImageScrollbar';
+import { planeOfImageId } from './imagePlaneOf';
 
 /**
  * Scroll minimap (PACS AI, build-spec "scroll minimap"): replaces the plain range
@@ -25,42 +26,7 @@ const verbose = () => (window as any).PACSAI_DEBUG_MINIMAP === true;
 let lastJumpLog = 0;
 
 // ---- plane classification -------------------------------------------------------
-// Duplicated from pacsai-hp's createAllInOneScrollSynchronizer (cornerstone ext must
-// not depend on pacsai-hp — wrong dependency direction). Keep the math in sync.
-
-function vec3(x: any): number[] | undefined {
-  if (!x || typeof x.length !== 'number' || x.length < 3) {
-    return undefined;
-  }
-  const a = [Number(x[0]), Number(x[1]), Number(x[2])];
-  return a.some(n => Number.isNaN(n)) ? undefined : a;
-}
-
-function planeOfImageId(imageId: string): string | undefined {
-  const m = metaData.get('imagePlaneModule', imageId) as any;
-  if (!m) {
-    return undefined;
-  }
-  let row = vec3(m.rowCosines);
-  let col = vec3(m.columnCosines);
-  if (!row || !col) {
-    const iop = m.imageOrientationPatient;
-    if (iop && iop.length >= 6) {
-      row = vec3([iop[0], iop[1], iop[2]]);
-      col = vec3([iop[3], iop[4], iop[5]]);
-    }
-  }
-  if (!row || !col) {
-    return undefined;
-  }
-  const nx = Math.abs(row[1] * col[2] - row[2] * col[1]);
-  const ny = Math.abs(row[2] * col[0] - row[0] * col[2]);
-  const nz = Math.abs(row[0] * col[1] - row[1] * col[0]);
-  if (nz >= nx && nz >= ny) {
-    return 'axial';
-  }
-  return nx >= ny ? 'sagittal' : 'coronal';
-}
+// planeOfImageId lives in ./imagePlaneOf (shared with the scout navigator).
 
 type Segment = { plane: string | undefined; start: number; count: number };
 

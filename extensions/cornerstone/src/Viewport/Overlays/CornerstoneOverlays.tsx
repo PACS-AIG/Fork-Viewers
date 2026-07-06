@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 import ViewportScrollMinimap from './ViewportScrollMinimap';
+import ViewportScoutNavigator from './ViewportScoutNavigator';
 import CustomizableViewportOverlay from './CustomizableViewportOverlay';
 import ViewportOrientationMarkers from './ViewportOrientationMarkers';
 import ViewportImageSliceLoadingIndicator from './ViewportImageSliceLoadingIndicator';
@@ -64,6 +65,16 @@ function CornerstoneOverlays(props: withAppTypes) {
         viewportId={viewportId}
         servicesManager={servicesManager}
         element={element}
+      />
+
+      {/* PACS AI scout navigator: scout inset + live slice line on the ACTIVE
+          stack viewport; click jumps to that anatomical level. */}
+      <ViewportScoutNavigator
+        viewportId={viewportId}
+        viewportData={viewportData}
+        element={element}
+        imageSliceData={imageSliceData}
+        servicesManager={servicesManager}
       />
 
       <ViewportImageSliceLoadingIndicator
