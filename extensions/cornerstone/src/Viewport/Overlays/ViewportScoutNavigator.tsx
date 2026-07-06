@@ -18,13 +18,21 @@ import { planeOfImageId, rowColOf, vec3 } from './imagePlaneOf';
  * mapping (scout pixel → world point) and jumps to the stack slice whose plane is
  * nearest to that point.
  *
- * Scout pick: same-study displaySets whose description says scout/topo/localizer,
- * or 1-2-image CT/MR series; the image whose plane DIFFERS from the stack's plane
- * (preference coronal → sagittal → axial) so the line is meaningful. Rendered via
- * loadImageToCanvas into a cached dataURL (same pattern as thumbnails/hover-scrub).
+ * Scout pick (STRICT): same-study displaySets, MONOCHROME only (derived RGB
+ * screenshots like "Rapid RV/LV Ratio" are never scouts), with full plane geometry
+ * (IOP + spacing + dims), image plane DIFFERENT from the stack's plane — required
+ * for a meaningful line: a coronal slice projected on a coronal scout degenerates
+ * to the whole image, so an axial stack gets a coronal/sagittal scout, a coronal
+ * stack gets a sagittal one, etc. Ranked: description-matched scouts
+ * (scout/topo/localizer) first, then the 1-2-image CT/MR fallback; within a rank,
+ * plane preference coronal → sagittal → axial. Rendered via loadImageToCanvas into
+ * a cached dataURL (same pattern as thumbnails/hover-scrub). Every pick logs
+ * '[pacsai-scout] scout chosen' once per (viewport, scout) so a wrong image in the
+ * inset is attributable from the console.
  *
- * Shown only on the ACTIVE viewport, stack viewports with >1 slice, when a scout
- * exists. Collapsible (persisted, localStorage 'pacsai.scoutNavigator').
+ * Shown PER PANE on every stack viewport with >1 slice and a usable scout — in a
+ * current|prior compare each pane shows its OWN study's scout. Collapsible
+ * (persisted, localStorage 'pacsai.scoutNavigator').
  * Kill switch: window.PACSAI_FLAGS = { disableScoutNavigator: true }.
  * DEBUGGING: window.PACSAI_DEBUG_SCOUT = true logs scout choice, projections and
  * click-jumps; scout render failures warn once.
@@ -40,6 +48,7 @@ const INSET_WIDTH = 132;
 
 const scoutSrcCache = new Map<string, string>(); // imageId -> dataURL (scouts are few)
 const warnedFailures = new Set<string>();
+const loggedPicks = new Set<string>(); // `${viewportId}|${imageId}` — one pick log each
 
 // ---- geometry -------------------------------------------------------------------
 
@@ -141,26 +150,14 @@ function ViewportScoutNavigator(props: withAppTypes) {
   const { cornerstoneViewportService, viewportGridService, displaySetService, cineService } =
     servicesManager.services;
 
-  const [activeViewportId, setActiveViewportId] = useState(
-    viewportGridService.getActiveViewportId?.()
-  );
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === 'collapsed'
   );
   const [scoutSrc, setScoutSrc] = useState<string | null>(null);
   const scoutImgRef = useRef<HTMLImageElement>(null);
 
-  useEffect(() => {
-    const sub = viewportGridService.subscribe(
-      viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
-      ({ viewportId: id }) => setActiveViewportId(id)
-    );
-    return () => sub.unsubscribe();
-  }, [viewportGridService]);
-
   const disabled = flags().disableScoutNavigator === true;
   const isStack = viewportData?.viewportType === Enums.ViewportType.STACK;
-  const isActive = viewportId === activeViewportId;
   const numberOfSlices = imageSliceData?.numberOfSlices ?? 0;
   const imageIndex = imageSliceData?.imageIndex ?? 0;
 
@@ -190,15 +187,22 @@ function ViewportScoutNavigator(props: withAppTypes) {
     if (!hung?.StudyInstanceUID) {
       return undefined;
     }
-    const candidates: Array<{ imageId: string; plane: string }> = [];
+    const candidates: Array<{
+      imageId: string;
+      plane: string;
+      info: PlaneInfo;
+      desc: string;
+      descMatched: boolean;
+    }> = [];
     (displaySetService.getActiveDisplaySets?.() ?? [])
       .filter((ds: any) => ds.StudyInstanceUID === hung.StudyInstanceUID && !ds.isAllInOne)
       .forEach((ds: any) => {
         const mod = String(ds.Modality ?? '').toUpperCase();
         const desc = String(ds.SeriesDescription ?? '');
         const images = Array.from(ds.images ?? ds.instances ?? []);
+        const descMatched = SCOUT_RE.test(desc);
         const looksLikeScout =
-          SCOUT_RE.test(desc) || ((mod === 'CT' || mod === 'MR') && images.length <= 2);
+          descMatched || ((mod === 'CT' || mod === 'MR') && images.length <= 2);
         if (!looksLikeScout || !images.length) {
           return;
         }
@@ -207,10 +211,25 @@ function ViewportScoutNavigator(props: withAppTypes) {
           if (!imageId) {
             return;
           }
-          const plane = planeOfImageId(imageId);
-          if (plane && plane !== stack.plane) {
-            candidates.push({ imageId, plane });
+          // MONOCHROME only — derived RGB screenshots (e.g. "Rapid RV/LV Ratio")
+          // are never scouts, whatever their size/geometry claims.
+          if (
+            Number(inst.SamplesPerPixel) === 3 ||
+            /RGB|YBR|PALETTE/i.test(String(inst.PhotometricInterpretation ?? ''))
+          ) {
+            return;
           }
+          const plane = planeOfImageId(imageId);
+          if (!plane || plane === stack.plane) {
+            return;
+          }
+          // Full geometry required up front (IOP + spacing + dims) — an image the
+          // projection can't use must not win the pick.
+          const info = planeInfoOf(imageId);
+          if (!info) {
+            return;
+          }
+          candidates.push({ imageId, plane, info, desc, descMatched });
         });
       });
     if (!candidates.length) {
@@ -219,23 +238,35 @@ function ViewportScoutNavigator(props: withAppTypes) {
       }
       return undefined;
     }
+    // Rank: real (description-matched) scouts before the small-series fallback,
+    // then by plane preference.
     const preference = PLANE_PREFERENCE.filter(p => p !== stack.plane);
-    candidates.sort((a, b) => preference.indexOf(a.plane) - preference.indexOf(b.plane));
+    candidates.sort(
+      (a, b) =>
+        Number(b.descMatched) - Number(a.descMatched) ||
+        preference.indexOf(a.plane) - preference.indexOf(b.plane)
+    );
     const chosen = candidates[0];
-    const info = planeInfoOf(chosen.imageId);
-    if (!info) {
-      return undefined;
+    const pickKey = `${viewportId}|${chosen.imageId}`;
+    if (!loggedPicks.has(pickKey)) {
+      loggedPicks.add(pickKey);
+      // Unconditional (once per pick): a wrong image in the inset must be
+      // attributable from the console without a redeploy.
+      console.log('[pacsai-scout] scout chosen', {
+        viewportId,
+        series: chosen.desc,
+        plane: chosen.plane,
+        stackPlane: stack.plane,
+        descMatched: chosen.descMatched,
+      });
     }
-    if (verbose()) {
-      console.log('[pacsai-scout] scout chosen', { plane: chosen.plane, stackPlane: stack.plane });
-    }
-    return { ...chosen, info };
+    return chosen;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stack, viewportId, viewportGridService, displaySetService]);
 
   // Render the scout image (cached dataURL).
   useEffect(() => {
-    if (!scout || collapsed || !isActive) {
+    if (!scout || collapsed) {
       return;
     }
     const cached = scoutSrcCache.get(scout.imageId);
@@ -263,7 +294,7 @@ function ViewportScoutNavigator(props: withAppTypes) {
     return () => {
       cancelled = true;
     };
-  }, [scout, collapsed, isActive]);
+  }, [scout, collapsed]);
 
   // Slice line for the CURRENT image (recomputed per scroll tick — cheap math).
   const line = useMemo(() => {
@@ -275,7 +306,7 @@ function ViewportScoutNavigator(props: withAppTypes) {
     return slice ? sliceLineOn(scout.info, slice) : undefined;
   }, [scout, stack, imageIndex]);
 
-  if (disabled || !isStack || !isActive || !scout || numberOfSlices < 2) {
+  if (disabled || !isStack || !scout || numberOfSlices < 2) {
     return null;
   }
 
