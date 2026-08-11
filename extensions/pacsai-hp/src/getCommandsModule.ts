@@ -71,8 +71,10 @@ const getCommandsModule = ({
      * then re-hangs the ALREADY-LOADED studies with the mode's protocol — no
      * re-query: priors/siblings were discovered once under the auto-matched compare
      * protocol and stay loaded, so this is a pure re-hang. 'append' auto-selects the
-     * best compare protocol (now ending in the all-in-one stage); 'allinone' forces
-     * the dedicated all-in-one protocol; 'manual' forces the stock default.
+     * best compare protocol (now ending in the all-in-one stage); 'current' hangs that
+     * same protocol's no-prior stages (the prior stays loaded but gets no hanging role,
+     * siblings still compare); 'allinone' forces the dedicated all-in-one protocol;
+     * 'manual' forces the stock default.
      */
     setBrowsingMode: ({ mode }: { mode?: BrowsingMode }) => {
       if (!mode) {

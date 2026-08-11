@@ -4,6 +4,7 @@ import getImageColor from '../utils/getImageColor';
 import { ALL_IN_ONE_MARKER } from '../allinone/buildAllInOneDisplaySet';
 import { getStudyRole } from './roleRegistry';
 import { getSpineRegion } from './metadata';
+import { hangingIgnoresPriors } from '../allinone/browsingMode';
 
 /**
  * DEBUG-only: log every stage of a built protocol together with the series each
@@ -26,8 +27,18 @@ function studyDescriptionOf(d: AnyDS): string {
   return String(d?.instances?.[0]?.StudyDescription ?? d?.StudyDescription ?? '');
 }
 
-function regionTimepoint(d: AnyDS, activeStudyUID?: string): string | undefined {
+/**
+ * The role the MATCHER sees — mirrors index.tsx's `hangRoleFor`: the 'Current +
+ * all-in-one' browsing mode suppresses the prior role, so without this the replay
+ * would report the prior stages ENABLED while the real engine disables them.
+ */
+function hangRole(d: AnyDS, activeStudyUID?: string): string | undefined {
   const role = getStudyRole(d?.StudyInstanceUID, activeStudyUID);
+  return role === 'prior' && hangingIgnoresPriors() ? undefined : role;
+}
+
+function regionTimepoint(d: AnyDS, activeStudyUID?: string): string | undefined {
+  const role = hangRole(d, activeStudyUID);
   const tp = role === 'current' || role === 'sibling' ? 'session' : role === 'prior' ? 'prior' : undefined;
   if (!tp) {
     return undefined;
@@ -39,7 +50,7 @@ function regionTimepoint(d: AnyDS, activeStudyUID?: string): string | undefined 
 function attrValue(d: AnyDS, attr: string, activeStudyUID: string | undefined, siblings: AnyDS[]): unknown {
   switch (attr) {
     case 'pacsaiRole':
-      return getStudyRole(d?.StudyInstanceUID, activeStudyUID);
+      return hangRole(d, activeStudyUID);
     case 'pacsaiRegionTimepoint':
       return regionTimepoint(d, activeStudyUID);
     case 'pacsaiPlane':
@@ -140,6 +151,11 @@ export function logPlannedStages(
   };
 
   log(`PLANNED PROTOCOL "${protocol?.id}" — ${protocol?.stages?.length ?? 0} stage(s):`);
+  if (hangingIgnoresPriors()) {
+    // The role in each `<role/plane/nN>` tag below is the TRUE registry role, so a
+    // loaded prior still prints as <prior> while being unmatchable by design.
+    log('  browsing mode "Current + all-in-one": prior role SUPPRESSED — every prior stage is expected to be disabled');
+  }
   (protocol?.stages ?? []).forEach((stage: any, i: number) => {
     const en = stage?.stageActivation?.enabled?.minViewportsMatched ?? 1;
     const pa = stage?.stageActivation?.passive?.minViewportsMatched ?? 0;

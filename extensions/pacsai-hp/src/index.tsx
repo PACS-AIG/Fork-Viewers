@@ -31,6 +31,7 @@ import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
 import { getStudyRole } from './priors/roleRegistry';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
+import { hangingIgnoresPriors } from './allinone/browsingMode';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
 import initMomentumScroll from './momentum/initMomentumScroll';
@@ -172,27 +173,38 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       (displaySet: any) => (displaySet?.isAllInOne ? ALL_IN_ONE_MARKER : 'series')
     );
 
-    // Comparison role (current/prior/sibling). Current is derived from the live
-    // activeStudyUID so the current viewport always matches — even on the first
-    // hang, before any prior/sibling is loaded; prior/sibling come from the role
-    // registry, populated by loadRelevantPriors just before it re-hangs.
-    const roleForDisplaySet = (displaySet: any) => {
+    // Comparison role (current/prior/sibling) AS SEEN BY THE MATCHER. Current is
+    // derived from the live activeStudyUID so the current viewport always matches —
+    // even on the first hang, before any prior/sibling is loaded; prior/sibling come
+    // from the role registry, populated by loadRelevantPriors just before it re-hangs.
+    //
+    // The 'Current + all-in-one' browsing mode suppresses the PRIOR role here (and in
+    // the region-timepoint attribute below, which is derived from it), so a loaded
+    // prior simply has no hanging role: every prior-requiring selector goes unmatched,
+    // its 2-up stage falls `disabled`, and the engine takes the same current-only path
+    // as a study with no prior at all — while siblings keep hanging as 'session'. The
+    // registry itself stays truthful, so the CURRENT/PRIOR overlay pill and the
+    // left-rail markers still identify a loaded prior.
+    const hangRoleFor = (displaySet: any) => {
       const activeStudyUID = hangingProtocolService?.getState?.()?.activeStudyUID;
-      return getStudyRole(displaySet?.StudyInstanceUID, activeStudyUID);
+      const role = getStudyRole(displaySet?.StudyInstanceUID, activeStudyUID);
+      return role === 'prior' && hangingIgnoresPriors() ? undefined : role;
     };
     hangingProtocolService?.addCustomAttribute?.(
       ROLE_ATTRIBUTE,
       'Comparison role (current/prior/sibling)',
-      roleForDisplaySet
+      hangRoleFor
     );
 
     // Spine region + timepoint (e.g. 'lumbar-session', 'cervical-prior'), used by
     // the region-addressable whole-spine survey (region-session panes) and the
     // per-region current-vs-prior compare. session = current/sibling, prior = a
     // loaded comparison prior. Generic 'spine' / non-spine / unknown -> undefined.
+    // Uses the SAME (possibly prior-suppressed) hanging role as ROLE_ATTRIBUTE, so
+    // 'Current + all-in-one' drops the per-region prior compares too and leaves the
+    // survey / per-region session views — which is the whole point of that mode.
     const regionTimepointForDisplaySet = (displaySet: any) => {
-      const activeStudyUID = hangingProtocolService?.getState?.()?.activeStudyUID;
-      const role = getStudyRole(displaySet?.StudyInstanceUID, activeStudyUID);
+      const role = hangRoleFor(displaySet);
       const timepoint =
         role === 'current' || role === 'sibling' ? 'session' : role === 'prior' ? 'prior' : undefined;
       if (!timepoint) {

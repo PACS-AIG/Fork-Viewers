@@ -383,8 +383,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       const currentStudy = DicomMetadataStore.getStudy(currentStudyUID);
       const activeDisplaySets = displaySetService.getActiveDisplaySets();
       if (currentStudy) {
-        // Honor the browsing mode: append -> this compare protocol (all-in-one last
-        // stage); allinone -> the all-in-one-only protocol; manual -> stock default.
+        // Honor the browsing mode: append/current -> this compare protocol (all-in-one
+        // last stage; identical here, there being no prior to suppress); allinone -> the
+        // all-in-one-only protocol; manual -> stock default.
         hangingProtocolService.run(
           { studies: [currentStudy], displaySets: activeDisplaySets, activeStudy: currentStudy },
           protocolIdForMode(getBrowsingMode(), protocol.id) ?? protocol.id
@@ -450,7 +451,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         log('ordered studies for run()', [currentStudyUID, ...extraUIDs]);
       }
       // Honor the browsing mode for which protocol to hang: append -> this matched
-      // compare protocol (all-in-one as its last stage); allinone -> the dedicated
+      // compare protocol (all-in-one as its last stage); current -> the same protocol,
+      // but the prior's hanging role is suppressed so its no-prior stages lead (the
+      // prior stays loaded/co-visible in the rail); allinone -> the dedicated
       // all-in-one-only protocol; manual -> stock default. Prior discovery above used
       // the compare protocol's policy regardless, so priors are loaded either way.
       const appliedProtocolId = protocolIdForMode(getBrowsingMode(), protocol.id) ?? protocol.id;

@@ -43,7 +43,7 @@ export function initAllInOneAutoRefresh({
       try {
         const { created } = syncAllInOneDisplaySets({ servicesManager, extensionManager });
         // Re-hang only when a composite first appears AND the mode actually hangs the
-        // all-in-one (append/allinone). In 'manual' the active protocol has no
+        // all-in-one (append/current/allinone). In 'manual' the active protocol has no
         // all-in-one stage, so a re-hang would gain nothing and only reset the
         // reader's hand-arranged layout.
         if (created > 0 && getBrowsingMode() !== 'manual') {

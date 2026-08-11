@@ -810,6 +810,8 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   // must never attempt a volume. Appended as the FINAL stage(s) — AFTER the safety
   // catch-all — so the "compare + all-in-one" mode pages to it at the very end:
   // present in every compare protocol, this is the default "append" browsing mode.
+  // ("Current + all-in-one" suppresses the prior's hanging role, so `allinone-cp`
+  // goes disabled there and paging to the end lands on the 1-up `allinone`.)
   // (The safety `current-any` stays just before it as the US / no-composite fallback;
   // it only needs to exist and stay non-disabled, not be last.) The composite is built
   // after the initial hang (same lifecycle as priors), so these stages stay `disabled`

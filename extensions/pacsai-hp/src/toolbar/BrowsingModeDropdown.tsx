@@ -11,7 +11,8 @@ import {
  * Toolbar control for the all-in-one browsing mode (a sticky, global reader
  * preference). Selecting a mode runs the `setBrowsingMode` command, which persists
  * the choice and re-hangs the already-loaded studies with that mode's protocol
- * (append = compare + all-in-one last stage; allinone = all-in-one only; manual =
+ * (append = compare + all-in-one last stage; current = the same protocol hung as if
+ * there were no prior, siblings still compared; allinone = all-in-one only; manual =
  * stock default). Always visible (unlike the session switcher) so the reader can
  * switch at any time.
  *
