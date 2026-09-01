@@ -1,6 +1,8 @@
 import React from 'react';
 import { getStudyRole } from '../priors/roleRegistry';
-import { formatStudyDateTime } from './formatStudyDateTime';
+import { formatInterval, formatStudyDateTime } from './formatStudyDateTime';
+import RoleTag from './RoleTag';
+import PriorSwitcher from './PriorSwitcher';
 
 /**
  * Viewport overlay tag that marks each pane's study ROLE so the reading
@@ -15,6 +17,9 @@ import { formatStudyDateTime } from './formatStudyDateTime';
  * separates two studies acquired on the SAME day — a same-day repeat or a
  * pre/post pair otherwise shows an identical tag on both panes. It degrades to
  * the date alone when the PACS omits StudyTime.
+ *
+ * The PRIOR pill is also the prior SWITCHER (`PriorSwitcher`): clicking it lists
+ * the patient's other priors and re-hangs the protocol against the chosen one.
  *
  * Design notes:
  *  - The WORD carries the meaning, not the color alone (a meaningful share of
@@ -42,47 +47,6 @@ export const STUDY_ROLE_OVERLAY_ITEM_ID = 'pacsai-study-role-indicator';
 const CURRENT_COLOR = '#34D399';
 const PRIOR_COLOR = '#FBBF24';
 
-/** Parse a DICOM date (YYYYMMDD...) into a Date, or undefined. */
-function parseDicomDate(raw: unknown): Date | undefined {
-  if (!raw || typeof raw !== 'string') {
-    return undefined;
-  }
-  const m = raw.match(/^(\d{4})(\d{2})(\d{2})/);
-  if (!m) {
-    return undefined;
-  }
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return Number.isNaN(d.getTime()) ? undefined : d;
-}
-
-/**
- * Human, compact elapsed time from the prior study to the current study
- * (e.g. "5 d", "3 wk", "6 mo", "2.5 y"). Empty string when undeterminable.
- */
-function formatInterval(currentDate: unknown, priorDate: unknown): string {
-  const cur = parseDicomDate(currentDate);
-  const pri = parseDicomDate(priorDate);
-  if (!cur || !pri) {
-    return '';
-  }
-  const days = Math.round((cur.getTime() - pri.getTime()) / 86400000);
-  if (days <= 0) {
-    return '';
-  }
-  if (days < 7) {
-    return `${days} d`;
-  }
-  if (days < 56) {
-    return `${Math.round(days / 7)} wk`;
-  }
-  if (days < 730) {
-    return `${Math.round(days / 30)} mo`;
-  }
-  const years = days / 365;
-  // One decimal under 5 years ("2.5 y"), whole years beyond.
-  return `${years < 5 ? years.toFixed(1) : Math.round(years)} y`;
-}
-
 /**
  * Find the CURRENT (report-target) study's timestamp from the loaded display
  * sets, as a `{ StudyDate, StudyTime }` source for `formatStudyDateTime` (the
@@ -108,54 +72,6 @@ function getCurrentStudyStamp(
   };
 }
 
-function Tag({ color, label }: { color: string; label: string }) {
-  return (
-    <span
-      data-cy="study-role-indicator"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: '1px 6px',
-        borderRadius: 4,
-        background: 'rgba(0, 0, 0, 0.55)',
-        border: `1px solid ${color}`,
-        color,
-        fontWeight: 700,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-        maxWidth: '100%',
-      }}
-    >
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: color,
-          flex: '0 0 auto',
-        }}
-      />
-      {/* Own span so it can shrink: the overlay corner is capped at 40% of the
-          viewport width (CustomizableViewportOverlay.css) and a flex child's
-          min-width defaults to its content, so a bare text node gets hard-
-          CLIPPED on narrow viewports instead of ellipsized. minWidth:0 +
-          ellipsis degrades to "CURRENT · JUN 1…" gracefully. */}
-      <span
-        style={{
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {label}
-      </span>
-    </span>
-  );
-}
-
 export const studyRoleOverlayItem = {
   id: STUDY_ROLE_OVERLAY_ITEM_ID,
   title: 'Study role indicator (current / prior)',
@@ -179,7 +95,7 @@ export const studyRoleOverlayItem = {
 
     if (role === 'current') {
       const stamp = formatStudyDateTime(currentStamp, formatters?.formatDate);
-      return <Tag color={CURRENT_COLOR} label={stamp ? `CURRENT · ${stamp}` : 'CURRENT'} />;
+      return <RoleTag color={CURRENT_COLOR} label={stamp ? `CURRENT · ${stamp}` : 'CURRENT'} />;
     }
 
     // role === 'prior'
@@ -190,7 +106,18 @@ export const studyRoleOverlayItem = {
     const stamp = formatStudyDateTime(priorStamp, formatters?.formatDate);
     const interval = formatInterval(currentStamp?.StudyDate, priorStamp.StudyDate);
     const label = ['PRIOR', stamp, interval].filter(Boolean).join(' · ');
-    return <Tag color={PRIOR_COLOR} label={label} />;
+    // The prior pill is a switcher: clicking it offers the patient's other priors
+    // and re-hangs against the chosen one. Degrades to a static pill when there is
+    // no alternative to offer.
+    return (
+      <PriorSwitcher
+        color={PRIOR_COLOR}
+        label={label}
+        priorUID={displaySet.StudyInstanceUID}
+        currentDate={currentStamp?.StudyDate}
+        formatDate={formatters?.formatDate}
+      />
+    );
   },
 };
 

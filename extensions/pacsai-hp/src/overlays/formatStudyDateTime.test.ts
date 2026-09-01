@@ -1,4 +1,4 @@
-import { formatDicomTimeHM, formatStudyDateTime } from './formatStudyDateTime';
+import { formatDicomTimeHM, formatInterval, formatStudyDateTime } from './formatStudyDateTime';
 
 // Stand-in for the overlay framework's `formatters.formatDate` (moment-based),
 // so these tests exercise our composition, not moment.
@@ -52,5 +52,22 @@ describe('formatStudyDateTime', () => {
     expect(formatStudyDateTime({ StudyTime: '143214' }, formatDate)).toBe('');
     expect(formatStudyDateTime(undefined, formatDate)).toBe('');
     expect(formatStudyDateTime({ StudyDate: '20260601' }, undefined)).toBe('');
+  });
+});
+
+describe('formatInterval', () => {
+  it('scales the unit with the gap', () => {
+    expect(formatInterval('20260601', '20260528')).toBe('4 d');
+    expect(formatInterval('20260601', '20260501')).toBe('4 wk');
+    expect(formatInterval('20260601', '20251201')).toBe('6 mo');
+    expect(formatInterval('20260601', '20231201')).toBe('2.5 y');
+    expect(formatInterval('20260601', '20120601')).toBe('14 y');
+  });
+
+  it('is empty when the prior is not earlier, or a date is unusable', () => {
+    expect(formatInterval('20260601', '20260601')).toBe('');
+    expect(formatInterval('20260601', '20260701')).toBe('');
+    expect(formatInterval(undefined, '20260501')).toBe('');
+    expect(formatInterval('20260601', 'nope')).toBe('');
   });
 });

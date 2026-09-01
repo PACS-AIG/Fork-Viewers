@@ -22,6 +22,25 @@ export type StudyRole = 'current' | 'prior' | 'sibling';
 /** A same-session study the user can quickly switch focus to (current + siblings). */
 export type SessionStudy = { uid: string; label: string };
 
+/**
+ * A prior the user MAY compare against — every earlier out-of-session study the
+ * patient query returned, not just the one the policy auto-picked. `qualifying`
+ * marks the ones that scored at/above the policy's `minScore` (those are listed
+ * first, in the ranker's order); the rest are still offered, because a rad
+ * overriding the automatic choice often wants exactly the study the score
+ * demoted (an older same-modality exam, a cross-body comparison).
+ */
+export type PriorOption = {
+  uid: string;
+  StudyDate?: string;
+  StudyTime?: string;
+  StudyDescription?: string;
+  modality?: string;
+  /** Normalized body part, so a multi-prior (whole-spine) hang can offer only same-region swaps. */
+  bodyPart?: string;
+  qualifying: boolean;
+};
+
 let priorUIDs: Set<string> = new Set();
 let siblingUIDs: Set<string> = new Set();
 
@@ -29,10 +48,48 @@ let siblingUIDs: Set<string> = new Set();
 let sessionStudies: SessionStudy[] = [];
 const sessionListeners = new Set<() => void>();
 
+// Every switchable prior candidate, for the on-image prior switcher.
+let availablePriors: PriorOption[] = [];
+const priorListeners = new Set<() => void>();
+
 /** Replace the prior/sibling sets (called once per re-hang). */
 export function setComparisonRoles(opts: { priors?: string[]; siblings?: string[] } = {}): void {
   priorUIDs = new Set((opts.priors ?? []).filter(Boolean));
   siblingUIDs = new Set((opts.siblings ?? []).filter(Boolean));
+  // The switcher's checkmark tracks which prior is actually hung.
+  priorListeners.forEach(cb => cb());
+}
+
+/** The currently HUNG prior study UIDs, in no particular order. */
+export function getPriorUIDs(): string[] {
+  return [...priorUIDs];
+}
+
+/** The currently loaded same-session sibling UIDs (preserved across a prior swap). */
+export function getSiblingUIDs(): string[] {
+  return [...siblingUIDs];
+}
+
+/**
+ * Publish the switchable prior candidates (called by `loadRelevantPriors` once
+ * per study open, after ranking) and notify the on-image switcher.
+ */
+export function setAvailablePriors(list: PriorOption[]): void {
+  availablePriors = (list ?? []).filter(p => p?.uid);
+  priorListeners.forEach(cb => cb());
+}
+
+/** Every switchable prior candidate: qualifying ones first, then the rest. */
+export function getAvailablePriors(): PriorOption[] {
+  return availablePriors;
+}
+
+/** Subscribe to prior-candidate / hung-prior changes; returns an unsubscribe fn. */
+export function subscribeAvailablePriors(cb: () => void): () => void {
+  priorListeners.add(cb);
+  return () => {
+    priorListeners.delete(cb);
+  };
 }
 
 /** Replace the session-study list and notify subscribers (the toolbar switcher). */
@@ -59,6 +116,7 @@ export function clearComparisonRoles(): void {
   priorUIDs = new Set();
   siblingUIDs = new Set();
   setSessionStudies([]);
+  setAvailablePriors([]);
 }
 
 /**

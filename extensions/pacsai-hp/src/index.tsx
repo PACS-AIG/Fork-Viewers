@@ -30,6 +30,7 @@ import getImageKernel from './utils/getImageKernel';
 import getImageColor from './utils/getImageColor';
 import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
 import { getStudyRole } from './priors/roleRegistry';
+import { configurePriorSwitching } from './priors/selectPrior';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import { hangingIgnoresPriors } from './allinone/browsingMode';
@@ -102,6 +103,11 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
   preRegistration: ({ servicesManager, extensionManager }: Types.Extensions.ExtensionParams) => {
     const { syncGroupService, hangingProtocolService, displaySetService } =
       servicesManager.services;
+
+    // Let the on-image prior switcher reach the data source / display sets: overlay
+    // items are handed `servicesManager` only, and a prior swap needs to create
+    // display sets for the chosen study before re-hanging.
+    configurePriorSwitching({ servicesManager, extensionManager });
 
     // Cross-study relative scroll synchronizer used by the protocols.
     syncGroupService?.addSynchronizerType?.(SCROLL_SYNC_TYPE, createScrollSyncSynchronizer);

@@ -6,7 +6,8 @@ import {
 
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
-import { setComparisonRoles, setSessionStudies } from './roleRegistry';
+import { setAvailablePriors, setComparisonRoles, setSessionStudies } from './roleRegistry';
+import type { PriorOption } from './roleRegistry';
 import {
   getBodyPart,
   getModality,
@@ -367,6 +368,51 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         log(`selected prior: ${priorUIDs[0]}`);
       }
     }
+
+    // Publish EVERY prior candidate for the on-image prior switcher (the clickable
+    // date on a prior pane), so the rad can override the automatic pick. Ordered
+    // qualifying-first — `qualifyingOrder` is the ranker's order, computed against
+    // the opened study — then the remaining candidates most-recent-first. The
+    // non-qualifying ones are still offered: scoring demotes exactly the studies a
+    // rad sometimes wants on purpose (an older same-modality exam, a cross-body
+    // comparison), and refusing to list them would make the switcher feel broken.
+    const qualifyingOrder = new Map<string, number>();
+    priorCandidates
+      .map(prior => ({ prior, score: scorePrior({ current, prior }, policy.scorers) }))
+      .filter(({ score }) => score >= policy.minScore)
+      .sort(makeRanker(current))
+      .forEach(({ prior }, index) => qualifyingOrder.set(prior.StudyInstanceUID, index));
+    const priorOptions: PriorOption[] = priorCandidates
+      .map(prior => ({
+        uid: prior.StudyInstanceUID,
+        StudyDate: prior.StudyDate,
+        StudyTime: prior.StudyTime,
+        StudyDescription: prior.StudyDescription,
+        modality: getModality(prior),
+        bodyPart: getBodyPart(prior),
+        qualifying: qualifyingOrder.has(prior.StudyInstanceUID),
+      }))
+      .sort((a, b) => {
+        const qa = qualifyingOrder.get(a.uid);
+        const qb = qualifyingOrder.get(b.uid);
+        if (qa !== undefined && qb !== undefined) {
+          return qa - qb; // both qualify: keep the ranker's order
+        }
+        if (qa !== undefined) {
+          return -1;
+        }
+        if (qb !== undefined) {
+          return 1;
+        }
+        // Neither qualifies: most recent first.
+        return String(b.StudyDate ?? '').localeCompare(String(a.StudyDate ?? ''));
+      });
+    setAvailablePriors(priorOptions);
+    log(
+      `${priorOptions.length} switchable prior candidate(s) published (${
+        qualifyingOrder.size
+      } qualifying)`
+    );
 
     // Register roles BEFORE any (re)hang so the role-based current/prior selectors,
     // the region-timepoint compare selectors, and the overview resolve correctly.

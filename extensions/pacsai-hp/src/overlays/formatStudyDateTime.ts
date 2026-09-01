@@ -75,4 +75,45 @@ export function formatStudyDateTime(
   return timePart ? `${datePart} ${timePart}` : datePart;
 }
 
+/** Parse a DICOM date (YYYYMMDD...) into a local Date, or undefined. */
+export function parseDicomDate(raw: unknown): Date | undefined {
+  if (!raw || typeof raw !== 'string') {
+    return undefined;
+  }
+  const m = raw.match(/^(\d{4})(\d{2})(\d{2})/);
+  if (!m) {
+    return undefined;
+  }
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+/**
+ * Human, compact elapsed time from the prior study to the current study
+ * (e.g. "5 d", "3 wk", "6 mo", "2.5 y"). Empty string when undeterminable.
+ */
+export function formatInterval(currentDate: unknown, priorDate: unknown): string {
+  const cur = parseDicomDate(currentDate);
+  const pri = parseDicomDate(priorDate);
+  if (!cur || !pri) {
+    return '';
+  }
+  const days = Math.round((cur.getTime() - pri.getTime()) / 86400000);
+  if (days <= 0) {
+    return '';
+  }
+  if (days < 7) {
+    return `${days} d`;
+  }
+  if (days < 56) {
+    return `${Math.round(days / 7)} wk`;
+  }
+  if (days < 730) {
+    return `${Math.round(days / 30)} mo`;
+  }
+  const years = days / 365;
+  // One decimal under 5 years ("2.5 y"), whole years beyond.
+  return `${years < 5 ? years.toFixed(1) : Math.round(years)} y`;
+}
+
 export default formatStudyDateTime;

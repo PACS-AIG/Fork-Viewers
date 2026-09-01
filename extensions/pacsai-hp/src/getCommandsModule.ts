@@ -1,5 +1,6 @@
 import { Types, DicomMetadataStore } from '@ohif/core';
 import loadRelevantPriors from './priors/loadRelevantPriors';
+import selectPrior from './priors/selectPrior';
 import { setBrowsingMode as persistBrowsingMode, type BrowsingMode } from './allinone/browsingMode';
 import { rehangForMode } from './allinone/rehang';
 import { toggleClinicalContextVisibility } from './clinicalContext/clinicalContextStore';
@@ -18,6 +19,20 @@ const getCommandsModule = ({
      * active comparison protocol. No-op for non-comparison protocols.
      */
     loadRelevantPriors: () => loadRelevantPriors({ servicesManager, extensionManager }),
+
+    /**
+     * Hang a DIFFERENT prior than the one the policy auto-picked (the on-image
+     * prior switcher, and available as a command for hotkeys/console). Loads the
+     * chosen study's display sets if needed, re-points the `prior` role, and
+     * re-hangs the active browsing mode's protocol — no re-query.
+     */
+    selectPrior: ({
+      studyInstanceUID,
+      replaceUID,
+    }: {
+      studyInstanceUID?: string;
+      replaceUID?: string;
+    }) => selectPrior({ servicesManager, extensionManager, studyInstanceUID, replaceUID }),
 
     /**
      * Re-focus a co-loaded same-session study (the toolbar study switcher): make it
@@ -122,6 +137,7 @@ const getCommandsModule = ({
 
   const definitions = {
     loadRelevantPriors: actions.loadRelevantPriors,
+    selectPrior: actions.selectPrior,
     focusSessionStudy: actions.focusSessionStudy,
     setBrowsingMode: actions.setBrowsingMode,
     toggleClinicalContextOverlay: actions.toggleClinicalContextOverlay,
