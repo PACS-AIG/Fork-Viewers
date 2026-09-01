@@ -7,6 +7,7 @@ import {
   patientInfoOverlayItems,
   clinicalContextOverlayItem,
   getStudyRole,
+  formatStudyDateTime,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
@@ -228,20 +229,38 @@ function modeFactory({ modeConfiguration }) {
       // many source series; prefer the current image's instance, falling back to
       // referenceInstance (identical for a normal single-series viewport, and the
       // fallback covers volume/multi-frame where instances[imageIndex] may be absent).
+      // (1b) Append the CLOCK TIME to the stock StudyDate ("Jun 1, 2026 14:32"): the
+      // date alone cannot separate two studies acquired on one calendar day (a
+      // same-day repeat, a pre/post pair), which is exactly when the rad needs to
+      // know which pane is later. Degrades to the date alone when StudyTime is
+      // absent (see formatStudyDateTime). referenceInstance leads here — the study
+      // stamp is study-level, so it is stable across an all-in-one composite's
+      // series — with `instance` as the fallback.
       // (2) Append a StudyDescription line beneath it (so each whole-spine pane names
       // its region). Idempotent.
       const topLeft = customizationService.getCustomization('viewportOverlay.topLeft') || [];
-      const topLeftPatched = topLeft.map((item: any) =>
-        item?.id === 'SeriesDescription'
-          ? {
-              ...item,
-              condition: ({ instance, referenceInstance }: Record<string, any>) =>
-                (instance ?? referenceInstance)?.SeriesDescription,
-              contentF: ({ instance, referenceInstance }: Record<string, any>) =>
-                (instance ?? referenceInstance)?.SeriesDescription,
-            }
-          : item
-      );
+      const topLeftPatched = topLeft.map((item: any) => {
+        if (item?.id === 'SeriesDescription') {
+          return {
+            ...item,
+            condition: ({ instance, referenceInstance }: Record<string, any>) =>
+              (instance ?? referenceInstance)?.SeriesDescription,
+            contentF: ({ instance, referenceInstance }: Record<string, any>) =>
+              (instance ?? referenceInstance)?.SeriesDescription,
+          };
+        }
+        if (item?.id === 'StudyDate') {
+          return {
+            ...item,
+            title: 'Study date and time',
+            condition: ({ instance, referenceInstance }: Record<string, any>) =>
+              (referenceInstance ?? instance)?.StudyDate,
+            contentF: ({ instance, referenceInstance, formatters }: Record<string, any>) =>
+              formatStudyDateTime(referenceInstance ?? instance, formatters?.formatDate),
+          };
+        }
+        return item;
+      });
       let topLeftItems = topLeftPatched.some(
         (item: { id?: string }) => item?.id === studyDescriptionOverlayItem.id
       )

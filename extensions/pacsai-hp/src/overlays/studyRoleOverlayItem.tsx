@@ -1,5 +1,6 @@
 import React from 'react';
 import { getStudyRole } from '../priors/roleRegistry';
+import { formatStudyDateTime } from './formatStudyDateTime';
 
 /**
  * Viewport overlay tag that marks each pane's study ROLE so the reading
@@ -7,8 +8,13 @@ import { getStudyRole } from '../priors/roleRegistry';
  * they are dictating (the CURRENT / report target) versus a comparison PRIOR.
  * The danger this guards against is dictating or measuring on a prior by mistake.
  *
- *   CURRENT  -> green  "CURRENT · <date>"
- *   PRIOR    -> amber  "PRIOR · <date> · <interval>"   (interval = time before current)
+ *   CURRENT  -> green  "CURRENT · <date> <HH:mm>"
+ *   PRIOR    -> amber  "PRIOR · <date> <HH:mm> · <interval>"  (interval = time before current)
+ *
+ * The clock time (StudyTime, 24h, appended by `formatStudyDateTime`) is what
+ * separates two studies acquired on the SAME day — a same-day repeat or a
+ * pre/post pair otherwise shows an identical tag on both panes. It degrades to
+ * the date alone when the PACS omits StudyTime.
  *
  * Design notes:
  *  - The WORD carries the meaning, not the color alone (a meaningful share of
@@ -77,14 +83,29 @@ function formatInterval(currentDate: unknown, priorDate: unknown): string {
   return `${years < 5 ? years.toFixed(1) : Math.round(years)} y`;
 }
 
-/** Find the CURRENT (report-target) study's date from the loaded display sets. */
-function getCurrentStudyDate(servicesManager: any, activeStudyUID?: string): string | undefined {
+/**
+ * Find the CURRENT (report-target) study's timestamp from the loaded display
+ * sets, as a `{ StudyDate, StudyTime }` source for `formatStudyDateTime` (the
+ * prior interval also needs the raw date, so this returns both parts, not a
+ * formatted string).
+ */
+function getCurrentStudyStamp(
+  servicesManager: any,
+  activeStudyUID?: string
+): { StudyDate?: string; StudyTime?: string } | undefined {
   if (!activeStudyUID) {
     return undefined;
   }
   const displaySets = servicesManager?.services?.displaySetService?.getActiveDisplaySets?.() ?? [];
   const curDs = displaySets.find((d: any) => d?.StudyInstanceUID === activeStudyUID);
-  return curDs?.instances?.[0]?.StudyDate ?? curDs?.SeriesDate;
+  if (!curDs) {
+    return undefined;
+  }
+  const instance = curDs.instances?.[0];
+  return {
+    StudyDate: instance?.StudyDate ?? curDs.SeriesDate,
+    StudyTime: instance?.StudyTime ?? curDs.SeriesTime,
+  };
 }
 
 function Tag({ color, label }: { color: string; label: string }) {
@@ -154,19 +175,21 @@ export const studyRoleOverlayItem = {
       return null;
     }
 
-    const fmt = (raw: unknown) =>
-      raw && formatters?.formatDate ? formatters.formatDate(raw) : '';
+    const currentStamp = getCurrentStudyStamp(servicesManager, activeStudyUID);
 
     if (role === 'current') {
-      const dateStr = fmt(getCurrentStudyDate(servicesManager, activeStudyUID));
-      return <Tag color={CURRENT_COLOR} label={dateStr ? `CURRENT · ${dateStr}` : 'CURRENT'} />;
+      const stamp = formatStudyDateTime(currentStamp, formatters?.formatDate);
+      return <Tag color={CURRENT_COLOR} label={stamp ? `CURRENT · ${stamp}` : 'CURRENT'} />;
     }
 
     // role === 'prior'
-    const priorDate = displaySet.instances?.[0]?.StudyDate ?? displaySet.SeriesDate;
-    const dateStr = fmt(priorDate);
-    const interval = formatInterval(getCurrentStudyDate(servicesManager, activeStudyUID), priorDate);
-    const label = ['PRIOR', dateStr, interval].filter(Boolean).join(' · ');
+    const priorStamp = {
+      StudyDate: displaySet.instances?.[0]?.StudyDate ?? displaySet.SeriesDate,
+      StudyTime: displaySet.instances?.[0]?.StudyTime ?? displaySet.SeriesTime,
+    };
+    const stamp = formatStudyDateTime(priorStamp, formatters?.formatDate);
+    const interval = formatInterval(currentStamp?.StudyDate, priorStamp.StudyDate);
+    const label = ['PRIOR', stamp, interval].filter(Boolean).join(' · ');
     return <Tag color={PRIOR_COLOR} label={label} />;
   },
 };

@@ -18,6 +18,7 @@ import {
   STUDY_DESCRIPTION_OVERLAY_ITEM_ID,
 } from './overlays/studyDescriptionOverlayItem';
 import { patientInfoOverlayItems } from './overlays/patientInfoOverlayItems';
+import { formatStudyDateTime, formatDicomTimeHM } from './overlays/formatStudyDateTime';
 import {
   clinicalContextOverlayItem,
   CLINICAL_CONTEXT_OVERLAY_ITEM_ID,
@@ -264,4 +265,6 @@ export {
   clinicalContextOverlayItem,
   CLINICAL_CONTEXT_OVERLAY_ITEM_ID,
   getStudyRole,
+  formatStudyDateTime,
+  formatDicomTimeHM,
 };
