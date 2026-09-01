@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
+
+import useIsTruncated from './useIsTruncated';
 
 /**
  * The study-role pill rendered in a viewport's top-right corner
@@ -11,7 +13,15 @@ import React from 'react';
  * `onActivate` turns it into a real <button>: the overlay corners are
  * `pointer-events: none` (ViewportOverlay), so an interactive child must opt
  * itself back in, and mousedown must be stopped or cornerstone starts a tool
- * drag on the image underneath.
+ * drag on the image underneath. It also lifts itself above the in-viewport
+ * insets — the scroll minimap (z 20) is a full-height 14px strip on the right
+ * edge and the pill's caret end can fall under it, which reads as a dead button.
+ *
+ * Both variants surface the FULL text on hover when the corner clips the pill
+ * (capped at 40% of the pane width). The interactive one always carries a title
+ * — it holds pointer events anyway — while the static one claims them only while
+ * actually clipped, so a fully-readable pill never takes the mouse away from the
+ * image beneath it.
  */
 export function RoleTag({
   color,
@@ -30,6 +40,9 @@ export function RoleTag({
   expanded?: boolean;
   buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
+  const { ref: textRef, truncated } = useIsTruncated<HTMLSpanElement>();
+  const [hovered, setHovered] = useState(false);
+
   const style: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -65,6 +78,7 @@ export function RoleTag({
   // ellipsis degrades to "CURRENT · JUN 1…" gracefully.
   const text = (
     <span
+      ref={textRef}
       style={{
         minWidth: 0,
         overflow: 'hidden',
@@ -80,7 +94,9 @@ export function RoleTag({
     return (
       <span
         data-cy="study-role-indicator"
-        style={style}
+        // Only a clipped pill claims pointer events, and only so its tooltip works.
+        style={{ ...style, pointerEvents: truncated ? 'auto' : 'none' }}
+        title={truncated ? label : undefined}
       >
         {dot}
         {text}
@@ -93,9 +109,11 @@ export function RoleTag({
       ref={buttonRef}
       type="button"
       data-cy="study-role-indicator"
-      title={title}
+      title={[label, title].filter(Boolean).join(' — ')}
       aria-haspopup="listbox"
       aria-expanded={expanded}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         ...style,
         font: 'inherit',
@@ -105,6 +123,15 @@ export function RoleTag({
         cursor: 'pointer',
         // The overlay corner is pointer-events:none; opt this control back in.
         pointerEvents: 'auto',
+        // Above the scroll minimap (z 20) / scout navigator (z 19): those insets
+        // live in the same stacking context and the minimap's right-edge strip can
+        // otherwise cover the caret end of the pill and swallow the click.
+        position: 'relative',
+        zIndex: 30,
+        // Hover feedback, so "this pill is a control" is discoverable without
+        // relying on the 9px caret alone.
+        background: hovered ? 'rgba(0, 0, 0, 0.8)' : style.background,
+        boxShadow: hovered ? `0 0 0 1px ${color}` : undefined,
       }}
       // Stop the press from reaching the cornerstone element beneath, which
       // would otherwise begin a WWWC / pan drag on the image.

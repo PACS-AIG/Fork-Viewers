@@ -19,6 +19,7 @@ import {
 } from './overlays/studyDescriptionOverlayItem';
 import { patientInfoOverlayItems } from './overlays/patientInfoOverlayItems';
 import { formatStudyDateTime, formatDicomTimeHM } from './overlays/formatStudyDateTime';
+import OverlayTextLine, { overlayTextLine } from './overlays/OverlayTextLine';
 import {
   clinicalContextOverlayItem,
   CLINICAL_CONTEXT_OVERLAY_ITEM_ID,
@@ -273,4 +274,6 @@ export {
   getStudyRole,
   formatStudyDateTime,
   formatDicomTimeHM,
+  OverlayTextLine,
+  overlayTextLine,
 };

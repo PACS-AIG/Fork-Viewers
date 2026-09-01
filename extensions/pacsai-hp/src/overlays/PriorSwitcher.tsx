@@ -28,8 +28,9 @@ import RoleTag from './RoleTag';
  *    see `PriorOption`. Cross-modality picks are allowed and labelled: the
  *    protocol's prior selectors may not match an unrelated modality, in which
  *    case the pane hangs empty and the rad picks again.
- *  - Falls back to the plain static pill when there is nothing to switch TO, so
- *    a single-prior patient gets no misleading affordance.
+ *  - ALWAYS opens on click, even when the patient has no other prior — the menu
+ *    then says so. A pill that silently does nothing is indistinguishable from a
+ *    broken one (rad-reported), which is worse than an honest empty state.
  *  - On a multi-prior hang (whole-spine, one prior per region) only same-region
  *    candidates are offered: the per-region selectors match on region, so an
  *    off-region prior would hang an empty pane.
@@ -89,8 +90,8 @@ export function PriorSwitcher({
       ? allOptions.filter(o => o.bodyPart === thisRegion)
       : allOptions;
 
-  // Nothing to switch to = no affordance. (The hung prior itself is in the list.)
-  const switchable = options.some(o => o.uid !== priorUID);
+  // The hung prior is itself in the list; these are the ones worth clicking.
+  const alternatives = options.filter(o => o.uid !== priorUID);
 
   const reposition = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
@@ -143,6 +144,46 @@ export function PriorSwitcher({
     };
   }, [open]);
 
+  // Report the candidate count once per state, so "the menu is empty" can be told
+  // apart from "the control is broken" without reading the code.
+  useEffect(() => {
+    console.log(
+      `[pacsai-hp] prior switcher: ${alternatives.length} alternative(s) of ` +
+        `${options.length} candidate(s)${thisRegion ? `, region=${thisRegion}` : ''}, prior=${priorUID}`
+    );
+  }, [priorUID, options.length, alternatives.length, thisRegion]);
+
+  // A dead click is almost always something painted over the pill (the scroll
+  // minimap's right-edge strip is the usual suspect). Hit-test our own centre once
+  // the grid has settled and name whatever is on top — unconditional, once per
+  // mount, mirroring the scroll-sync "DEAD for pair" fingerprint.
+  const obstructionLogged = useRef(false);
+  useEffect(() => {
+    if (obstructionLogged.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const element = buttonRef.current;
+      if (!element || obstructionLogged.current) {
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height) {
+        return;
+      }
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      if (hit && hit !== element && !element.contains(hit)) {
+        obstructionLogged.current = true;
+        console.warn(
+          '[pacsai-hp] prior switcher OBSTRUCTED — clicks cannot reach the PRIOR pill; on top: ' +
+            `<${hit.tagName.toLowerCase()} class="${String((hit as HTMLElement).className ?? '').slice(0, 80)}" ` +
+            `data-cy="${(hit as HTMLElement).dataset?.cy ?? ''}">`
+        );
+      }
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [priorUID]);
+
   const choose = (uid: string) => {
     setOpen(false);
     if (uid === priorUID) {
@@ -155,14 +196,23 @@ export function PriorSwitcher({
     <RoleTag
       color={color}
       label={label}
-      buttonRef={switchable ? buttonRef : undefined}
-      expanded={switchable ? open : undefined}
-      title={switchable ? 'Click to compare against a different prior' : undefined}
-      onActivate={switchable ? () => setOpen(o => !o) : undefined}
+      buttonRef={buttonRef}
+      expanded={open}
+      title={
+        alternatives.length
+          ? 'click to compare against a different prior'
+          : 'click for the prior list'
+      }
+      onActivate={() => {
+        console.log(
+          `[pacsai-hp] prior switcher clicked (open=${!open}, ${alternatives.length} alternative(s))`
+        );
+        setOpen(o => !o);
+      }}
     />
   );
 
-  if (!switchable || !open || !placement) {
+  if (!open || !placement) {
     return tag;
   }
 
@@ -203,6 +253,18 @@ export function PriorSwitcher({
       >
         Compare against
       </div>
+      {!alternatives.length ? (
+        <div
+          style={{
+            padding: '5px 8px 7px',
+            fontSize: 12,
+            color: '#9FB3C4',
+            whiteSpace: 'normal',
+          }}
+        >
+          No other prior studies for this patient.
+        </div>
+      ) : null}
       {options.map(option => {
         const { primary, secondary } = optionLabel(option, currentDate, formatDate);
         const isHung = option.uid === priorUID;

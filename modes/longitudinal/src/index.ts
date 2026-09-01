@@ -8,6 +8,7 @@ import {
   clinicalContextOverlayItem,
   getStudyRole,
   formatStudyDateTime,
+  overlayTextLine,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
@@ -236,6 +237,10 @@ function modeFactory({ modeConfiguration }) {
       // absent (see formatStudyDateTime). referenceInstance leads here — the study
       // stamp is study-level, so it is stable across an all-in-one composite's
       // series — with `instance` as the fallback.
+      // (1c) Both lines render through `OverlayTextLine`, which shows the full value
+      // in a tooltip when the 40%-capped corner clips it (rad-reported: "the badge
+      // sometimes doesn't show full info if the viewport is narrow"). Pointer events
+      // are claimed only while a line is actually clipped.
       // (2) Append a StudyDescription line beneath it (so each whole-spine pane names
       // its region). Idempotent.
       const topLeft = customizationService.getCustomization('viewportOverlay.topLeft') || [];
@@ -245,8 +250,10 @@ function modeFactory({ modeConfiguration }) {
             ...item,
             condition: ({ instance, referenceInstance }: Record<string, any>) =>
               (instance ?? referenceInstance)?.SeriesDescription,
-            contentF: ({ instance, referenceInstance }: Record<string, any>) =>
-              (instance ?? referenceInstance)?.SeriesDescription,
+            contentF: overlayTextLine(
+              ({ instance, referenceInstance }: Record<string, any>) =>
+                (instance ?? referenceInstance)?.SeriesDescription
+            ),
           };
         }
         if (item?.id === 'StudyDate') {
@@ -255,8 +262,9 @@ function modeFactory({ modeConfiguration }) {
             title: 'Study date and time',
             condition: ({ instance, referenceInstance }: Record<string, any>) =>
               (referenceInstance ?? instance)?.StudyDate,
-            contentF: ({ instance, referenceInstance, formatters }: Record<string, any>) =>
-              formatStudyDateTime(referenceInstance ?? instance, formatters?.formatDate),
+            contentF: overlayTextLine(({ instance, referenceInstance, formatters }: Record<string, any>) =>
+              formatStudyDateTime(referenceInstance ?? instance, formatters?.formatDate)
+            ),
           };
         }
         return item;
