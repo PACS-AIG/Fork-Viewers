@@ -11,12 +11,14 @@ import type { PriorOption } from './roleRegistry';
 import {
   getBodyPart,
   getModality,
+  getModalityFamily,
   getSpineRegion,
   isSpine,
   parseStudyDate,
   parseStudyDateTime,
   SESSION_WINDOW_MS,
 } from './metadata';
+import makeRanker from './rankPriors';
 import logPlannedStages from './debugPlannedStages';
 import type { StudyLike } from './types';
 import getImagePlane from '../utils/getImagePlane';
@@ -32,7 +34,8 @@ import { getBrowsingMode, protocolIdForMode } from '../allinone/browsingMode';
  * Flow:
  *   1. The active protocol must be a pacsai compare protocol with a prior policy.
  *   2. QIDO the patient's studies, score each candidate prior, keep those above
- *      `minScore`, sort descending, take the top `maxPriors`.
+ *      `minScore`, rank them with `makeRanker` (same body > same modality > most
+ *      recent > score — see `rankPriors.ts`), take the top `maxPriors`.
  *   3. For a multi-part study (spine), also pick same-session sibling regions for
  *      the whole-spine overview.
  *   4. Register comparison roles (prior/sibling) and load their display sets.
@@ -186,45 +189,11 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
 
     const curBody = getBodyPart(current);
     const curMod = getModality(current);
+    // Every same-modality COMPARISON is made on the FAMILY (a CR, DX or XR chest are
+    // the same exam); `curMod` stays raw because the DEBUG dump prints it.
+    const curModFamily = getModalityFamily(current);
     const curDate = parseStudyDate(current);
     const curDateTime = parseStudyDateTime(current);
-
-    // Rank QUALIFYING priors (rad spec): prefer the SAME body part, then the SAME
-    // modality, then the MOST RECENT (StudyDate descending); the additive relevance
-    // score is only the final tiebreak. Recency is therefore primary WITHIN the
-    // compatible group, instead of the old pure score sort letting an indication
-    // keyword or a coarse recency bucket pick an older prior. `ref` is the study a
-    // prior is compared against (the opened study, or a spine region's session study).
-    const makeRanker = (ref: StudyLike) => {
-      const refBody = getBodyPart(ref);
-      const refMod = getModality(ref);
-      const tierOf = (prior: StudyLike): number => {
-        const sameBody = refBody !== 'unknown' && getBodyPart(prior) === refBody;
-        const sameMod = refMod !== undefined && getModality(prior) === refMod;
-        if (sameBody && sameMod) {
-          return 0;
-        }
-        if (sameBody) {
-          return 1;
-        }
-        return 2; // cross-body — kept only as a last resort (see CROSS_BODY_PART)
-      };
-      return (
-        a: { prior: StudyLike; score: number },
-        b: { prior: StudyLike; score: number }
-      ): number => {
-        const tierDelta = tierOf(a.prior) - tierOf(b.prior);
-        if (tierDelta !== 0) {
-          return tierDelta; // better (lower) tier first
-        }
-        const da = parseStudyDateTime(a.prior) ?? -Infinity;
-        const db = parseStudyDateTime(b.prior) ?? -Infinity;
-        if (da !== db) {
-          return db - da; // most recent first
-        }
-        return b.score - a.score; // relevance only breaks ties
-      };
-    };
 
     // Two studies belong to the same concurrent SESSION when their acquisition
     // timestamps are within SESSION_WINDOW_MS of each other (interval-based, not
@@ -242,7 +211,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     const siblingStudies =
       curDateTime === undefined
         ? []
-        : candidates.filter(s => isSameSession(s) && getModality(s) === curMod);
+        : candidates.filter(s => isSameSession(s) && getModalityFamily(s) === curModFamily);
     const siblingUIDs = siblingStudies.map(s => s.StudyInstanceUID);
 
     // Publish the same-session studies (opened + siblings) for the toolbar study
@@ -273,7 +242,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     // mismatch, region gate, or candidates missing UIDs / filtered out entirely).
     if (DEBUG) {
       log(
-        `current: uid=${currentStudyUID} body=${curBody} mod=${curMod} date=${curDate} dateTime=${curDateTime}`
+        `current: uid=${currentStudyUID} body=${curBody} mod=${curMod} modFamily=${curModFamily} date=${curDate} dateTime=${curDateTime}`
       );
       log(
         `candidates (${candidates.length} of ${patientStudies.length} returned):`,
@@ -287,7 +256,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
             dateTime: t,
             mod: getModality(s),
             body: getBodyPart(s),
-            sibling: isSameSession(s) && getModality(s) === curMod,
+            sibling: isSameSession(s) && getModalityFamily(s) === curModFamily,
             earlierPrior:
               t !== undefined && curDateTime !== undefined
                 ? t < curDateTime && !isSameSession(s)

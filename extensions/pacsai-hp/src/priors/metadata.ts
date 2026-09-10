@@ -29,6 +29,16 @@ export function isSpine(part: BodyPart): boolean {
 }
 
 /**
+ * The unregionalized region a body part belongs to. Spine is the only part this
+ * module subdivides, and two callers need it flattened: `baseRelevance`'s
+ * cross-anatomy table is keyed on bare 'spine', and a scanner protocol's region
+ * group names 'Spine' while the protocol itself names the level.
+ */
+export function baseRegion(part: BodyPart): BodyPart {
+  return part.startsWith('spine-') ? 'spine' : part;
+}
+
+/**
  * Resolve the spine region of a description, or undefined if it is not a spine
  * study. Runs BEFORE the generic body-part table because cervical/thoracic spine
  * descriptions would otherwise be mis-classified as 'neck'/'chest' (the keyword
@@ -57,7 +67,7 @@ export function getSpineRegion(text: string): BodyPart | undefined {
   if (spineBounded('cervical\\s+spine|c[-_\\s]?spine').test(text)) {
     return 'spine-cervical';
   }
-  if (spineBounded('spine|spinal|vertebr|myelogram').test(text)) {
+  if (spineBounded('spine|spinal|vertebr\\w*|myelogram').test(text)) {
     return 'spine';
   }
   return undefined;
@@ -112,45 +122,173 @@ export function getModality(study: StudyLike): string | undefined {
   return undefined;
 }
 
+/** Projection radiography is one family — a CR, DX, XR or RG chest are the same exam. */
+function modalityFamily(modality?: string): string | undefined {
+  if (!modality) {
+    return undefined;
+  }
+  const m = modality.toUpperCase();
+  return m === 'CR' || m === 'DX' || m === 'XR' || m === 'RG' ? 'XR' : m;
+}
+
 /**
- * Keyword → body-part mapping applied to BodyPartExamined / StudyDescription.
- * Includes common radiology abbreviations (ABD, PEL, CXR, C-SPINE, ...) since
- * real-world descriptions rarely spell anatomy out in full.
+ * The study's modality folded to its FAMILY — what every same-modality COMPARISON
+ * must be made on. `baseRelevance` always folded, but the ranker's tier test and
+ * the sibling filter compared raw values, so a current CR against a prior DX chest
+ * read as different modalities: it fell to the same tier as a prior CT and lost to
+ * it on recency, contradicting the rad's "same modality, then most recent" spec.
+ *
+ * `getModality` deliberately stays raw — the prior switcher prints it, and a rad
+ * looking at a menu row wants the exam's own "CR"/"DX", not the family label.
+ */
+export function getModalityFamily(study: StudyLike): string | undefined {
+  return modalityFamily(getModality(study));
+}
+
+/**
+ * Word boundary for the anatomy vocabulary, plus an optional plural `s`.
+ *
+ * NOT `\b`, for two reasons real descriptions make unmissable. `\b` counts `_` as
+ * a word character, so every scanner protocol name hid its region behind the
+ * underscore ("Vascular^001_PE_CHEST (Adult)" resolved to unknown). And `\b` after
+ * a singular stem excludes every plural the table does not spell out, so "US DUP
+ * CAROTIDS BILATERAL" and "XR FINGERS 2+ VIEWS LEFT" both missed off a stem the
+ * table already carried. Terms whose plural is not a bare -s (sinus/sinuses) stay
+ * spelled out, and a stem ending in `\w*` has already eaten the suffix.
+ * Same boundary rule as `spineBounded` above.
+ */
+const anatomyBounded = (body: string): RegExp =>
+  new RegExp(`(?<![a-z])(?:${body})s?(?![a-z])`, 'i');
+
+/**
+ * Keyword → body-part mapping applied to StudyDescription (BodyPartExamined as a
+ * fallback). Includes common radiology abbreviations (ABD, PEL, CXR, C-SPINE, ...)
+ * since real-world descriptions rarely spell anatomy out in full.
  * Order matters: the first match wins (e.g. an "ABD PEL" study resolves to
  * abdomen, which is fine as long as current and prior resolve consistently).
+ *
+ * Kept deliberately WIDE, because an unclassified study is not merely a study that
+ * scores lower — it is one that OUTSCORES the studies we can read. A prior whose
+ * body part is 'unknown' collects `SAME_MODALITY_UNKNOWN_BODY_PART` (60), which
+ * clears `minScore`, while a correctly-classified cross-body pair the relevance
+ * table has no entry for scores 0 and is filtered out. Being unreadable beat being
+ * read: a cervical spine CT hung against a CT CEREBRAL PERFUSION, ahead of the same
+ * patient's own head CT, purely because "CEREBRAL" was not in this table.
+ *
+ * Mirrors the app repo's `comparisonAutoFill.ts` vocabulary, which was measured
+ * over 69,733 real reports (16.7% → 0.7% unclassified, with no description that
+ * already had an answer changing it). Keep the two in step.
  */
-const BODY_PART_KEYWORDS: Array<[RegExp, BodyPart]> = [
-  [/\b(brain|head|skull|cranial|hd)\b/i, 'head'],
-  [/\b(neck|cervical|carotid|c-?spine)\b/i, 'neck'],
-  [/\b(chest|thorax|thoracic|lung|cxr|cx|pulmonary|thx)\b/i, 'chest'],
-  [/\b(cardiac|heart|coronary|echo)\b/i, 'cardiac'],
-  [/\b(abdomen|abdominal|abdo|abd|liver|kidney|renal|pancrea)\b/i, 'abdomen'],
-  [/\b(spine|spinal|lumbar|l-?spine|t-?spine|vertebr)\b/i, 'spine'],
-  [/\b(pelvis|pelvic|pelv|pel|hip|bladder|prostate)\b/i, 'pelvis'],
-  [/\b(breast|mammo|mg)\b/i, 'breast'],
-  [/\b(arm|leg|knee|shoulder|ankle|wrist|elbow|femur|tibia|hand|foot|extremity)\b/i, 'extremity'],
+const BODY_PART_VOCAB: Array<[string, BodyPart]> = [
+  // Maxillofacial belongs to head: sinuses, orbits, facial bones and temporal
+  // bones are all read alongside a head CT. `mandible` deliberately does not match
+  // "submandibular", a neck gland claimed by the row below — anatomyBounded's
+  // lookbehind rejects a preceding letter, so it still doesn't.
+  [
+    'brain|cerebr\\w*|cerebell\\w*|encephal\\w*|intracranial|supratentorial|infratentorial|subdural|head|skull|cranial|calvari\\w*|mastoid|hd|facial|face|sinus(es)?|orbit|maxillofacial|maxilla|mandible|temporal|nasal|pituitary|sella|iac|tmj|zygoma',
+    'head',
+  ],
+  [
+    'neck|cervical|carotid|c-?spine|thyroid|parathyroid|larynx|laryngeal|submandibular|parotid|salivary|trachea',
+    'neck',
+  ],
+  ['chest|thorax|thoracic|lung|cxr|cx|pulmonary|thx|rib|sternum|sternal', 'chest'],
+  ['cardiac|heart|coronary|echo', 'cardiac'],
+  // KUB and urogram span kidneys to bladder; abdomen is the closer of the two.
+  // `pancrea` and `vertebr` (below) were written as stems but compiled with a
+  // closing \b, so they matched NOTHING — not even the word they were truncated
+  // from. Same defect as `mammo` in the breast row.
+  [
+    'abdomen|abdominal|abdo|abd|liver|hepat\\w*|kidney|renal|pancrea\\w*|mrcp|urogram|kub|gallbladder|biliary|spleen|splenic|bowel|colon|appendix|adrenal|ureter|retroperiton\\w*|mesenteric',
+    'abdomen',
+  ],
+  [
+    'spine|spinal|lumbar|l-?spine|t-?spine|vertebr\\w*|scoliosis|sacrum|sacral|coccyx|coccygeal',
+    'spine',
+  ],
+  // Obstetric ultrasound is read on the pelvis and names nothing above it. `ob` is
+  // safe this far down the row because "US PELVIS NON OB COMPLETE" is claimed by
+  // `pelvis` in the same alternation, whichever branch the engine tries first.
+  [
+    'pelvis|pelvic|pelv|pel|hip|bladder|prostate|scrotum|scrotal|testic\\w*|uterus|uterine|ovary|ovarian|adnexa|transvaginal|groin|ob|obstetric\\w*|fetal|fetus(es)?|gestation\\w*|biophysical|nuchal|pregnan\\w*',
+    'pelvis',
+  ],
+  // mammo\w* rather than a bare `mammo` stem: there is no word boundary inside
+  // "MAMMOGRAM", so the stem matched neither it nor "mammography" and every
+  // screening study came back 'unknown' — then outscored the real prior mammogram.
+  ['breast|mammo\\w*|mg', 'breast'],
+  // ext / extrem are how vascular ultrasound writes it ("DUPLEX LOWER EXT VENOUS").
+  [
+    'arm|leg|knee|shoulder|ankle|wrist|elbow|femur|tibia|fibula|humerus|radius|ulna|clavicle|scapula|forearm|hand|foot|finger|thumb|toe|calcaneus|patella|extrem\\w*|ext',
+    'extremity',
+  ],
 ];
 
-export function getBodyPart(study: StudyLike): BodyPart {
-  const sources = [study.BodyPartExamined, study.StudyDescription];
-  for (const source of sources) {
-    if (!source) {
-      continue;
-    }
-    const str = String(source);
-    // Spine (incl. cervical/thoracic/lumbar regions) is resolved first — see
-    // getSpineRegion — so "cervical/thoracic spine" don't fall into neck/chest.
-    const spine = getSpineRegion(str);
-    if (spine) {
-      return spine;
-    }
-    for (const [re, part] of BODY_PART_KEYWORDS) {
-      if (re.test(str)) {
-        return part;
-      }
+/** Compiled once. */
+const BODY_PART_KEYWORDS: Array<[RegExp, BodyPart]> = BODY_PART_VOCAB.map(([vocab, part]) => [
+  anatomyBounded(vocab),
+  part,
+]);
+
+/** Resolve one text source to a body part, or undefined when it names none. */
+function scanBodyPart(source: string): BodyPart | undefined {
+  if (!source.trim()) {
+    return undefined;
+  }
+  // Spine (incl. cervical/thoracic/lumbar regions) is resolved first — see
+  // getSpineRegion — so "cervical/thoracic spine" don't fall into neck/chest.
+  const spine = getSpineRegion(source);
+  if (spine) {
+    return spine;
+  }
+  for (const [re, part] of BODY_PART_KEYWORDS) {
+    if (re.test(source)) {
+      return part;
     }
   }
-  return 'unknown';
+  return undefined;
+}
+
+/**
+ * Siemens-style protocol names put the scanner's own region group before the `^`:
+ * "Head^001_IAC_TEMP_BONES (Adult)", "Upper Extremities^001_WRIST_ABOVE_HEAD (Adult)".
+ */
+const PROTOCOL_REGION_GROUP = /^([^^]{2,40})\^/;
+
+/**
+ * Study → body part, from the StudyDescription first and DICOM BodyPartExamined
+ * only as a fallback.
+ *
+ * The description leads because BodyPartExamined is scanner-populated and coarse: a
+ * study described "Spine^001_Cspine (Adult)" can carry BodyPartExamined "HEAD". The
+ * tag still rescues a description that names nothing (a cryptic exam code), which is
+ * the case it is really there for. Today this ordering is academic on the prior path
+ * — `toStudyLike` in loadRelevantPriors never populates BodyPartExamined from QIDO,
+ * so both sides already resolve off the description — but the app repo hit the
+ * tag-first bug on real data, and the moment anyone maps the QIDO field through, the
+ * comparison would go asymmetric: priors have only a description, so a tag-derived
+ * current would be compared against description-derived priors and disagree exactly
+ * when the tag is wrong.
+ */
+export function getBodyPart(study: StudyLike): BodyPart {
+  const description = study.StudyDescription ? String(study.StudyDescription) : '';
+  const resolved =
+    scanBodyPart(description) ??
+    scanBodyPart(study.BodyPartExamined ? String(study.BodyPartExamined) : '') ??
+    'unknown';
+
+  // A protocol's region group is the region the protocol was FILED under, which
+  // beats any single word found deeper in the name — that is where positioning
+  // language lives, and "Upper Extremities^001_WRIST_ABOVE_HEAD" resolved to 'head'
+  // off ABOVE_HEAD. It must not overrule a refinement of ITSELF, though:
+  // "Spine^001_C_SPINE (Adult)" has group 'spine' and full-string 'spine-cervical',
+  // and the specific answer is the right one — so only a genuinely different region wins.
+  const group = PROTOCOL_REGION_GROUP.exec(description)?.[1];
+  const grouped = group ? scanBodyPart(group) : undefined;
+  if (grouped && grouped !== resolved && baseRegion(resolved) !== grouped) {
+    return grouped;
+  }
+  return resolved;
 }
 
 /** Parse a DICOM date (YYYYMMDD) into a millisecond timestamp, or undefined. */

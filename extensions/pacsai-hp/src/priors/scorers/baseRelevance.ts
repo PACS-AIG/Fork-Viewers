@@ -1,5 +1,5 @@
 import type { PriorContext, PriorScorer } from '../types';
-import { getBodyPart, getModality } from '../metadata';
+import { baseRegion, getBodyPart, getModalityFamily } from '../metadata';
 
 /**
  * Base anatomical/modality relevance.
@@ -20,17 +20,6 @@ const SAME_BODY_PART_DIFFERENT_MODALITY_DEFAULT = 70;
 // Fallbacks when a body part can't be parsed from the description/metadata.
 const SAME_MODALITY_UNKNOWN_BODY_PART = 60;
 const DIFFERENT_MODALITY_UNKNOWN_BODY_PART = 20;
-
-/** Treat projection radiography modalities as one family. */
-function modalityFamily(modality?: string): string | undefined {
-  if (!modality) {
-    return undefined;
-  }
-  if (modality === 'CR' || modality === 'DX' || modality === 'XR' || modality === 'RG') {
-    return 'XR';
-  }
-  return modality;
-}
 
 /**
  * Directional (current → prior) overrides when the body part matches but the
@@ -63,8 +52,8 @@ const CROSS_BODY_PART: Record<string, number> = {
 };
 
 export const baseRelevance: PriorScorer = ({ current, prior }: PriorContext): number => {
-  const curMod = modalityFamily(getModality(current));
-  const priMod = modalityFamily(getModality(prior));
+  const curMod = getModalityFamily(current);
+  const priMod = getModalityFamily(prior);
   const curBp = getBodyPart(current);
   const priBp = getBodyPart(prior);
 
@@ -89,8 +78,19 @@ export const baseRelevance: PriorScorer = ({ current, prior }: PriorContext): nu
   }
 
   // Both body parts known and different — use the cross-anatomy overlap table.
-  const crossKey = `${curBp}>${priBp}`;
-  return CROSS_BODY_PART[crossKey] ?? 0;
+  //
+  // Retry on the UNREGIONALIZED pair. The table is keyed on bare 'spine' while
+  // getBodyPart returns 'spine-cervical' / '-thoracic' / '-lumbar' whenever the
+  // description names a level — which is most of the time — so every entry touching
+  // spine was unreachable in practice: a neck prior against a cervical spine study
+  // looked up 'spine-cervical>neck', missed, and scored 0 where the table says 40.
+  // Trying the exact key first keeps a future region-specific entry able to win.
+  // Cross-REGION spine pairs never arrive here; spineRegionGate disqualified them.
+  return (
+    CROSS_BODY_PART[`${curBp}>${priBp}`] ??
+    CROSS_BODY_PART[`${baseRegion(curBp)}>${baseRegion(priBp)}`] ??
+    0
+  );
 };
 
 export default baseRelevance;
