@@ -1,4 +1,5 @@
 import type { PriorContext, PriorScorer } from '../types';
+import { PROTOCOL_REGION_GROUP } from '../metadata';
 
 /**
  * Clinical-indication match. Ideally this reads the requested-procedure /
@@ -42,15 +43,56 @@ const STOP_WORDS = new Set([
   'for',
 ]);
 
+/**
+ * Age/population qualifiers. A scanner protocol name carries one on nearly every
+ * entry, so they say nothing about whether two studies are the same exam.
+ */
+const POPULATION_QUALIFIERS = new Set([
+  'adult',
+  'adults',
+  'child',
+  'children',
+  'peds',
+  'pediatric',
+  'paediatric',
+  'infant',
+  'neonate',
+  'neonatal',
+]);
+
+/**
+ * Tokens of a description that could plausibly mean "these are the same exam".
+ *
+ * Scanner protocol names are mostly BOILERPLATE, and the boilerplate is shared by
+ * every protocol filed under one region group — so the generic overlap bonus fired
+ * on all of them and carried no signal at all. "Head^001_HEAD_WO (Adult)" and
+ * "Head^001_MAXILLOFACIAL_TRAUMA (Adult)" share `head`, `001` and `adult`, which
+ * made a prior maxillofacial score exactly what the patient's own prior head CT
+ * scored (105 each); the ranker then had nothing left but the clock, and the study
+ * scanned five minutes later in that prior trauma session won.
+ *
+ * So three things are dropped on top of STOP_WORDS: the region group before the
+ * `^` (it repeats inside the name anyway when it is genuinely the anatomy — the
+ * current study keeps its own 'head' from HEAD_WO), pure-numeric protocol codes,
+ * and the age qualifier. RIS-style descriptions have no caret and no code, so they
+ * tokenize exactly as before.
+ */
 function tokenize(desc?: string): Set<string> {
   if (!desc) {
     return new Set();
   }
   return new Set(
     String(desc)
+      .replace(PROTOCOL_REGION_GROUP, ' ')
       .toLowerCase()
       .split(/[^a-z0-9]+/)
-      .filter(tok => tok.length > 2 && !STOP_WORDS.has(tok))
+      .filter(
+        tok =>
+          tok.length > 2 &&
+          !STOP_WORDS.has(tok) &&
+          !POPULATION_QUALIFIERS.has(tok) &&
+          !/^\d+$/.test(tok)
+      )
   );
 }
 

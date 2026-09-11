@@ -93,6 +93,43 @@ describe('indication', () => {
     expect(indication({ current, prior })).toBe(15);
   });
 
+  it('ignores scanner protocol-name boilerplate', () => {
+    // A protocol name is mostly boilerplate, and the boilerplate is shared by every
+    // protocol filed under one region group — so the generic overlap bonus fired on
+    // all of them and carried no signal. Reported live: a current CT head ranked a
+    // prior CT maxillofacial level with the patient's own prior head CT (both 105),
+    // and the clock then picked the one scanned five minutes later.
+    const current = study({ StudyDescription: 'Head^001_HEAD_WO (Adult)' });
+    expect(
+      indication({ current, prior: study({ StudyDescription: 'Head^001_HEAD_WO (Adult)' }) })
+    ).toBe(15);
+    expect(
+      indication({
+        current,
+        prior: study({ StudyDescription: 'Head^001_MAXILLOFACIAL_TRAUMA (Adult)' }),
+      })
+    ).toBe(0);
+    expect(
+      indication({ current, prior: study({ StudyDescription: 'Spine^001_C_Spine (Adult)' }) })
+    ).toBe(0);
+  });
+
+  it('leaves RIS-style descriptions tokenizing exactly as before', () => {
+    // No caret, no protocol code, no age qualifier — nothing to strip.
+    expect(
+      indication({
+        current: study({ StudyDescription: 'CT HEAD WO CONTRAST' }),
+        prior: study({ StudyDescription: 'CT HEAD WO CONTRAST' }),
+      })
+    ).toBe(15);
+    expect(
+      indication({
+        current: study({ StudyDescription: 'CT HEAD WO CONTRAST' }),
+        prior: study({ StudyDescription: 'CT MAXILLOFACIAL WO CONTRAST' }),
+      })
+    ).toBe(0);
+  });
+
   it('returns 0 with no overlap or missing descriptions', () => {
     expect(
       indication({
@@ -445,6 +482,28 @@ describe('makeRanker', () => {
       at('CT MAXILLOFACIAL WO CONTRAST', '20260820', 'CT'), // same region, last month
     ]);
     expect(ranked[0]).toBe('CT MAXILLOFACIAL WO CONTRAST');
+  });
+
+  // The live case, with the descriptions exactly as the scanner writes them. The
+  // day-grain fix alone could not decide it: protocol-name boilerplate scored both
+  // priors 105, so the ranker fell through to the clock and took the study scanned
+  // last in that prior trauma session.
+  it('picks the matching prior protocol over a sibling scanned later that day', () => {
+    const current = study({
+      Modality: 'CT',
+      StudyDescription: 'Head^001_HEAD_WO (Adult)',
+      StudyDate: '20260910',
+      StudyTime: '214331',
+    });
+    const priorAt = (desc: string, time: string) =>
+      study({ Modality: 'CT', StudyDescription: desc, StudyDate: '20250402', StudyTime: time });
+    expect(
+      rank(current, [
+        priorAt('Head^001_MAXILLOFACIAL_TRAUMA (Adult)', '160932'), // scanned last
+        priorAt('Head^001_HEAD_WO (Adult)', '160432'),
+        priorAt('Spine^001_C_Spine (Adult)', '160634'),
+      ])[0]
+    ).toBe('Head^001_HEAD_WO (Adult)');
   });
 
   it('keeps tier above both day and score', () => {

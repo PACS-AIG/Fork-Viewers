@@ -253,7 +253,7 @@ function scanBodyPart(source: string): BodyPart | undefined {
  * Siemens-style protocol names put the scanner's own region group before the `^`:
  * "Head^001_IAC_TEMP_BONES (Adult)", "Upper Extremities^001_WRIST_ABOVE_HEAD (Adult)".
  */
-const PROTOCOL_REGION_GROUP = /^([^^]{2,40})\^/;
+export const PROTOCOL_REGION_GROUP = /^([^^]{2,40})\^/;
 
 /**
  * Study → body part, from the StudyDescription first and DICOM BodyPartExamined
