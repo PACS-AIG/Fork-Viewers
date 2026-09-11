@@ -1,5 +1,6 @@
 import type { PriorContext, PriorScorer } from '../types';
-import { baseRegion, getBodyPart, getModalityFamily } from '../metadata';
+import type { BodyPart } from '../metadata';
+import { getBodyPart, getModalityFamily } from '../metadata';
 
 /**
  * Base anatomical/modality relevance.
@@ -51,6 +52,25 @@ const CROSS_BODY_PART: Record<string, number> = {
   'neck>spine': 40,
 };
 
+/**
+ * Spine levels fold to bare 'spine' for the cross-anatomy table ONLY where the fold
+ * is anatomically true.
+ *
+ * Every CROSS_BODY_PART entry touching spine pairs it with head or neck, and those
+ * are relations of the CERVICAL spine — the neck IS the cervical region. Folding
+ * every level into them made a prior CT LUMBAR SPINE a 40-point comparison for a
+ * CT NECK SOFT TISSUE, two regions apart, and 40 clears `minScore`.
+ *
+ * Narrower than `baseRegion` on purpose: that one answers a different question (is
+ * this body part a refinement of that one) and has to fold every level, or
+ * "Spine^001_L_SPINE" loses its level to its own protocol group.
+ *
+ * An unregionalized 'spine' is left alone and still matches: its description named
+ * no level, so the relation may well hold, and that is the entry the table was
+ * written for.
+ */
+const crossBodySpine = (part: BodyPart): BodyPart => (part === 'spine-cervical' ? 'spine' : part);
+
 export const baseRelevance: PriorScorer = ({ current, prior }: PriorContext): number => {
   const curMod = getModalityFamily(current);
   const priMod = getModalityFamily(prior);
@@ -79,7 +99,7 @@ export const baseRelevance: PriorScorer = ({ current, prior }: PriorContext): nu
 
   // Both body parts known and different — use the cross-anatomy overlap table.
   //
-  // Retry on the UNREGIONALIZED pair. The table is keyed on bare 'spine' while
+  // Retry with the CERVICAL level folded. The table is keyed on bare 'spine' while
   // getBodyPart returns 'spine-cervical' / '-thoracic' / '-lumbar' whenever the
   // description names a level — which is most of the time — so every entry touching
   // spine was unreachable in practice: a neck prior against a cervical spine study
@@ -88,7 +108,7 @@ export const baseRelevance: PriorScorer = ({ current, prior }: PriorContext): nu
   // Cross-REGION spine pairs never arrive here; spineRegionGate disqualified them.
   return (
     CROSS_BODY_PART[`${curBp}>${priBp}`] ??
-    CROSS_BODY_PART[`${baseRegion(curBp)}>${baseRegion(priBp)}`] ??
+    CROSS_BODY_PART[`${crossBodySpine(curBp)}>${crossBodySpine(priBp)}`] ??
     0
   );
 };

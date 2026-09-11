@@ -343,6 +343,22 @@ describe('baseRelevance cross-anatomy table', () => {
     const knee = study({ Modality: 'MR', StudyDescription: 'MR Knee' });
     expect(baseRelevance({ current: lspine, prior: knee })).toBe(0);
   });
+
+  it('folds only the CERVICAL level into the spine entries', () => {
+    // Reported off a live worklist, and a regression from the retry above: every
+    // CROSS_BODY_PART entry touching spine pairs it with head or neck, and those
+    // are relations of the CERVICAL spine — the neck IS the cervical region.
+    // Folding every level in made a prior CT LUMBAR SPINE a 40-point comparison
+    // for a CT NECK SOFT TISSUE, two regions apart, which clears minScore.
+    const neck = study({ Modality: 'CT', StudyDescription: 'CT NECK SOFT TISSUE W CONTRAST' });
+    const at = (desc: string) => study({ Modality: 'CT', StudyDescription: desc });
+    expect(baseRelevance({ current: neck, prior: at('CT CERVICAL SPINE WO CONTRAST') })).toBe(40);
+    expect(baseRelevance({ current: neck, prior: at('CT LUMBAR SPINE WO CONTRAST') })).toBe(0);
+    expect(baseRelevance({ current: neck, prior: at('CT THORACIC SPINE WO CONTRAST') })).toBe(0);
+    // An unregionalized spine study named no level, so the relation may hold and
+    // it keeps the bare entry — the same 40 the cervical level folds into.
+    expect(baseRelevance({ current: neck, prior: at('SPINE SURVEY') })).toBe(40);
+  });
 });
 
 describe('tierOfPrior', () => {
@@ -388,6 +404,56 @@ describe('makeRanker', () => {
     expect(
       rank(current, [at('CT CHEST OLD', '20240101', 'CT'), at('CT CHEST RECENT', '20260801', 'CT')])
     ).toEqual(['CT CHEST RECENT', 'CT CHEST OLD']);
+  });
+
+  // Reported off a live worklist: a CT HEAD row led with a prior CT MAXILLOFACIAL,
+  // ahead of the patient's own prior CT HEAD. The SCORES were already right — same
+  // body part and modality gives both 100, and the head CT adds the 15-point
+  // description overlap. The sort threw it away: it ordered tier -> full TIMESTAMP
+  // -> score, while `recency` scores on calendar DAY, so a sibling scanned five
+  // minutes later in the same session won and score could never overcome it.
+  it('lets score decide within a day, not which study was scanned last', () => {
+    const current = study({
+      Modality: 'CT',
+      StudyDescription: 'CT HEAD WO CONTRAST',
+      StudyDate: '20260910',
+      StudyTime: '214707',
+    });
+    // One prior trauma CT session, three exams, minutes apart.
+    const atTime = (desc: string, time: string) =>
+      study({ Modality: 'CT', StudyDescription: desc, StudyDate: '20250402', StudyTime: time });
+    expect(
+      rank(current, [
+        atTime('CT MAXILLOFACIAL WO CONTRAST', '205532'),
+        atTime('CT HEAD WO CONTRAST', '205032'),
+        atTime('CT CERVICAL SPINE WO CONTRAST', '205234'),
+      ])
+    ).toEqual([
+      'CT HEAD WO CONTRAST', // 105, tier 0 — the exact exam
+      'CT MAXILLOFACIAL WO CONTRAST', // 90, tier 0 — same region, scanned later
+      'CT CERVICAL SPINE WO CONTRAST', // tier 2
+    ]);
+  });
+
+  // Day still beats score within a tier: that is what a rad means by the comparable
+  // study, and the reason this is a granularity fix rather than a policy change.
+  // Without this, the test above would also pass on a plain tier -> score sort.
+  it('still prefers a more recent DAY over a better score', () => {
+    const current = at('CT HEAD WO CONTRAST', '20260910', 'CT');
+    const ranked = rank(current, [
+      at('CT HEAD WO CONTRAST', '20260110', 'CT'), // exact exam, but 8 months old
+      at('CT MAXILLOFACIAL WO CONTRAST', '20260820', 'CT'), // same region, last month
+    ]);
+    expect(ranked[0]).toBe('CT MAXILLOFACIAL WO CONTRAST');
+  });
+
+  it('keeps tier above both day and score', () => {
+    const current = at('CT HEAD WO CONTRAST', '20260910', 'CT');
+    const ranked = rank(current, [
+      at('CT CERVICAL SPINE WO CONTRAST', '20260901', 'CT'), // cross-body, recent
+      at('CT HEAD WO CONTRAST', '20260110', 'CT'), // tier 0, older
+    ]);
+    expect(ranked[0]).toBe('CT HEAD WO CONTRAST');
   });
 });
 
