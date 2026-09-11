@@ -100,8 +100,9 @@ describe('indication', () => {
     // prior CT maxillofacial level with the patient's own prior head CT (both 105),
     // and the clock then picked the one scanned five minutes later.
     const current = study({ StudyDescription: 'Head^001_HEAD_WO (Adult)' });
+    // The real prior carries an extra _SPIRAL token; the shared 'head' still earns it.
     expect(
-      indication({ current, prior: study({ StudyDescription: 'Head^001_HEAD_WO (Adult)' }) })
+      indication({ current, prior: study({ StudyDescription: 'Head^001_HEAD_WO_SPIRAL (Adult)' }) })
     ).toBe(15);
     expect(
       indication({
@@ -110,7 +111,7 @@ describe('indication', () => {
       })
     ).toBe(0);
     expect(
-      indication({ current, prior: study({ StudyDescription: 'Spine^001_C_Spine (Adult)' }) })
+      indication({ current, prior: study({ StudyDescription: 'Spine^001_C_SPINE (Adult)' }) })
     ).toBe(0);
   });
 
@@ -489,6 +490,9 @@ describe('makeRanker', () => {
   // priors 105, so the ranker fell through to the clock and took the study scanned
   // last in that prior trauma session.
   it('picks the matching prior protocol over a sibling scanned later that day', () => {
+    // Descriptions, dates and (fractional-second) times verbatim from the DEBUG
+    // dump of the reported study. All three priors are ONE prior trauma session,
+    // so day ties for all of them and score has to decide.
     const current = study({
       Modality: 'CT',
       StudyDescription: 'Head^001_HEAD_WO (Adult)',
@@ -499,11 +503,11 @@ describe('makeRanker', () => {
       study({ Modality: 'CT', StudyDescription: desc, StudyDate: '20250402', StudyTime: time });
     expect(
       rank(current, [
-        priorAt('Head^001_MAXILLOFACIAL_TRAUMA (Adult)', '160932'), // scanned last
-        priorAt('Head^001_HEAD_WO (Adult)', '160432'),
-        priorAt('Spine^001_C_Spine (Adult)', '160634'),
+        priorAt('Head^001_MAXILLOFACIAL_TRAUMA (Adult)', '205532.260000'), // scanned last
+        priorAt('Head^001_HEAD_WO_SPIRAL (Adult)', '205032.137000'),
+        priorAt('Spine^001_C_SPINE (Adult)', '205234.945000'),
       ])[0]
-    ).toBe('Head^001_HEAD_WO (Adult)');
+    ).toBe('Head^001_HEAD_WO_SPIRAL (Adult)');
   });
 
   it('keeps tier above both day and score', () => {
