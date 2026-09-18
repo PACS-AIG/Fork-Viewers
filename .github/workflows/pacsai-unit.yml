@@ -1,0 +1,27 @@
+name: PACS-AI unit tests
+
+# Rev 11 milestone 1 (B00). The upstream OHIF workflows in this folder filter
+# on main/master, which this fork never pushes to, so nothing ran here before.
+# The deploy repo (PACS-AIG/ohif) runs the same command as its gate; this one
+# gives the signal on the branch where the code changes.
+on:
+  push:
+    branches: [ 'pacs-aig/**' ]
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the node:18 the deploy Dockerfile builds on.
+          node-version: 18
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --network-timeout 600000
+
+      - name: PACS-AI extension unit tests
+        run: yarn jest extensions/pacsai-hp --ci

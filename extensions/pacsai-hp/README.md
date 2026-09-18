@@ -55,4 +55,4 @@ Registered in `platform/app/pluginConfig.json` and used by the longitudinal mode
 
 ## Tests
 
-`yarn jest extensions/pacsai-hp` runs `src/priors/scorePrior.test.ts`.
+`yarn jest extensions/pacsai-hp` runs `src/priors/scorePrior.test.ts` and `src/overlays/formatStudyDateTime.test.ts` (the extension's `jest.config.js` widens the shared `*.test.js` match to TypeScript; without it the command finds nothing and exits 1).
