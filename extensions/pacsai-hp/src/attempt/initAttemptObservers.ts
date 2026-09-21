@@ -14,7 +14,7 @@
  * preRegistration, and extension-cornerstone may register its services later.
  */
 import { utils } from '@ohif/core';
-import { eventTarget, Enums } from '@cornerstonejs/core';
+import { Enums } from '@cornerstonejs/core';
 
 type Services = Record<string, any>;
 
@@ -46,11 +46,14 @@ export default function initAttemptObservers({ servicesManager }: { servicesMana
   };
 
   const onImageRendered = (evt: { detail?: { viewportId?: string } }) => {
-    attempt.mark('first_pixels');
     const viewportId = evt?.detail?.viewportId;
-    if (!viewportId) {
+    // Thumbnails render through offscreen `renderGPUViewport-*` viewports the
+    // viewport service has never heard of; they are not the reader's first
+    // pixels. Only a grid viewport counts.
+    if (!viewportId || !services().cornerstoneViewportService?.getViewportInfo?.(viewportId)) {
       return;
     }
+    attempt.mark('first_pixels');
     const wantsRender = !attempt.has('image_rendered_matching_study');
     const wantsTools = !attempt.has('tools_ready');
     if (!wantsRender && !wantsTools) {
@@ -70,5 +73,13 @@ export default function initAttemptObservers({ servicesManager }: { servicesMana
       }
     }
   };
-  eventTarget.addEventListener(Enums.Events.IMAGE_RENDERED, onImageRendered as EventListener);
+  // Cornerstone dispatches IMAGE_RENDERED on the viewport ELEMENT (a
+  // non-bubbling CustomEvent — RenderingEngine.js `triggerEvent(element, …)`),
+  // not on its global eventTarget. A capture-phase listener on the document
+  // still sees every one of them, whichever element they land on. The first
+  // dev run of this trace recorded no render stage at all because it listened
+  // on the global target; the images had rendered.
+  if (typeof document !== 'undefined') {
+    document.addEventListener(Enums.Events.IMAGE_RENDERED, onImageRendered as EventListener, true);
+  }
 }
