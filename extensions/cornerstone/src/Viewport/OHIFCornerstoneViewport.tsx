@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { useResizeDetector } from 'react-resize-detector';
 import * as cs3DTools from '@cornerstonejs/tools';
 import { Enums, eventTarget, getEnabledElement } from '@cornerstonejs/core';
-import { MeasurementService } from '@ohif/core';
+import { MeasurementService, utils as ohifUtils } from '@ohif/core';
 import { AllInOneMenu, Notification, useViewportDialog } from '@ohif/ui';
 import type { Types as csTypes } from '@cornerstonejs/core';
 
@@ -289,7 +289,12 @@ const OHIFCornerstoneViewport = React.memo(
         }
       };
 
-      loadViewportData();
+      loadViewportData().catch(err => {
+        // B01 (Rev 11 milestone 2): this rejection used to surface only as an
+        // unhandled promise in the console; now the attempt records it too.
+        ohifUtils.attempt.fail('VIEWPORT_LOAD_FAILED');
+        console.error(err);
+      });
     }, [viewportOptions, displaySets, dataSource]);
 
     /**

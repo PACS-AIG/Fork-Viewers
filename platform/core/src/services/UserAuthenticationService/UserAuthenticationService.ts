@@ -1,4 +1,5 @@
 import { PubSubService } from '../_shared/pubSubServiceInterface';
+import { attempt } from '../../utils/attempt';
 
 class UserAuthenticationService extends PubSubService {
   public static readonly EVENTS = {};
@@ -33,6 +34,11 @@ class UserAuthenticationService extends PubSubService {
   }
 
   public setUser(user) {
+    // B01 (Rev 11 milestone 2): the sign-in callback is one of two places a
+    // usable token first appears; the other is the header below on a warm load.
+    if (user && (user.access_token || user.id_token)) {
+      attempt.mark('auth_ready');
+    }
     return this.serviceImplementation._setUser(user);
   }
 
@@ -41,7 +47,11 @@ class UserAuthenticationService extends PubSubService {
   }
 
   public getAuthorizationHeader() {
-    return this.serviceImplementation._getAuthorizationHeader();
+    const header = this.serviceImplementation._getAuthorizationHeader();
+    if (header && (header as { Authorization?: string }).Authorization) {
+      attempt.mark('auth_ready');
+    }
+    return header;
   }
 
   public handleUnauthenticated() {

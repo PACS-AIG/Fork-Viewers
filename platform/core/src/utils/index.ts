@@ -42,6 +42,7 @@ import { sopClassDictionary } from './sopClassDictionary';
 import * as MeasurementFilters from './measurementFilters';
 import { parseDicomAge, deriveAgeFromDob } from './dicomAge';
 import { getPacsaiTheme, applyPacsaiTheme, togglePacsaiTheme } from './pacsaiTheme';
+import { attempt, ATTEMPT_STAGES, studyRefFor, validateReadiness } from './attempt';
 
 // Commented out unused functionality.
 // Need to implement new mechanism for derived displaySets using the displaySetManager.
@@ -67,6 +68,10 @@ const utils = {
   getPacsaiTheme,
   applyPacsaiTheme,
   togglePacsaiTheme,
+  attempt,
+  ATTEMPT_STAGES,
+  studyRefFor,
+  validateReadiness,
   b64toBlob,
   urlUtil,
   imageIdToURI,
@@ -96,6 +101,10 @@ const utils = {
 };
 
 export {
+  attempt,
+  ATTEMPT_STAGES,
+  studyRefFor,
+  validateReadiness,
   guid,
   ObjectPath,
   absoluteUrl,

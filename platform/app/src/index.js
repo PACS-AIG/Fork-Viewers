@@ -17,9 +17,15 @@ import React from 'react';
  */
 import { modes as defaultModes, extensions as defaultExtensions } from './pluginImports';
 import loadDynamicConfig from './loadDynamicConfig';
+import { utils as ohifUtils } from '@ohif/core';
 export { history } from './utils/history';
 export { preserveQueryParameters, preserveQueryStrings } from './utils/preserveQueryParameters';
 export { publicUrl } from './utils/publicUrl';
+
+// B01 (Rev 11 milestone 2): resolve this document's viewer attempt first, so
+// every later stage — including a failure before React mounts — is recorded
+// against the launcher's click.
+ohifUtils.attempt.init();
 
 loadDynamicConfig(window.config).then(config_json => {
   // Reset Dynamic config if defined

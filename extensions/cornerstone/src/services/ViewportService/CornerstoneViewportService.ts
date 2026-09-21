@@ -1,4 +1,4 @@
-import { PubSubService } from '@ohif/core';
+import { PubSubService, utils as ohifUtils } from '@ohif/core';
 import { Types as OhifTypes } from '@ohif/core';
 import {
   RenderingEngine,
@@ -113,12 +113,29 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     const renderingEngine = getRenderingEngine(RENDERING_ENGINE_ID);
 
     if (renderingEngine) {
+      // B01 (Rev 11 milestone 2): a RenderingEngine caches itself before its
+      // constructor finishes, so a throw in between leaves a half-built engine
+      // here that nothing evicts (§13). Record which kind we are reusing; B02
+      // decides what to do about an invalid one.
+      const viewports = (renderingEngine as unknown as { _viewports?: unknown })._viewports;
+      if (viewports instanceof Map) {
+        ohifUtils.attempt.mark('engine_created');
+      } else {
+        ohifUtils.attempt.fail('ENGINE_CACHE_INVALID', 'engine_created');
+      }
       this.renderingEngine = renderingEngine;
       return this.renderingEngine;
     }
 
     if (!renderingEngine || renderingEngine.hasBeenDestroyed) {
-      this.renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
+      try {
+        this.renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
+      } catch (err) {
+        ohifUtils.attempt.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+        throw err;
+      }
+      ohifUtils.attempt.mark('engine_created');
+      ohifUtils.attempt.observeEngine(this.renderingEngine);
     }
 
     return this.renderingEngine;
@@ -452,6 +469,8 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     // renderingEngine is designed to be used like this. This will trigger
     // ENABLED_ELEMENT again and again, which will run onEnableElement callbacks
     renderingEngine.enableElement(viewportInput);
+    // B01: the container's size at enable time, and its WebGL context from now on.
+    ohifUtils.attempt.observeContainer(element);
 
     viewportInfo.setViewportOptions(viewportOptions);
     viewportInfo.setDisplaySetOptions(displaySetOptions);

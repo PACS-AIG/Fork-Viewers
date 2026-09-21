@@ -32,6 +32,7 @@ import getImageColor from './utils/getImageColor';
 import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
 import { getStudyRole } from './priors/roleRegistry';
 import { configurePriorSwitching } from './priors/selectPrior';
+import initAttemptObservers from './attempt/initAttemptObservers';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import { hangingIgnoresPriors } from './allinone/browsingMode';
@@ -109,6 +110,10 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     // items are handed `servicesManager` only, and a prior swap needs to create
     // display sets for the chosen study before re-hanging.
     configurePriorSwitching({ servicesManager, extensionManager });
+
+    // B01 (Rev 11 milestone 2): derive the display-set, first-pixels, matching-
+    // render and tools-ready stages of the viewer attempt trace.
+    initAttemptObservers({ servicesManager });
 
     // Cross-study relative scroll synchronizer used by the protocols.
     syncGroupService?.addSynchronizerType?.(SCROLL_SYNC_TYPE, createScrollSyncSynchronizer);

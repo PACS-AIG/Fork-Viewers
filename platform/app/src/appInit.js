@@ -23,6 +23,7 @@ import {
   MultiMonitorService,
   // utils,
 } from '@ohif/core';
+import { utils as ohifUtils } from '@ohif/core';
 
 import loadModules, { loadModule as peerImport } from './pluginImports';
 
@@ -45,6 +46,18 @@ async function appInit(appConfigOrFunc, defaultExtensions, defaultModes) {
       ? await appConfigOrFunc({ servicesManager, peerImport })
       : appConfigOrFunc),
   };
+  // B01 (Rev 11 milestone 2): the config resolved. On the first document of a
+  // cold open it resolves before any token exists and comes back with no data
+  // source at all (§13, ohif/config.js loadParams) — that is a red stage, not a
+  // green one, so the trace can see the defect instead of a later timeout.
+  {
+    const dataSourceCount = Array.isArray(appConfig.dataSources) ? appConfig.dataSources.length : 0;
+    if (dataSourceCount > 0) {
+      ohifUtils.attempt.mark('config_ready');
+    } else {
+      ohifUtils.attempt.fail('CONFIG_NO_DATASOURCES', 'config_ready');
+    }
+  }
   // Default the peer import function
   appConfig.peerImport ||= peerImport;
 
@@ -89,6 +102,8 @@ async function appInit(appConfigOrFunc, defaultExtensions, defaultModes) {
    */
   const loadedExtensions = await loadModules([...defaultExtensions, ...appConfig.extensions]);
   await extensionManager.registerExtensions(loadedExtensions, appConfig.dataSources);
+  // B01: extensions (including the Cornerstone runtime) are initialized.
+  ohifUtils.attempt.mark('runtime_ready');
 
   // TODO: We no longer use `utils.addServer`
   // TODO: We no longer init webWorkers at app level

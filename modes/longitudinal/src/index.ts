@@ -1,4 +1,4 @@
-import { hotkeys } from '@ohif/core';
+import { hotkeys, utils as ohifUtils } from '@ohif/core';
 import i18n from 'i18next';
 import {
   studyRoleOverlayItem,
@@ -145,6 +145,11 @@ function modeFactory({ modeConfiguration }) {
      * Lifecycle hooks
      */
     onModeEnter: function ({ servicesManager, extensionManager, commandsManager }: withAppTypes) {
+      // B01 (Rev 11 milestone 2): the study this document is opening; a switch
+      // inside the same document starts a new generation of the attempt trace.
+      ohifUtils.attempt.begin(
+        new URLSearchParams(window.location.search).get('StudyInstanceUIDs')?.split(',')[0]
+      );
       const {
         measurementService,
         toolbarService,
@@ -360,6 +365,9 @@ function modeFactory({ modeConfiguration }) {
         uiDialogService,
         uiModalService,
       } = servicesManager.services;
+
+      // B01: leaving the mode before the requested study rendered is a cancel.
+      ohifUtils.attempt.cancelIfIncomplete('MODE_EXIT_BEFORE_RENDER');
 
       _activatePanelTriggersSubscriptions.forEach(sub => sub.unsubscribe());
       _activatePanelTriggersSubscriptions = [];
