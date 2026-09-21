@@ -46,6 +46,8 @@ export interface AttemptRecorder {
   cancelIfIncomplete(code: string): void;
   /** Record `retry_requested` and let the re-run stages record again. */
   retry(): AttemptEvent | null;
+  /** True while an ok record of this stage is still owed (respects the retry window). */
+  needs(stage: AttemptStage): boolean;
   snapshot(): (AttemptTraceState & { readiness: unknown; complete: boolean }) | null;
   subscribe(listener: (e: AttemptEvent) => void): () => void;
 }
@@ -287,6 +289,10 @@ class BrowserAttemptRecorder implements AttemptRecorder {
   retry(): AttemptEvent | null {
     this.init();
     return this.trace ? this.trace.retry() : null;
+  }
+
+  needs(stage: AttemptStage): boolean {
+    return !!this.trace && this.trace.needs(stage);
   }
 
   snapshot() {

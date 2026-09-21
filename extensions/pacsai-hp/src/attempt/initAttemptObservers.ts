@@ -54,8 +54,9 @@ export default function initAttemptObservers({ servicesManager }: { servicesMana
       return;
     }
     attempt.mark('first_pixels');
-    const wantsRender = !attempt.has('image_rendered_matching_study');
-    const wantsTools = !attempt.has('tools_ready');
+    // needs(), not has(): after Retry viewer these stages are owed again.
+    const wantsRender = attempt.needs('image_rendered_matching_study');
+    const wantsTools = attempt.needs('tools_ready');
     if (!wantsRender && !wantsTools) {
       return;
     }

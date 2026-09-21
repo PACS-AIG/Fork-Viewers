@@ -38,6 +38,15 @@ export const READINESS_STAGES: readonly AttemptStage[] = ATTEMPT_STAGES.slice(0,
 /** Stages that may legitimately be recorded more than once per document. */
 const REPEATABLE: ReadonlySet<AttemptStage> = new Set<AttemptStage>(['failed', 'retry_requested']);
 
+/** Stages a Retry viewer re-runs; only these may record again after a retry. */
+export const RETRY_RERUN_STAGES: ReadonlySet<AttemptStage> = new Set<AttemptStage>([
+  'engine_created',
+  'container_sized',
+  'first_pixels',
+  'image_rendered_matching_study',
+  'tools_ready',
+]);
+
 export type CacheState = 'cold' | 'warm' | 'unknown';
 
 export interface AttemptError {
@@ -282,8 +291,13 @@ export class AttemptTrace {
    */
   retry(): AttemptEvent {
     const event = this.record({ stage: 'retry_requested', ok: true });
-    this.eventsAtConstruct = this.state.events.length;
+    this.eventsAtRetry = this.state.events.length;
     return event;
+  }
+
+  /** True while an ok record of this stage is still owed in the current window. */
+  needs(stage: AttemptStage): boolean {
+    return !this.recordedInThisDocument(stage, true);
   }
 
   events(): readonly AttemptEvent[] {
@@ -307,13 +321,18 @@ export class AttemptTrace {
 
   private recordedInThisDocument(stage: AttemptStage, ok = true): boolean {
     // Events carry no document index (the schema forbids extra fields), so
-    // the per-document window is the events appended since this construct.
+    // the per-document window is the events appended since this construct;
+    // after a Retry viewer, the stages the retry re-runs count from the retry.
+    const from = RETRY_RERUN_STAGES.has(stage)
+      ? Math.max(this.eventsAtConstruct, this.eventsAtRetry)
+      : this.eventsAtConstruct;
     return this.state.events
-      .slice(this.eventsAtConstruct)
+      .slice(from)
       .some(e => e.stage === stage && e.generation === this.state.generation && e.ok === ok);
   }
 
   private eventsAtConstruct = 0;
+  private eventsAtRetry = 0;
 
   private record(
     partial: Pick<AttemptEvent, 'stage' | 'ok'> & Partial<Pick<AttemptEvent, 'error' | 'containerSize'>>

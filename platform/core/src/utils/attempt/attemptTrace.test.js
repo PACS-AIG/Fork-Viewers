@@ -210,11 +210,18 @@ describe('attempt trace: retry and recovery', () => {
     expect(r.stage).toBe('retry_requested');
     expect(r.ok).toBe(true);
     expect(r.generation).toBe(1);
+    expect(trace.needs('engine_created')).toBe(true);
     expect(trace.mark('engine_created')).not.toBeNull();
+    expect(trace.needs('engine_created')).toBe(false);
     expect(trace.mark('container_sized', { containerSize: [400, 300] })).not.toBeNull();
+    expect(trace.needs('image_rendered_matching_study')).toBe(true);
     trace.mark('image_rendered_matching_study');
     expect(trace.snapshot().readiness.ok).toBe(true);
     expect(trace.events().filter(e => e.stage === 'engine_created').length).toBe(2);
+    // boot stages are not re-run by a retry and stay deduped
+    expect(trace.needs('auth_ready')).toBe(false);
+    expect(trace.mark('auth_ready')).toBeNull();
+    expect(trace.mark('runtime_ready')).toBeNull();
   });
 });
 
