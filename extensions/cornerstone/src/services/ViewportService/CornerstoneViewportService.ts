@@ -140,10 +140,6 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
    * harness's V05/V06 drive) is rethrown as is, so the Retry card is exercised.
    */
   private constructRenderingEngine(): RenderingEngine {
-    if (ohifUtils.takeInjectedFault('engine_construct_once')) {
-      ohifUtils.attempt.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
-      throw ohifUtils.injectedFault('Injected rendering engine construction failure');
-    }
     try {
       const engine = new RenderingEngine(RENDERING_ENGINE_ID);
       ohifUtils.attempt.mark('engine_created');
@@ -441,6 +437,16 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     publicDisplaySetOptions: DisplaySetOptions[],
     presentations?: Presentations
   ): void {
+    if (ohifUtils.takeInjectedFault('engine_construct_once')) {
+      // The harness's engine fault (V05/V06). It has to fire inside the load
+      // path: the first real construction can be asked for by a caller outside
+      // it, and a fault there would recover silently 4 ms later, never showing
+      // the pane its card. Drop whatever engine exists so the retry constructs
+      // one afresh, then fail the way a construction failure would.
+      this.resetRenderingEngine();
+      ohifUtils.attempt.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+      throw ohifUtils.injectedFault('Injected rendering engine construction failure');
+    }
     const renderingEngine = this.getRenderingEngine();
 
     // if not valid viewportData then return early
