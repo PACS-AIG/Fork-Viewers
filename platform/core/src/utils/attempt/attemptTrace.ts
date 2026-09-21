@@ -274,6 +274,18 @@ export class AttemptTrace {
     return this.record({ stage, ok: false, error, ...rest });
   }
 
+  /**
+   * The reader pressed Retry: record it and open a new dedupe window, so the
+   * stages the retry re-runs (engine, container, first pixels, render, tools)
+   * can be recorded again in the same generation. The readiness rule takes
+   * the latest event per stage, so a retried stage supersedes the red one.
+   */
+  retry(): AttemptEvent {
+    const event = this.record({ stage: 'retry_requested', ok: true });
+    this.eventsAtConstruct = this.state.events.length;
+    return event;
+  }
+
   events(): readonly AttemptEvent[] {
     return this.state.events;
   }

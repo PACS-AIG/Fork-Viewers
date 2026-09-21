@@ -44,6 +44,8 @@ export interface AttemptRecorder {
   observeEngine(engine: unknown): void;
   /** Record `cancelled` unless the matching image already rendered. */
   cancelIfIncomplete(code: string): void;
+  /** Record `retry_requested` and let the re-run stages record again. */
+  retry(): AttemptEvent | null;
   snapshot(): (AttemptTraceState & { readiness: unknown; complete: boolean }) | null;
   subscribe(listener: (e: AttemptEvent) => void): () => void;
 }
@@ -280,6 +282,11 @@ class BrowserAttemptRecorder implements AttemptRecorder {
       return;
     }
     this.trace.fail(code, 'cancelled');
+  }
+
+  retry(): AttemptEvent | null {
+    this.init();
+    return this.trace ? this.trace.retry() : null;
   }
 
   snapshot() {

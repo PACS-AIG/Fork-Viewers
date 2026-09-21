@@ -186,6 +186,38 @@ describe('attempt trace: readiness rule', () => {
   });
 });
 
+describe('attempt trace: retry and recovery', () => {
+  it('lets a failed stage succeed later in the same document (the CPU fallback), and the latest event wins', () => {
+    const { deps } = memoryDeps();
+    const trace = new AttemptTrace(deps, init);
+    READINESS_STAGES.filter(s => s !== 'engine_created').forEach(s => trace.mark(s));
+    trace.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+    expect(trace.snapshot().readiness.failed).toEqual(['engine_created']);
+    expect(trace.mark('engine_created')).not.toBeNull();
+    trace.mark('image_rendered_matching_study');
+    expect(trace.snapshot().readiness).toEqual({ ok: true, missing: [], failed: [], rendered: true });
+    expect(trace.events().filter(e => e.stage === 'engine_created').map(e => e.ok)).toEqual([false, true]);
+  });
+
+  it('records retry_requested and lets already-green stages record again', () => {
+    const { deps } = memoryDeps();
+    const trace = new AttemptTrace(deps, init);
+    READINESS_STAGES.forEach(s => trace.mark(s));
+    expect(trace.mark('engine_created')).toBeNull();
+    expect(trace.mark('container_sized')).toBeNull();
+    trace.fail('WEBGL_CONTEXT_LOST');
+    const r = trace.retry();
+    expect(r.stage).toBe('retry_requested');
+    expect(r.ok).toBe(true);
+    expect(r.generation).toBe(1);
+    expect(trace.mark('engine_created')).not.toBeNull();
+    expect(trace.mark('container_sized', { containerSize: [400, 300] })).not.toBeNull();
+    trace.mark('image_rendered_matching_study');
+    expect(trace.snapshot().readiness.ok).toBe(true);
+    expect(trace.events().filter(e => e.stage === 'engine_created').length).toBe(2);
+  });
+});
+
 describe('attempt trace: dedupe and generations', () => {
   it('records a non-repeatable stage once per document, but failures may repeat', () => {
     const { deps } = memoryDeps();

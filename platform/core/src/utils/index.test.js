@@ -12,6 +12,9 @@ describe('Top level exports', () => {
       'ATTEMPT_STAGES',
       'studyRefFor',
       'validateReadiness',
+      'takeInjectedFault',
+      'injectedFault',
+      'isInjectedFault',
       // pacsai additions that predate this list's last update
       'getPacsaiTheme',
       'applyPacsaiTheme',

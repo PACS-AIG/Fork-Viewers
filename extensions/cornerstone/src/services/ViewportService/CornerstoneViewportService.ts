@@ -11,6 +11,8 @@ import {
   cache,
   Enums as csEnums,
   BaseVolumeViewport,
+  getShouldUseCPURendering,
+  setUseCPURendering,
 } from '@cornerstonejs/core';
 
 import { utilities as csToolsUtils, Enums as csToolsEnums } from '@cornerstonejs/tools';
@@ -112,33 +114,73 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     // get renderingEngine from cache if it exists
     const renderingEngine = getRenderingEngine(RENDERING_ENGINE_ID);
 
-    if (renderingEngine) {
-      // B01 (Rev 11 milestone 2): a RenderingEngine caches itself before its
-      // constructor finishes, so a throw in between leaves a half-built engine
-      // here that nothing evicts (§13). Record which kind we are reusing; B02
-      // decides what to do about an invalid one.
+    if (renderingEngine && !renderingEngine.hasBeenDestroyed) {
+      // A RenderingEngine caches itself before its constructor finishes, so a
+      // throw in between leaves a half-built engine here that nothing evicts
+      // (§13). B01 recorded which kind we reuse; B02 part 4 stops reusing the
+      // half-built one: constructing a fresh engine under the same id
+      // replaces the cache entry.
       const viewports = (renderingEngine as unknown as { _viewports?: unknown })._viewports;
       if (viewports instanceof Map) {
         ohifUtils.attempt.mark('engine_created');
-      } else {
-        ohifUtils.attempt.fail('ENGINE_CACHE_INVALID', 'engine_created');
+        this.renderingEngine = renderingEngine;
+        return this.renderingEngine;
       }
-      this.renderingEngine = renderingEngine;
-      return this.renderingEngine;
+      ohifUtils.attempt.fail('ENGINE_CACHE_INVALID', 'engine_created');
     }
 
-    if (!renderingEngine || renderingEngine.hasBeenDestroyed) {
-      try {
-        this.renderingEngine = new RenderingEngine(RENDERING_ENGINE_ID);
-      } catch (err) {
-        ohifUtils.attempt.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+    this.renderingEngine = this.constructRenderingEngine();
+    return this.renderingEngine;
+  }
+
+  /**
+   * Construct the engine. When the GPU path throws (a WebGL context that could
+   * not be created), fall back to CPU rendering once and construct again, so
+   * the reader gets an image instead of a blank pane; an injected fault (the
+   * harness's V05/V06 drive) is rethrown as is, so the Retry card is exercised.
+   */
+  private constructRenderingEngine(): RenderingEngine {
+    if (ohifUtils.takeInjectedFault('engine_construct_once')) {
+      ohifUtils.attempt.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+      throw ohifUtils.injectedFault('Injected rendering engine construction failure');
+    }
+    try {
+      const engine = new RenderingEngine(RENDERING_ENGINE_ID);
+      ohifUtils.attempt.mark('engine_created');
+      ohifUtils.attempt.observeEngine(engine);
+      return engine;
+    } catch (err) {
+      ohifUtils.attempt.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+      if (getShouldUseCPURendering()) {
         throw err;
       }
-      ohifUtils.attempt.mark('engine_created');
-      ohifUtils.attempt.observeEngine(this.renderingEngine);
+      console.warn('[pacsai] GPU rendering engine could not be constructed; falling back to CPU rendering', err);
+      setUseCPURendering(true);
+      try {
+        const engine = new RenderingEngine(RENDERING_ENGINE_ID);
+        ohifUtils.attempt.mark('engine_created');
+        return engine;
+      } catch (err2) {
+        ohifUtils.attempt.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+        throw err2;
+      }
     }
+  }
 
-    return this.renderingEngine;
+  /**
+   * Drop the rendering engine so the next getRenderingEngine() constructs a
+   * fresh one (the Retry card, a lost WebGL context). Best effort: a half-built
+   * engine cannot be destroyed cleanly, and a fresh construction replaces it
+   * in the cache anyway.
+   */
+  public resetRenderingEngine(): void {
+    const engine = this.renderingEngine ?? getRenderingEngine(RENDERING_ENGINE_ID);
+    try {
+      engine?.destroy?.();
+    } catch (_) {
+      /* half-built or already gone */
+    }
+    this.renderingEngine = null;
   }
 
   /**

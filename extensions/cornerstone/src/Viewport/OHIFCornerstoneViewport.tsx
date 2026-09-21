@@ -10,6 +10,7 @@ import { setEnabledElement } from '../state';
 
 import './OHIFCornerstoneViewport.css';
 import CornerstoneOverlays from './Overlays/CornerstoneOverlays';
+import ViewportRecoveryCard, { VIEWER_RETRY_EVENT } from './Overlays/ViewportRecoveryCard';
 import CinePlayer from '../components/CinePlayer';
 import type { Types } from '@ohif/core';
 
@@ -87,6 +88,10 @@ const OHIFCornerstoneViewport = React.memo(
 
     const [scrollbarHeight, setScrollbarHeight] = useState('100px');
     const [enabledVPElement, setEnabledVPElement] = useState(null);
+    // B02 part 4: a failed open shows a card in this pane; Retry viewer bumps
+    // the token (for every viewport of the grid) and the load effect re-runs.
+    const [loadError, setLoadError] = useState<{ code: string; message?: string } | null>(null);
+    const [retryToken, setRetryToken] = useState(0);
     const elementRef = useRef() as React.MutableRefObject<HTMLDivElement>;
     const [appConfig] = useAppConfig();
 
@@ -249,6 +254,9 @@ const OHIFCornerstoneViewport = React.memo(
       }
 
       const loadViewportData = async () => {
+        if (ohifUtils.takeInjectedFault('viewport_load_once')) {
+          throw ohifUtils.injectedFault('Injected viewport load failure');
+        }
         const viewportData = await cornerstoneCacheService.createViewportData(
           displaySets,
           viewportOptions,
@@ -287,15 +295,44 @@ const OHIFCornerstoneViewport = React.memo(
         if (measurement) {
           cs3DTools.annotation.selection.setAnnotationSelected(measurement.uid);
         }
+        setLoadError(null);
       };
 
       loadViewportData().catch(err => {
-        // B01 (Rev 11 milestone 2): this rejection used to surface only as an
-        // unhandled promise in the console; now the attempt records it too.
+        // B01 recorded this rejection, which used to be an unhandled promise;
+        // B02 part 4 shows the pane's recovery card instead of a blank canvas.
         ohifUtils.attempt.fail('VIEWPORT_LOAD_FAILED');
         console.error(err);
+        setLoadError({
+          code: ohifUtils.isInjectedFault(err) ? 'INJECTED_FAULT' : 'VIEWPORT_LOAD_FAILED',
+          message: err instanceof Error ? err.message : String(err),
+        });
       });
-    }, [viewportOptions, displaySets, dataSource]);
+    }, [viewportOptions, displaySets, dataSource, retryToken]);
+
+    // Retry viewer (this card or any other pane's): rebuild and reload.
+    useEffect(() => {
+      const onRetry = () => setRetryToken(t => t + 1);
+      document.addEventListener(VIEWER_RETRY_EVENT, onRetry);
+      return () => document.removeEventListener(VIEWER_RETRY_EVENT, onRetry);
+    }, []);
+
+    // A lost WebGL context on this pane is an open that failed; offer Retry.
+    useEffect(() => {
+      const el = elementRef.current;
+      if (!el) {
+        return;
+      }
+      const onLost = () => setLoadError({ code: 'WEBGL_CONTEXT_LOST', message: 'The graphics context was lost.' });
+      el.addEventListener('webglcontextlost', onLost, true);
+      return () => el.removeEventListener('webglcontextlost', onLost, true);
+    }, [enabledVPElement]);
+
+    const retryViewer = useCallback(() => {
+      ohifUtils.attempt.retry();
+      cornerstoneViewportService.resetRenderingEngine?.();
+      document.dispatchEvent(new CustomEvent(VIEWER_RETRY_EVENT));
+    }, [cornerstoneViewportService]);
 
     /**
      * There are two scenarios for jump to click
@@ -407,6 +444,12 @@ const OHIFCornerstoneViewport = React.memo(
             viewportId={viewportId}
             servicesManager={servicesManager}
           />
+          {loadError && (
+            <ViewportRecoveryCard
+              error={loadError}
+              onRetry={retryViewer}
+            />
+          )}
         </div>
         {/* top offset of 24px to account for ViewportActionCorners.
             pointer-events-none: the Notification is now a compact right-anchored

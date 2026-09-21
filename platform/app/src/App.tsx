@@ -49,6 +49,25 @@ let commandsManager: CommandsManager,
   serviceProvidersManager: ServiceProvidersManager,
   hotkeysManager: HotkeysManager;
 
+let probedMax3DTextureSize: number | null | undefined;
+function probeMax3DTextureSize(): number | null {
+  if (probedMax3DTextureSize !== undefined) {
+    return probedMax3DTextureSize;
+  }
+  probedMax3DTextureSize = null;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2');
+    if (gl) {
+      probedMax3DTextureSize = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  } catch (_) {
+    /* no WebGL2: leave it null, Cornerstone decides */
+  }
+  return probedMax3DTextureSize;
+}
+
 function App({
   config = {
     /**
@@ -114,13 +133,11 @@ function App({
   const appConfigState = init.appConfig;
   const { routerBasename, modes, dataSources, oidc, showStudyList } = appConfigState;
 
-  // get the maximum 3D texture size
-  const canvas = document.createElement('canvas');
-  const gl = canvas.getContext('webgl2');
-
-  if (gl) {
-    const max3DTextureSize = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
-    appConfigState.max3DTextureSize = max3DTextureSize;
+  // get the maximum 3D texture size — probed once per document and the
+  // context released; this ran on every render of App and leaked a webgl2
+  // context each time (Rev 11 §13, B02 part 4).
+  if (appConfigState.max3DTextureSize === undefined) {
+    appConfigState.max3DTextureSize = probeMax3DTextureSize();
   }
 
   const {
