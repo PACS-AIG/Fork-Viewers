@@ -33,6 +33,7 @@ import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
 import { getStudyRole } from './priors/roleRegistry';
 import { configurePriorSwitching } from './priors/selectPrior';
 import initAttemptObservers from './attempt/initAttemptObservers';
+import installImagePoolHold from './startup/installImagePoolHold';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import { hangingIgnoresPriors } from './allinone/browsingMode';
@@ -281,4 +282,5 @@ export {
   formatDicomTimeHM,
   OverlayTextLine,
   overlayTextLine,
+  installImagePoolHold,
 };

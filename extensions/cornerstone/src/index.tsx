@@ -57,9 +57,17 @@ import { StudySummaryFromMetadata } from './components/StudySummaryFromMetadata'
 
 const { imageRetrieveMetadataProvider } = cornerstone.utilities;
 
-const Component = React.lazy(() => {
-  return import(/* webpackPrefetch: true */ './Viewport/OHIFCornerstoneViewport');
-});
+// Rev 11 milestone 2, B02 part 2. The viewport component lives in its own
+// chunk. `webpackPrefetch` is only an idle-time hint, so the chunk was really
+// requested when the grid first mounted — by which time the thumbnail and
+// prefetch image traffic was already running, and in four of six measured
+// opens the 117 KB chunk took 9–16 s to arrive while the grid waited for it.
+// Start the download when this module is evaluated (boot, before any image is
+// asked for); React.lazy resolves from the same in-flight import.
+const viewportModule = import(
+  /* webpackChunkName: "cornerstone-viewport" */ './Viewport/OHIFCornerstoneViewport'
+);
+const Component = React.lazy(() => viewportModule);
 
 const OHIFCornerstoneViewport = props => {
   return (

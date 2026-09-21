@@ -10,6 +10,7 @@ import {
   formatStudyDateTime,
   overlayTextLine,
 } from '@ohif/extension-pacsai-hp';
+import { installImagePoolHold } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
 import toolbarButtons from './toolbarButtons';
@@ -132,6 +133,7 @@ const modeHotkeys = [
 ];
 
 function modeFactory({ modeConfiguration }) {
+  let _imagePoolHold: ReturnType<typeof installImagePoolHold> = null;
   let _activatePanelTriggersSubscriptions = [];
   let _segPanelSubscription = null;
   let _segPanelAdded = false;
@@ -150,6 +152,10 @@ function modeFactory({ modeConfiguration }) {
       ohifUtils.attempt.begin(
         new URLSearchParams(window.location.search).get('StudyInstanceUIDs')?.split(',')[0]
       );
+      // B02 part 2: thumbnails and prefetch wait for the first grid render (or
+      // 8 s), so the first viewport's own images are not queued behind them.
+      _imagePoolHold?.release('mode_exit');
+      _imagePoolHold = installImagePoolHold();
       const {
         measurementService,
         toolbarService,
@@ -368,6 +374,8 @@ function modeFactory({ modeConfiguration }) {
 
       // B01: leaving the mode before the requested study rendered is a cancel.
       ohifUtils.attempt.cancelIfIncomplete('MODE_EXIT_BEFORE_RENDER');
+      _imagePoolHold?.release('mode_exit');
+      _imagePoolHold = null;
 
       _activatePanelTriggersSubscriptions.forEach(sub => sub.unsubscribe());
       _activatePanelTriggersSubscriptions = [];
