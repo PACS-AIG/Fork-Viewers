@@ -3,8 +3,7 @@ import { useEffect } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router';
 import CallbackPage from '../routes/CallbackPage';
 import SignoutCallbackComponent from '../routes/SignoutCallbackComponent';
-import LegacyClient from './legacyOIDCClient';
-import NextClient from './nextOIDCClient';
+import { getOidcUserManager } from './oidcUserManager';
 
 function _isAbsoluteUrl(url) {
   return url.includes('http://') || url.includes('https://');
@@ -25,29 +24,10 @@ function _makeAbsoluteIfNecessary(url, base_url) {
   return base_url + url;
 }
 
-const initUserManager = (oidc, routerBasename) => {
-  if (!oidc || !oidc.length) {
-    return;
-  }
-
-  const firstOpenIdClient = oidc[0];
-  const { protocol, host } = window.location;
-  const baseUri = `${protocol}//${host}${routerBasename}`;
-
-  const redirect_uri = firstOpenIdClient.redirect_uri || '/callback';
-  const silent_redirect_uri = firstOpenIdClient.silent_redirect_uri || '/silent-refresh.html';
-  const post_logout_redirect_uri = firstOpenIdClient.post_logout_redirect_uri || '/';
-
-  const openIdConnectConfiguration = Object.assign({}, firstOpenIdClient, {
-    redirect_uri: _makeAbsoluteIfNecessary(redirect_uri, baseUri),
-    silent_redirect_uri: _makeAbsoluteIfNecessary(silent_redirect_uri, baseUri),
-    post_logout_redirect_uri: _makeAbsoluteIfNecessary(post_logout_redirect_uri, baseUri),
-  });
-
-  const client = firstOpenIdClient.response_type === 'code' ? NextClient : LegacyClient;
-
-  return client(openIdConnectConfiguration);
-};
+// The client is built once per document in ./oidcUserManager (B02 part 3):
+// a new one per render used to start a new session monitor and renew timer
+// each time — the duplicate login-status frames.
+const initUserManager = (oidc, routerBasename) => getOidcUserManager(oidc, routerBasename);
 
 function LogoutComponent(props) {
   const { userManager } = props;
@@ -139,12 +119,37 @@ function OpenIdConnectRoutes({ oidc, routerBasename, userAuthenticationService }
   }, []);
 
   useEffect(() => {
-    userAuthenticationService.set({ enabled: true });
-
+    let cancelled = false;
     userAuthenticationService.setServiceImplementation({
       getAuthorizationHeader,
       handleUnauthenticated,
     });
+
+    // B02 part 3: a user this document already holds — from the pre-init
+    // silent sign-in, or from an earlier sign-in in this tab — is the user.
+    // Enabling the gate before that lookup sent every document to the
+    // identity provider, token in storage or not.
+    const enable = () => {
+      if (!cancelled) {
+        userAuthenticationService.set({ enabled: true });
+      }
+    };
+    if (userManager?.getUser) {
+      userManager
+        .getUser()
+        .then(user => {
+          if (!cancelled && user && !user.expired) {
+            userAuthenticationService.setUser(user);
+          }
+          enable();
+        })
+        .catch(enable);
+    } else {
+      enable();
+    }
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const oidcAuthority = oidc[0].authority;
