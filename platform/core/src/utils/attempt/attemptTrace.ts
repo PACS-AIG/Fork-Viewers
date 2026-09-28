@@ -38,6 +38,9 @@ export const READINESS_STAGES: readonly AttemptStage[] = ATTEMPT_STAGES.slice(0,
 /** Stages that may legitimately be recorded more than once per document. */
 const REPEATABLE: ReadonlySet<AttemptStage> = new Set<AttemptStage>(['failed', 'retry_requested']);
 
+/** The launcher's click: once per attempt, whichever of its documents asks. */
+const ONCE_PER_ATTEMPT: ReadonlySet<AttemptStage> = new Set<AttemptStage>(['launch']);
+
 /** Stages a Retry viewer re-runs; only these may record again after a retry. */
 export const RETRY_RERUN_STAGES: ReadonlySet<AttemptStage> = new Set<AttemptStage>([
   'engine_created',
@@ -142,6 +145,30 @@ export function studyRefFor(studyInstanceUid: string | null | undefined): string
   return uid ? `fnv1a64:${fnv1a64Hex(uid)}` : 'none';
 }
 
+/**
+ * For work that records its outcome when it settles (a viewport's load): read
+ * the trace's generation when the work starts; the returned check is false
+ * once the trace has moved to another generation. The recorder stamps every
+ * event with the CURRENT generation and study, so a load of study A that fails
+ * after an in-document switch to B would otherwise be recorded as B's failure.
+ * A generation that cannot be read (no trace yet) never blocks a record.
+ */
+export function pinGeneration(read: () => number | null | undefined): () => boolean {
+  const readSafely = (): number | null => {
+    try {
+      const generation = read();
+      return typeof generation === 'number' ? generation : null;
+    } catch (_) {
+      return null;
+    }
+  };
+  const pinned = readSafely();
+  return () => {
+    const now = readSafely();
+    return pinned === null || now === null || now === pinned;
+  };
+}
+
 export interface ReadinessVerdict {
   ok: boolean;
   /** Readiness stages with no ok=true event in this generation. */
@@ -189,6 +216,15 @@ export class AttemptTrace {
   private readonly deps: AttemptTraceDeps;
   private state: AttemptTraceState;
   private readonly listeners = new Set<(e: AttemptEvent) => void>();
+  /**
+   * Where this document's events start. Events carry no document index (the
+   * schema forbids extra fields), so the per-document dedupe window is the
+   * events appended since this construct: a resumed document (the OIDC
+   * callback, an F5) owes every stage again, whatever the earlier one recorded.
+   */
+  private eventsAtConstruct = 0;
+  /** Where the latest Retry viewer's window starts (the stages it re-runs). */
+  private eventsAtRetry = 0;
 
   constructor(deps: AttemptTraceDeps, init: AttemptTraceInit) {
     this.deps = deps;
@@ -203,6 +239,9 @@ export class AttemptTrace {
         documentLoads: stored.documentLoads + 1,
         events: Array.isArray(stored.events) ? stored.events.slice() : [],
       };
+      // Everything stored so far belongs to earlier documents. Set here, not
+      // on the first record: mark() asks before it records.
+      this.eventsAtConstruct = this.state.events.length;
     } else {
       this.state = {
         attemptId: init.attemptId,
@@ -254,14 +293,18 @@ export class AttemptTrace {
     return this.state.generation;
   }
 
+  /** An ok record of this stage and generation in ANY document of the attempt; needs() is this document's. */
   has(stage: AttemptStage, generation: number = this.state.generation): boolean {
     return this.state.events.some(
       e => e.stage === stage && e.generation === generation && e.ok
     );
   }
 
-  /** Record an ok=true stage. Once per stage, generation and document load. */
+  /** Record an ok=true stage. Once per stage, generation and document load (launch: per attempt). */
   mark(stage: AttemptStage, extra: Pick<AttemptEvent, 'containerSize'> = {}): AttemptEvent | null {
+    if (ONCE_PER_ATTEMPT.has(stage) && this.state.events.some(e => e.stage === stage && e.ok)) {
+      return null;
+    }
     if (!REPEATABLE.has(stage) && this.recordedInThisDocument(stage)) {
       return null;
     }
@@ -295,7 +338,7 @@ export class AttemptTrace {
     return event;
   }
 
-  /** True while an ok record of this stage is still owed in the current window. */
+  /** True while an ok record of this stage is still owed in this document's (or the retry's) window. */
   needs(stage: AttemptStage): boolean {
     return !this.recordedInThisDocument(stage, true);
   }
@@ -320,9 +363,8 @@ export class AttemptTrace {
   }
 
   private recordedInThisDocument(stage: AttemptStage, ok = true): boolean {
-    // Events carry no document index (the schema forbids extra fields), so
-    // the per-document window is the events appended since this construct;
-    // after a Retry viewer, the stages the retry re-runs count from the retry.
+    // This document's window (eventsAtConstruct); after a Retry viewer, the
+    // stages the retry re-runs count from the retry.
     const from = RETRY_RERUN_STAGES.has(stage)
       ? Math.max(this.eventsAtConstruct, this.eventsAtRetry)
       : this.eventsAtConstruct;
@@ -331,17 +373,9 @@ export class AttemptTrace {
       .some(e => e.stage === stage && e.generation === this.state.generation && e.ok === ok);
   }
 
-  private eventsAtConstruct = 0;
-  private eventsAtRetry = 0;
-
   private record(
     partial: Pick<AttemptEvent, 'stage' | 'ok'> & Partial<Pick<AttemptEvent, 'error' | 'containerSize'>>
   ): AttemptEvent {
-    if (this.eventsAtConstruct === 0 && this.state.events.length > 0 && this.state.documentLoads > 1) {
-      // First record in a resumed document: everything stored so far belongs
-      // to earlier documents.
-      this.eventsAtConstruct = this.state.events.length;
-    }
     const tMs = Math.max(0, Math.round(this.deps.now() - this.state.t0));
     const event: AttemptEvent = {
       attemptId: this.state.attemptId,

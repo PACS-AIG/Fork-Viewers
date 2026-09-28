@@ -3,6 +3,7 @@ import {
   READINESS_STAGES,
   AttemptTrace,
   fnv1a64Hex,
+  pinGeneration,
   studyRefFor,
   validateReadiness,
   ERROR_CODE,
@@ -186,6 +187,85 @@ describe('attempt trace: readiness rule', () => {
   });
 });
 
+describe('attempt trace: documents of one attempt', () => {
+  const BOOT_TO_TOOLS = [
+    'auth_ready',
+    'config_ready',
+    'runtime_ready',
+    'engine_created',
+    'container_sized',
+    'metadata_loaded',
+    'first_pixels',
+    'image_rendered_matching_study',
+    'tools_ready',
+  ];
+
+  it('re-records every stage in a document resumed after a full render (an F5)', () => {
+    const { deps } = memoryDeps();
+    const doc1 = new AttemptTrace(deps, init);
+    doc1.mark('launch');
+    BOOT_TO_TOOLS.forEach(s => doc1.mark(s));
+    expect(doc1.snapshot().complete).toBe(true);
+
+    // F5: the same URL (same attempt id) loads a second document, and
+    // sessionStorage still holds the trace of the first.
+    const doc2 = new AttemptTrace(deps, init);
+    expect(doc2.documentLoads).toBe(2);
+    // has() spans the documents; needs() is this document's.
+    expect(doc2.has('metadata_loaded')).toBe(true);
+    expect(doc2.needs('metadata_loaded')).toBe(true);
+    expect(doc2.needs('first_pixels')).toBe(true);
+    expect(doc2.needs('image_rendered_matching_study')).toBe(true);
+    // launch is the launcher's click: once per attempt.
+    expect(doc2.mark('launch')).toBeNull();
+    BOOT_TO_TOOLS.forEach(s => expect(doc2.mark(s)).not.toBeNull());
+    // … and once per document again from here.
+    expect(doc2.mark('first_pixels')).toBeNull();
+    expect(doc2.needs('image_rendered_matching_study')).toBe(false);
+    const stages = doc2.events().map(e => e.stage);
+    expect(stages.filter(s => s === 'launch')).toHaveLength(1);
+    expect(stages.filter(s => s === 'image_rendered_matching_study')).toHaveLength(2);
+    expect(stages.filter(s => s === 'metadata_loaded')).toHaveLength(2);
+    expect(doc2.snapshot().complete).toBe(true);
+  });
+
+  it('lets a resumed document record a failure the earlier one already recorded', () => {
+    const { deps } = memoryDeps();
+    const doc1 = new AttemptTrace(deps, init);
+    doc1.mark('launch');
+    expect(doc1.fail('AUTH_REQUIRED', 'auth_ready')).not.toBeNull();
+    expect(doc1.fail('AUTH_REQUIRED', 'auth_ready')).toBeNull(); // once per document
+    const doc2 = new AttemptTrace(deps, init);
+    expect(doc2.fail('AUTH_REQUIRED', 'auth_ready')).not.toBeNull();
+    expect(doc2.events().filter(e => e.stage === 'auth_ready')).toHaveLength(2);
+  });
+
+  it('keeps the cold sign-in flow: launch once in document 1, the rest in document 2', () => {
+    const { deps } = memoryDeps();
+    const doc1 = new AttemptTrace(deps, init);
+    doc1.mark('launch'); // then the redirect to the identity provider
+    const doc2 = new AttemptTrace(deps, { ...init, studyRef: 'none' }); // the callback URL
+    expect(doc2.documentLoads).toBe(2);
+    expect(doc2.has('launch', 1)).toBe(true); // attempt.init()'s guard
+    expect(doc2.mark('launch')).toBeNull();
+    BOOT_TO_TOOLS.forEach(s => expect(doc2.mark(s)).not.toBeNull());
+    expect(doc2.events().map(e => e.stage)).toEqual(['launch', ...BOOT_TO_TOOLS]);
+    expect(doc2.snapshot().complete).toBe(true);
+  });
+
+  it('does not count a fresh document as resumed', () => {
+    const { deps, store } = memoryDeps();
+    const doc1 = new AttemptTrace(deps, init);
+    doc1.mark('launch');
+    doc1.mark('metadata_loaded');
+    const other = new AttemptTrace(deps, { ...init, attemptId: 'a2' });
+    expect(store.state).toContain('"attemptId":"a2"');
+    expect(other.documentLoads).toBe(1);
+    expect(other.mark('launch')).not.toBeNull();
+    expect(other.mark('metadata_loaded')).not.toBeNull();
+  });
+});
+
 describe('attempt trace: retry and recovery', () => {
   it('lets a failed stage succeed later in the same document (the CPU fallback), and the latest event wins', () => {
     const { deps } = memoryDeps();
@@ -272,5 +352,45 @@ describe('attempt trace: dedupe and generations', () => {
     const trace = new AttemptTrace(deps, init);
     expect(trace.mark('launch').tMs).toBe(500);
     expect(trace.events().length).toBe(1);
+  });
+});
+
+describe('attempt trace: pinGeneration (a load that settles late)', () => {
+  it('is true while the trace stays in the generation the work started in', () => {
+    const { deps } = memoryDeps();
+    const trace = new AttemptTrace(deps, init);
+    const stillA = pinGeneration(() => trace.generation);
+    expect(stillA()).toBe(true);
+    trace.begin(studyRefFor('1.2.3')); // the same study again: no new generation
+    trace.retry(); // Retry viewer keeps the generation
+    expect(stillA()).toBe(true);
+    trace.begin(studyRefFor('9.9.9')); // an in-document switch
+    expect(stillA()).toBe(false);
+    expect(pinGeneration(() => trace.generation)()).toBe(true);
+  });
+
+  it('is what keeps a late failure of A off B: the trace stamps it with B', () => {
+    const { deps } = memoryDeps();
+    const trace = new AttemptTrace(deps, init);
+    const loadOfA = pinGeneration(() => trace.generation);
+    trace.begin(studyRefFor('9.9.9'));
+    const unguarded = trace.fail('VIEWPORT_LOAD_FAILED');
+    expect(unguarded.generation).toBe(2);
+    expect(unguarded.studyRef).toBe(studyRefFor('9.9.9'));
+    expect(loadOfA()).toBe(false);
+  });
+
+  it('never blocks a record when a generation cannot be read', () => {
+    let generation = null;
+    const unknownAtStart = pinGeneration(() => generation);
+    generation = 3;
+    expect(unknownAtStart()).toBe(true);
+    const unknownAtEnd = pinGeneration(() => generation);
+    generation = undefined;
+    expect(unknownAtEnd()).toBe(true);
+    const throwing = pinGeneration(() => {
+      throw new Error('no trace');
+    });
+    expect(throwing()).toBe(true);
   });
 });

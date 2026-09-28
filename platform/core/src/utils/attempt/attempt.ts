@@ -280,7 +280,10 @@ class BrowserAttemptRecorder implements AttemptRecorder {
   }
 
   cancelIfIncomplete(code: string): void {
-    if (!this.trace || this.trace.has('image_rendered_matching_study')) {
+    // needs(), not has(): has() spans the attempt's documents, so after an F5
+    // of a document that rendered, this one's mode exit before its own render
+    // would record nothing.
+    if (!this.trace || !this.trace.needs('image_rendered_matching_study')) {
       return;
     }
     this.trace.fail(code, 'cancelled');

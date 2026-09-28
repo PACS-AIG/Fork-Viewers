@@ -3,6 +3,7 @@ import { useResizeDetector } from 'react-resize-detector';
 import * as cs3DTools from '@cornerstonejs/tools';
 import { Enums, eventTarget, getEnabledElement } from '@cornerstonejs/core';
 import { MeasurementService, utils as ohifUtils } from '@ohif/core';
+import { pinGeneration } from '@ohif/core/src/utils/attempt/attemptTrace';
 import { AllInOneMenu, Notification, useViewportDialog } from '@ohif/ui';
 import type { Types as csTypes } from '@cornerstonejs/core';
 
@@ -253,6 +254,10 @@ const OHIFCornerstoneViewport = React.memo(
         viewportOptions.viewportType = STACK;
       }
 
+      // The attempt generation this load belongs to: a load that settles after
+      // an in-document switch to another study is not that study's failure.
+      const sameGeneration = pinGeneration(() => ohifUtils.attempt.snapshot()?.generation);
+
       const loadViewportData = async () => {
         if (ohifUtils.takeInjectedFault('viewport_load_once')) {
           throw ohifUtils.injectedFault('Injected viewport load failure');
@@ -301,7 +306,10 @@ const OHIFCornerstoneViewport = React.memo(
       loadViewportData().catch(err => {
         // B01 recorded this rejection, which used to be an unhandled promise;
         // B02 part 4 shows the pane's recovery card instead of a blank canvas.
-        ohifUtils.attempt.fail('VIEWPORT_LOAD_FAILED');
+        // Recorded only in the generation it started in (the card still shows).
+        if (sameGeneration()) {
+          ohifUtils.attempt.fail('VIEWPORT_LOAD_FAILED');
+        }
         console.error(err);
         setLoadError({
           code: ohifUtils.isInjectedFault(err) ? 'INJECTED_FAULT' : 'VIEWPORT_LOAD_FAILED',
