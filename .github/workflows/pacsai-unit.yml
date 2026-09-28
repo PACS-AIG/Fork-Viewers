@@ -23,5 +23,10 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile --network-timeout 600000
 
-      - name: PACS-AI extension unit tests
-        run: yarn jest extensions/pacsai-hp --ci
+      # The extension's suites, plus the in-frame sign-in (platform/app/src/utils:
+      # preInitSignIn, embedAuth, oidcUserManager) and the attempt trace
+      # (platform/core/src/utils/attempt), which the extension-only command
+      # never ran. Only the attempt folder of core's utils: the rest holds the
+      # upstream Queue.test.js, which is timing-flaky.
+      - name: PACS-AI unit tests
+        run: yarn jest extensions/pacsai-hp platform/app/src/utils platform/core/src/utils/attempt --ci
