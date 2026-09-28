@@ -11,23 +11,25 @@
  * nothing is dropped) and restored on the first grid render — or after a
  * timeout, so a viewer that never renders still gets its thumbnails.
  *
- * The pure half takes its pool and clock as parameters so it can be tested
- * without Cornerstone; installImagePoolHold() wires the real ones.
+ * Rev 11 milestone 6 part 2: the hold is one holder (`first_render`) on the
+ * image-pool governor, beside the embed bridge's `parked`, so neither can
+ * restore a pool the other still holds. Given only a pool, it makes a private
+ * governor (the behaviour on its own, as tested).
+ *
+ * The pure half takes its governor (or pool) and clock as parameters so it can
+ * be tested without Cornerstone; installImagePoolHold() wires the real ones.
  */
+import { createImagePoolGovernor, type GovernedPool, type ImagePoolGovernor } from './imagePoolGovernor';
 
 export type HeldPoolType = 'thumbnail' | 'prefetch';
+/** Not the `parked` hold's set (thumbnail only): until the first render, prefetch waits too. */
 export const HELD_POOL_TYPES: readonly HeldPoolType[] = ['thumbnail', 'prefetch'];
 export const DEFAULT_HOLD_TIMEOUT_MS = 8000;
+export const FIRST_RENDER_HOLD = 'first_render';
 
-export interface HoldablePool {
-  getMaxSimultaneousRequests(type: string): number | undefined;
-  setMaxSimultaneousRequests(type: string, max: number): void;
-  /** Cornerstone declares this protected; nothing else wakes a pool whose limit just rose. */
-  startGrabbing?: () => void;
-}
+export type HoldablePool = GovernedPool;
 
-export interface HoldDeps {
-  pool: HoldablePool;
+interface HoldTiming {
   /** Calls the listener once when the first grid viewport renders; returns an unsubscribe. */
   onFirstRender: (listener: () => void) => () => void;
   timeoutMs?: number;
@@ -35,30 +37,33 @@ export interface HoldDeps {
   clearTimeout?: (handle: unknown) => void;
 }
 
+export type HoldDeps = HoldTiming &
+  ({ governor: ImagePoolGovernor; pool?: undefined } | { pool: HoldablePool; governor?: undefined });
+
 export interface ImagePoolHold {
-  /** Restore the pools. Idempotent. `reason` is for the debug log only. */
+  /** Release this hold. Idempotent. `reason` is for the debug log only. */
   release(reason: 'first_render' | 'timeout' | 'mode_exit' | 'manual'): void;
   readonly released: boolean;
   readonly reason: string | null;
-  /** The limits that were in force before the hold, per pool. */
+  /** The limits the governor restores once no hold covers the pool, per pool. */
   readonly saved: Readonly<Record<string, number>>;
 }
 
 export function holdImagePoolsUntilFirstRender(deps: HoldDeps): ImagePoolHold {
   const {
-    pool,
     onFirstRender,
     timeoutMs = DEFAULT_HOLD_TIMEOUT_MS,
     setTimeout: schedule = (fn, ms) => globalThis.setTimeout(fn, ms),
     clearTimeout: cancel = handle => globalThis.clearTimeout(handle as number),
   } = deps;
+  const governor = deps.governor ? deps.governor : createImagePoolGovernor(deps.pool);
 
+  const releaseHold = governor.hold(FIRST_RENDER_HOLD, HELD_POOL_TYPES);
   const saved: Record<string, number> = {};
   for (const type of HELD_POOL_TYPES) {
-    const current = pool.getMaxSimultaneousRequests(type);
-    if (typeof current === 'number' && current > 0) {
-      saved[type] = current;
-      pool.setMaxSimultaneousRequests(type, 0);
+    const limit = governor.savedLimit(type);
+    if (typeof limit === 'number') {
+      saved[type] = limit;
     }
   }
 
@@ -73,9 +78,6 @@ export function holdImagePoolsUntilFirstRender(deps: HoldDeps): ImagePoolHold {
     }
     released = true;
     reason = why;
-    for (const type of Object.keys(saved)) {
-      pool.setMaxSimultaneousRequests(type, saved[type]);
-    }
     if (timer !== null) {
       cancel(timer);
       timer = null;
@@ -84,17 +86,13 @@ export function holdImagePoolsUntilFirstRender(deps: HoldDeps): ImagePoolHold {
       unsubscribe();
       unsubscribe = null;
     }
-    // Raising a limit does not wake the pool; the queued thumbnails would wait
-    // for the next addRequest. Wake it explicitly when the pool allows.
-    try {
-      pool.startGrabbing?.();
-    } catch (_) {
-      /* best effort */
-    }
+    // The governor restores (and wakes) a pool only when no other hold covers it.
+    releaseHold();
   };
 
   if (Object.keys(saved).length === 0) {
     // Nothing to hold (pools already at 0 or unknown): behave as released.
+    releaseHold();
     released = true;
     reason = 'manual';
   } else {

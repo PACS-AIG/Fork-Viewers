@@ -34,6 +34,8 @@ import { getStudyRole } from './priors/roleRegistry';
 import { configurePriorSwitching } from './priors/selectPrior';
 import initAttemptObservers from './attempt/initAttemptObservers';
 import installImagePoolHold from './startup/installImagePoolHold';
+import { installParkedPoolHold } from './startup/browserImagePoolGovernor';
+import { getEmbedBridge } from './embed/browser';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import { hangingIgnoresPriors } from './allinone/browsingMode';
@@ -115,6 +117,17 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     // B01 (Rev 11 milestone 2): derive the display-set, first-pixels, matching-
     // render and tools-ready stages of the viewer attempt trace.
     initAttemptObservers({ servicesManager });
+
+    // Rev 11 milestone 6 part 2: while the report window parks this frame (its
+    // Report mode), the thumbnail pool waits on the image-pool governor; the
+    // prefetch pool (which also streams volumes) and the interaction pool stay
+    // open, so a return to Images is immediate. Once per document — the
+    // bridge is installed by index.js before the boot, and a park that arrived
+    // before this ran is replayed to the listener.
+    const embedBridge = getEmbedBridge();
+    if (embedBridge) {
+      installParkedPoolHold(embedBridge.onVisibilityChange);
+    }
 
     // Cross-study relative scroll synchronizer used by the protocols.
     syncGroupService?.addSynchronizerType?.(SCROLL_SYNC_TYPE, createScrollSyncSynchronizer);

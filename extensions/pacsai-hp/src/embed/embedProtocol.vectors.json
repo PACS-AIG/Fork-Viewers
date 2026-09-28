@@ -1,0 +1,1111 @@
+{
+  "comment": "Golden vectors for the pacsai.embed/1 cross-frame protocol (Rev 11 milestone 6 part 2). The SAME bytes live in the viewer fork (extensions/pacsai-hp/src/embed/embedProtocol.vectors.json) and the app (src/app/lib/frameProtocol.vectors.json); each side pins their sha256 in its protocol module (EMBED_VECTORS_SHA256) and its tests fail on any difference. Change both copies and both constants together.",
+  "protocol": "pacsai.embed",
+  "version": 1,
+  "checkOrder": [
+    "not-object",
+    "wrong-protocol",
+    "wrong-version",
+    "bad-envelope",
+    "unknown-type",
+    "wrong-direction",
+    "bad-nonce",
+    "bad-generation",
+    "bad-payload"
+  ],
+  "parse": [
+    {
+      "name": "viewer.hello",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.hello",
+        "nonce": null,
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "viewer.ready shown",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "viewer.ready while parked, second generations",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 2,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 2,
+          "shown": false
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "viewer.error AUTH_REQUIRED",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.error",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "code": "AUTH_REQUIRED",
+          "stage": "auth_ready"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "viewer.error from the attempt trace",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.error",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "code": "VIEWPORT_LOAD_FAILED",
+          "stage": "failed"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "shell.hello",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.hello",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "shell.study",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "shell.study, an AE title with an inner space",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GW 1"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "shell.visibility parked",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.visibility",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "state": "parked",
+          "width": 903,
+          "height": 869
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "shell.visibility visible at zero size",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.visibility",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "state": "visible",
+          "width": 0,
+          "height": 0
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "nonce of 64 characters",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.hello",
+        "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "caseGeneration at the maximum",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 2147483647,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "null",
+      "direction": "toShell",
+      "raw": null,
+      "ok": false,
+      "reason": "not-object"
+    },
+    {
+      "name": "an array",
+      "direction": "toShell",
+      "raw": [],
+      "ok": false,
+      "reason": "not-object"
+    },
+    {
+      "name": "a string",
+      "direction": "toShell",
+      "raw": "hello",
+      "ok": false,
+      "reason": "not-object"
+    },
+    {
+      "name": "a boolean",
+      "direction": "toViewer",
+      "raw": true,
+      "ok": false,
+      "reason": "not-object"
+    },
+    {
+      "name": "an empty object",
+      "direction": "toShell",
+      "raw": {},
+      "ok": false,
+      "reason": "wrong-protocol"
+    },
+    {
+      "name": "protocol with a trailing space",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed ",
+        "version": 1,
+        "type": "viewer.hello",
+        "nonce": null,
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": false,
+      "reason": "wrong-protocol"
+    },
+    {
+      "name": "version 2",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 2,
+        "type": "viewer.hello",
+        "nonce": null,
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": false,
+      "reason": "wrong-version"
+    },
+    {
+      "name": "version as a string",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": "1",
+        "type": "viewer.hello",
+        "nonce": null,
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": false,
+      "reason": "wrong-version"
+    },
+    {
+      "name": "an extra envelope key",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        },
+        "origin": "https://evil.test"
+      },
+      "ok": false,
+      "reason": "bad-envelope"
+    },
+    {
+      "name": "no payload key",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1
+      },
+      "ok": false,
+      "reason": "bad-envelope"
+    },
+    {
+      "name": "an unknown type",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.bogus",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "unknown-type"
+    },
+    {
+      "name": "type as a number",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": 7,
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "unknown-type"
+    },
+    {
+      "name": "a shell message sent to the shell",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "wrong-direction"
+    },
+    {
+      "name": "a viewer message sent to the viewer",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "wrong-direction"
+    },
+    {
+      "name": "viewer.ready without a nonce",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": null,
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-nonce"
+    },
+    {
+      "name": "nonce of 21 characters",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "aaaaaaaaaaaaaaaaaaaaa",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-nonce"
+    },
+    {
+      "name": "nonce of 65 characters",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.hello",
+        "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": false,
+      "reason": "bad-nonce"
+    },
+    {
+      "name": "nonce with a plus sign",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonce+BCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-nonce"
+    },
+    {
+      "name": "viewer.hello carrying a nonce",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.hello",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": false,
+      "reason": "bad-nonce"
+    },
+    {
+      "name": "viewer.hello with generation 1",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.hello",
+        "nonce": null,
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "viewer.ready with generation 0",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "generation 1.5",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1.5,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "generation as a string",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": "1",
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "generation above the maximum",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 2147483648,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "generation negative",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": -1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "viewer.ready carrying a study UID",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true,
+          "studyInstanceUid": "1.2.3"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.ready shown as a string",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": "true"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.ready attemptGeneration 0",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 0,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.ready attemptId with a space",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att 1",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.ready attemptId of 129 characters",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.ready documentId too short",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "short",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.error code in prose",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.error",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "code": "auth required",
+          "stage": "auth_ready"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.error unknown stage",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.error",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "code": "AUTH_REQUIRED",
+          "stage": "rendering"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.study UID with letters",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.abc",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.study UID of 65 characters",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.222222222222222222222222222222222222222222222222222222222222222",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.study UID with an empty component",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1..2",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.study AE title with a leading space",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": " GW"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.study AE title of 65 characters",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.study",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.visibility hidden is not a state",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.visibility",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "state": "hidden",
+          "width": 903,
+          "height": 869
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.visibility negative width",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.visibility",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "state": "parked",
+          "width": -1,
+          "height": 869
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.visibility width above the bound",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.visibility",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "state": "parked",
+          "width": 100001,
+          "height": 869
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.visibility fractional height",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.visibility",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "state": "parked",
+          "width": 903,
+          "height": 1.5
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "payload null",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": null
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "payload an array",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.ready",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": []
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.hello without documentId",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.hello",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {}
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.hello payload with an extra key",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.hello",
+        "nonce": null,
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "href": "x"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    }
+  ],
+  "build": [
+    {
+      "name": "viewer.hello",
+      "type": "viewer.hello",
+      "fields": {
+        "nonce": null,
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"viewer.hello\",\"nonce\":null,\"caseGeneration\":0,\"payload\":{\"documentId\":\"docIdABCDEFGHIJKLMNOPQ\"}}"
+    },
+    {
+      "name": "viewer.ready",
+      "type": "viewer.ready",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"viewer.ready\",\"nonce\":\"nonceABCDEFGHIJKLMNOPq\",\"caseGeneration\":1,\"payload\":{\"documentId\":\"docIdABCDEFGHIJKLMNOPQ\",\"attemptId\":\"att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f\",\"attemptGeneration\":1,\"shown\":true}}"
+    },
+    {
+      "name": "viewer.error",
+      "type": "viewer.error",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "code": "AUTH_REQUIRED",
+          "stage": "auth_ready"
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"viewer.error\",\"nonce\":\"nonceABCDEFGHIJKLMNOPq\",\"caseGeneration\":1,\"payload\":{\"documentId\":\"docIdABCDEFGHIJKLMNOPQ\",\"code\":\"AUTH_REQUIRED\",\"stage\":\"auth_ready\"}}"
+    },
+    {
+      "name": "shell.hello",
+      "type": "shell.hello",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"shell.hello\",\"nonce\":\"nonceABCDEFGHIJKLMNOPq\",\"caseGeneration\":1,\"payload\":{\"documentId\":\"docIdABCDEFGHIJKLMNOPQ\"}}"
+    },
+    {
+      "name": "shell.study",
+      "type": "shell.study",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"shell.study\",\"nonce\":\"nonceABCDEFGHIJKLMNOPq\",\"caseGeneration\":1,\"payload\":{\"studyInstanceUid\":\"1.2.3.4.5\",\"gatewayAet\":\"GATEWAY_AET_1\"}}"
+    },
+    {
+      "name": "shell.visibility",
+      "type": "shell.visibility",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "state": "parked",
+          "width": 903,
+          "height": 869
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"shell.visibility\",\"nonce\":\"nonceABCDEFGHIJKLMNOPq\",\"caseGeneration\":1,\"payload\":{\"state\":\"parked\",\"width\":903,\"height\":869}}"
+    },
+    {
+      "name": "payload keys in another order come out in the canonical order",
+      "type": "shell.visibility",
+      "fields": {
+        "nonce": "nonce2_-abcdefghijklmn",
+        "caseGeneration": 3,
+        "payload": {
+          "height": 10,
+          "state": "visible",
+          "width": 20
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"shell.visibility\",\"nonce\":\"nonce2_-abcdefghijklmn\",\"caseGeneration\":3,\"payload\":{\"state\":\"visible\",\"width\":20,\"height\":10}}"
+    },
+    {
+      "name": "a bad nonce throws",
+      "type": "viewer.ready",
+      "fields": {
+        "nonce": "short",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "attemptId": "att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f",
+          "attemptGeneration": 1,
+          "shown": true
+        }
+      },
+      "throws": true
+    },
+    {
+      "name": "an unknown type throws",
+      "type": "viewer.bogus",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {}
+      },
+      "throws": true
+    },
+    {
+      "name": "an extra payload key throws",
+      "type": "shell.hello",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "extra": 1
+        }
+      },
+      "throws": true
+    },
+    {
+      "name": "generation 0 on a non-hello throws",
+      "type": "shell.study",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 0,
+        "payload": {
+          "studyInstanceUid": "1.2.3.4.5",
+          "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "throws": true
+    }
+  ]
+}

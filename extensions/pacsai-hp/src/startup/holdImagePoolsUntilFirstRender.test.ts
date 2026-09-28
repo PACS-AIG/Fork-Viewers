@@ -1,4 +1,5 @@
 import { holdImagePoolsUntilFirstRender, HELD_POOL_TYPES } from './holdImagePoolsUntilFirstRender';
+import { createImagePoolGovernor, PARKED_POOL_TYPES } from './imagePoolGovernor';
 
 function fakePool(limits: Record<string, number>) {
   const calls: Array<[string, number]> = [];
@@ -126,5 +127,47 @@ describe('holdImagePoolsUntilFirstRender', () => {
     expect(hold.released).toBe(true);
     expect(fp.calls).toEqual([]);
     expect(clock.timers).toEqual([]);
+  });
+
+  describe('on a shared governor (Rev 11 M6 part 2)', () => {
+    it('cannot restore a pool another holder still holds', () => {
+      const fp = fakePool({ interaction: 100, thumbnail: 75, prefetch: 25 });
+      const governor = createImagePoolGovernor(fp.pool);
+      const clock = fakeClock();
+      const signal = fakeSignal();
+      const hold = holdImagePoolsUntilFirstRender({ governor, onFirstRender: signal.onFirstRender, ...clock });
+      const releaseParked = governor.hold('parked', PARKED_POOL_TYPES);
+
+      signal.render();
+      expect(hold.released).toBe(true);
+      expect(hold.reason).toBe('first_render');
+      // prefetch was the first-render hold's alone; the thumbnails stay parked.
+      expect(fp.limits).toEqual({ interaction: 100, thumbnail: 0, prefetch: 25 });
+      expect(fp.grabs).toBe(1);
+      expect(governor.holds().map(h => h.reason)).toEqual(['parked']);
+
+      releaseParked();
+      expect(fp.limits).toEqual({ interaction: 100, thumbnail: 75, prefetch: 25 });
+      expect(fp.grabs).toBe(2);
+    });
+
+    it('is a real hold when it starts while another holder already has the pools at 0', () => {
+      const fp = fakePool({ thumbnail: 75, prefetch: 25 });
+      const governor = createImagePoolGovernor(fp.pool);
+      const releaseParked = governor.hold('parked', PARKED_POOL_TYPES);
+      const clock = fakeClock();
+      const signal = fakeSignal();
+      const hold = holdImagePoolsUntilFirstRender({ governor, onFirstRender: signal.onFirstRender, ...clock });
+      expect(hold.released).toBe(false);
+      expect(hold.saved).toEqual({ thumbnail: 75, prefetch: 25 });
+      expect(clock.timers).toHaveLength(1);
+
+      // Visible again before the first grid render: the first-render hold keeps both at 0.
+      releaseParked();
+      expect(fp.limits).toEqual({ thumbnail: 0, prefetch: 0 });
+      clock.fire();
+      expect(hold.reason).toBe('timeout');
+      expect(fp.limits).toEqual({ thumbnail: 75, prefetch: 25 });
+    });
   });
 });
