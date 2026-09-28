@@ -103,3 +103,96 @@ describe('preInitSignIn', () => {
     expect(stripBasename('/x', '/')).toBe('/x');
   });
 });
+
+// Rev 11 milestone 6 part 2: framed by the report window, the sign-in page
+// (which refuses to be framed) is never the answer.
+describe('preInitSignIn framed', () => {
+  function framedDeps(extra) {
+    const d = deps(extra);
+    const required = { count: 0 };
+    d.required = required;
+    d.deps = { ...d.deps, framed: true, onAuthRequired: () => required.count++ };
+    return d;
+  }
+
+  it('reports auth-required without a session: no redirect, no redirect target, the shell told once', async () => {
+    const d = framedDeps({ manager: { silent: 'reject' } });
+    expect(await preInitSignIn(d.deps)).toEqual({ action: 'auth-required' });
+    expect(d.fm.calls).toEqual(['getUser', 'signinSilent']);
+    expect(d.required.count).toBe(1);
+    expect(d.stored.has('ohif-redirect-to')).toBe(false);
+    expect(d.stored.size).toBe(0);
+    expect(d.ready.count).toBe(0);
+  });
+
+  it('reports auth-required after the silent guard timeout, and on an expired silent user', async () => {
+    const hung = framedDeps({ manager: { silent: 'hang' } });
+    expect(await preInitSignIn(hung.deps)).toEqual({ action: 'auth-required' });
+    expect(hung.fm.calls).not.toContain('signinRedirect');
+    expect(hung.required.count).toBe(1);
+
+    const expired = framedDeps({ manager: { stored: { expired: true }, silent: { expired: true } } });
+    expect(await preInitSignIn(expired.deps)).toEqual({ action: 'auth-required' });
+    expect(expired.fm.calls).toEqual(['getUser', 'signinSilent']);
+    expect(expired.required.count).toBe(1);
+  });
+
+  it('keeps the outcome when the notifier throws', async () => {
+    const d = framedDeps({ manager: { silent: 'reject' } });
+    d.deps.onAuthRequired = () => {
+      d.required.count++;
+      throw new Error('bridge gone');
+    };
+    expect(await preInitSignIn(d.deps)).toEqual({ action: 'auth-required' });
+    expect(d.required.count).toBe(1);
+    expect(d.fm.calls).not.toContain('signinRedirect');
+  });
+
+  it('continues with a stored user, as when not framed', async () => {
+    const d = framedDeps({ manager: { stored: { expired: false, access_token: 't' } } });
+    expect(await preInitSignIn(d.deps)).toEqual({ action: 'continue', via: 'storage' });
+    expect(d.fm.calls).toEqual(['getUser']);
+    expect(d.ready.count).toBe(1);
+    expect(d.required.count).toBe(0);
+  });
+
+  it('continues with a silent sign-in, as when not framed', async () => {
+    const d = framedDeps({ manager: { stored: { expired: true }, silent: { expired: false, access_token: 't2' } } });
+    expect(await preInitSignIn(d.deps)).toEqual({ action: 'continue', via: 'silent' });
+    expect(d.fm.calls).toEqual(['getUser', 'signinSilent']);
+    expect(d.ready.count).toBe(1);
+    expect(d.required.count).toBe(0);
+    expect(d.stored.size).toBe(0);
+  });
+
+  it('skips exactly as when not framed: no OIDC settings, the code flow, the auth routes, no client', async () => {
+    const noOidc = framedDeps({});
+    expect(await preInitSignIn({ ...noOidc.deps, oidc: undefined })).toEqual({ action: 'skip', reason: 'no-oidc' });
+    const codeFlow = framedDeps({});
+    expect(await preInitSignIn({ ...codeFlow.deps, oidc: [{ authority: 'a', client_id: 'c', response_type: 'code' }] })).toEqual({ action: 'skip', reason: 'code-flow' });
+    const noClient = framedDeps({});
+    expect(await preInitSignIn({ ...noClient.deps, getUserManager: () => undefined })).toEqual({ action: 'skip', reason: 'no-client' });
+    const skipped = [noOidc, codeFlow, noClient];
+    // (a classic loop: this package's babel/regenerator cannot compile for…of around await)
+    const authPaths = ['/viewer/callback', '/viewer/logout', '/viewer/login', '/viewer/silent-refresh.html', '/viewer/logout-redirect.html'];
+    for (let i = 0; i < authPaths.length; i++) {
+      const d = framedDeps({});
+      expect(await preInitSignIn({ ...d.deps, location: { pathname: authPaths[i], search: '' } })).toEqual({ action: 'skip', reason: 'auth-route' });
+      skipped.push(d);
+    }
+    for (let i = 0; i < skipped.length; i++) {
+      expect(skipped[i].fm.calls).toEqual([]);
+      expect(skipped[i].required.count).toBe(0);
+      expect(skipped[i].stored.size).toBe(0);
+    }
+  });
+
+  it('framed: false is the redirect path, unchanged', async () => {
+    const d = deps({ manager: { silent: 'reject' } });
+    const required = { count: 0 };
+    expect(await preInitSignIn({ ...d.deps, framed: false, onAuthRequired: () => required.count++ })).toEqual({ action: 'redirect' });
+    expect(d.fm.calls).toEqual(['getUser', 'signinSilent', 'signinRedirect']);
+    expect(required.count).toBe(0);
+    expect(JSON.parse(d.stored.get('ohif-redirect-to'))).toEqual({ pathname: '/viewer', search: '?StudyInstanceUIDs=1' });
+  });
+});

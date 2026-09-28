@@ -104,20 +104,6 @@ function App({
     run();
   }, []);
 
-  useEffect(() => {
-    if (init) {
-      const handleMessage = event => {
-        // Do something with event.data
-        console.log('[OHIF App] Received message:', event.data);
-      };
-  
-      window.addEventListener('message', handleMessage);
-      return () => {
-        window.removeEventListener('message', handleMessage);
-      };
-    }
-  }, [init]);
-
   if (!init) {
     return null;
   }

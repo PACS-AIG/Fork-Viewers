@@ -10,15 +10,21 @@
  * session, the redirect happens now — before the boot — so the first document
  * costs a few hundred milliseconds instead of a boot it throws away.
  *
+ * Framed by the report window (Rev 11 milestone 6 part 2), the sign-in page
+ * refuses to be framed: without a user the shell is told instead (see
+ * ./embedAuth).
+ *
  * Everything is injected so the decision is testable without a browser.
  */
 import type { OidcClientSettings, UserManagerLike } from './oidcUserManager';
+import { unauthenticatedAction } from './embedAuth';
 
 export type PreInitOutcome =
   | { action: 'skip'; reason: 'no-oidc' | 'code-flow' | 'auth-route' | 'no-client' }
   | { action: 'continue'; via: 'storage' | 'silent' }
   | { action: 'continue'; via: 'none'; reason: string }
-  | { action: 'redirect' };
+  | { action: 'redirect' }
+  | { action: 'auth-required' };
 
 export interface PreInitDeps {
   oidc: OidcClientSettings[] | undefined | null;
@@ -29,6 +35,10 @@ export interface PreInitDeps {
   /** Guard around signinSilent, on top of the client's own silentRequestTimeout. */
   silentTimeoutMs?: number;
   onAuthReady?: () => void;
+  /** Framed by the report window: never redirect, report auth-required instead. */
+  framed?: boolean;
+  /** Called once when a framed document has no user (records it and tells the shell). */
+  onAuthRequired?: () => void;
   setTimeout?: (fn: () => void, ms: number) => unknown;
   clearTimeout?: (handle: unknown) => void;
 }
@@ -54,6 +64,8 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
     storage,
     silentTimeoutMs = 10000,
     onAuthReady,
+    framed = false,
+    onAuthRequired,
     setTimeout: schedule = (fn, ms) => globalThis.setTimeout(fn, ms),
     clearTimeout: cancel = handle => globalThis.clearTimeout(handle as number),
   } = deps;
@@ -93,7 +105,19 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
     // login_required, a blocked frame, or the timeout: fall through
   }
 
-  // 3. No session: go to the sign-in page now, before any boot. The callback
+  // 3. No session, framed: the sign-in page refuses to be framed, so this
+  // document never goes there, and stores no target for a callback that will
+  // not come. The shell offers the sign-in in a top-level window.
+  if (unauthenticatedAction({ framed }) === 'report-auth-required') {
+    try {
+      onAuthRequired?.();
+    } catch (_) {
+      /* the outcome stands: a boot here could only fail to sign in */
+    }
+    return { action: 'auth-required' };
+  }
+
+  // 4. No session: go to the sign-in page now, before any boot. The callback
   // document navigates back to this path (router-relative, as the routes
   // store it).
   try {

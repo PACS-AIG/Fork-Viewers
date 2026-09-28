@@ -1,9 +1,12 @@
 import React from 'react';
 import { useEffect } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router';
+import { utils as ohifUtils } from '@ohif/core';
+import { getEmbedBridge, isFramed } from '@ohif/extension-pacsai-hp/src/embed/browser';
 import CallbackPage from '../routes/CallbackPage';
 import SignoutCallbackComponent from '../routes/SignoutCallbackComponent';
 import { getOidcUserManager } from './oidcUserManager';
+import { unauthenticatedAction } from './embedAuth';
 
 function _isAbsoluteUrl(url) {
   return url.includes('http://') || url.includes('https://');
@@ -29,6 +32,23 @@ function _makeAbsoluteIfNecessary(url, base_url) {
 // each time — the duplicate login-status frames.
 const initUserManager = (oidc, routerBasename) => getOidcUserManager(oidc, routerBasename);
 
+/**
+ * Rev 11 milestone 6 part 2 (pacsai.embed/1 §3): framed by the report window,
+ * the document never navigates to the sign-in page, which refuses to be
+ * framed. It records AUTH_REQUIRED and tells the shell, which offers the
+ * sign-in in a top-level window. True when it did so; not framed, false.
+ * Repeated calls are harmless: the trace records the stage once per document
+ * and the bridge posts the same error once.
+ */
+function reportAuthRequiredIfFramed(): boolean {
+  if (unauthenticatedAction({ framed: isFramed() }) !== 'report-auth-required') {
+    return false;
+  }
+  ohifUtils.attempt.fail('AUTH_REQUIRED', 'auth_ready');
+  getEmbedBridge()?.authRequired();
+  return true;
+}
+
 function LogoutComponent(props) {
   const { userManager } = props;
   localStorage.setItem('signoutEvent', 'true');
@@ -41,6 +61,9 @@ function LogoutComponent(props) {
 }
 
 function LoginComponent(userManager) {
+  if (reportAuthRequiredIfFramed()) {
+    return null;
+  }
   const queryParams = new URLSearchParams(location.search);
   const iss = queryParams.get('iss');
   const loginHint = queryParams.get('login_hint');
@@ -91,6 +114,9 @@ function OpenIdConnectRoutes({ oidc, routerBasename, userAuthenticationService }
   };
 
   const handleUnauthenticated = () => {
+    if (reportAuthRequiredIfFramed()) {
+      return null;
+    }
     // Note: Don't await the redirect. If you make this component async it
     // causes a react error before redirect as it returns a promise of a component rather than a component.
     userManager.signinRedirect();
