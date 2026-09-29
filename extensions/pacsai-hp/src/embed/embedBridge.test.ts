@@ -709,6 +709,26 @@ describe('viewer.error', () => {
     expect(h.bridge.getState().lastError).toEqual({ caseGeneration: 1, code: 'VIEWPORT_LOAD_FAILED', stage: 'failed' });
   });
 
+  it('reports the recovery a Retry viewer brings, even when another pane was ready before it', () => {
+    // Found live (N02-failure): one pane failed, another pane's image made the
+    // case ready, and the reader's Retry then recovered the failed pane — with
+    // no new viewer.ready, because no error had come since the last one.
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.trace.fail('VIEWPORT_LOAD_FAILED');
+    h.trace.mark(RENDER); // the other pane
+    expect(h.of('viewer.ready')).toHaveLength(1);
+    h.trace.mark('retry_requested');
+    expect(h.of('viewer.ready')).toHaveLength(1);
+    h.trace.mark(RENDER); // the retried pane
+    expect(h.of('viewer.ready')).toHaveLength(2);
+    // A Retry that fails again is reported again, although the code is the same.
+    h.trace.mark('retry_requested');
+    h.trace.fail('VIEWPORT_LOAD_FAILED');
+    expect(h.of('viewer.error')).toHaveLength(2);
+  });
+
   it('replays the bound generation in order at binding time: an error, then the recovery', () => {
     const h = setup();
     h.trace.fail('VIEWPORT_LOAD_FAILED');

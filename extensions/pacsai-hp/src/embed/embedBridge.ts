@@ -44,6 +44,7 @@ export const EMBED_HELLO_MAX_POSTS = 12;
 const RENDER_STAGE: EmbedStage = 'image_rendered_matching_study';
 /** A mode exit before the render (MODE_EXIT_BEFORE_RENDER): not a failure of the case. */
 const CANCELLED_STAGE: EmbedStage = 'cancelled';
+const RETRY_STAGE: EmbedStage = 'retry_requested';
 /** The trace's own fallback for a code that breaks its rule. */
 const FALLBACK_CODE = 'UNSPECIFIED_ERROR';
 
@@ -407,6 +408,12 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
     if (event.ok) {
       if (event.stage === RENDER_STAGE) {
         announceReady(event.attemptId);
+      } else if (event.stage === RETRY_STAGE) {
+        // Retry viewer opens a new episode: the render it brings is reported
+        // even when another pane was ready before it, and a failure after it
+        // is reported again although its code is the same.
+        readyPosted = false;
+        postedErrors.clear();
       }
       return;
     }
