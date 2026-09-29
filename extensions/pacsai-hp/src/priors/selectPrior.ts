@@ -5,6 +5,7 @@ import {
   getSiblingUIDs,
   setComparisonRoles,
 } from './roleRegistry';
+import { pinCase } from './pinCase';
 import syncAllInOneDisplaySets from '../allinone/buildAllInOneDisplaySet';
 import rehangForMode from '../allinone/rehang';
 
@@ -25,6 +26,10 @@ import rehangForMode from '../allinone/rehang';
  * The previously hung prior is left LOADED — it simply loses its hanging role
  * (so no selector matches it) and stays one click away in the rail and in this
  * switcher, which makes flipping back and forth between two priors instant.
+ *
+ * A pick is for the case it was made on (pinCase.ts): one that finishes after
+ * an in-document switch to another study writes no roles and re-hangs nothing,
+ * as the relevant-priors load does not.
  */
 
 const DEBUG = true;
@@ -47,7 +52,8 @@ export async function selectPrior({
   /** The prior it replaces — the clicked pane's study. Omit when only one prior is hung. */
   replaceUID?: string;
 }): Promise<void> {
-  const { displaySetService, uiNotificationService } = servicesManager?.services ?? {};
+  const { displaySetService, hangingProtocolService, uiNotificationService } =
+    servicesManager?.services ?? {};
   if (!studyInstanceUID || !displaySetService || !extensionManager || switching) {
     return;
   }
@@ -78,6 +84,18 @@ export async function selectPrior({
     autoClose: false,
   });
   const dismiss = () => notificationId && uiNotificationService?.hide?.(notificationId);
+  // The case this pick is for. Once it is not, the pick is dropped: its
+  // indicator goes and the next click is taken, and nothing is written.
+  const { stillTheCase, noLongerTheCase } = pinCase({
+    hangingProtocolService,
+    studyInstanceUID: hangingProtocolService?.getState?.()?.activeStudyUID,
+    job: `the picked prior ${studyInstanceUID} loaded`,
+    log,
+    onDrop: () => {
+      switching = false;
+      dismiss();
+    },
+  });
 
   try {
     log('selectPrior ->', { chosen: studyInstanceUID, replaced: replaceUID, nextPriors });
@@ -91,6 +109,10 @@ export async function selectPrior({
       studyInstanceUID,
       false
     );
+    // Before the roles: they are the CASE's, and they steer its hang.
+    if (noLongerTheCase('display sets')) {
+      return;
+    }
 
     setComparisonRoles({ priors: nextPriors, siblings: getSiblingUIDs() });
 
@@ -111,8 +133,8 @@ export async function selectPrior({
      */
     const warnIfNotHung = () => {
       const { viewportGridService } = servicesManager?.services ?? {};
-      // Superseded by a later switch (or the study changed) — not ours to judge.
-      if (!getPriorUIDs().includes(studyInstanceUID)) {
+      // Superseded by a later switch, or the case changed — not ours to judge.
+      if (!stillTheCase() || !getPriorUIDs().includes(studyInstanceUID)) {
         return;
       }
       const viewports = viewportGridService?.getState?.()?.viewports;
@@ -177,7 +199,9 @@ export async function selectPrior({
     const intervalMs = 750;
     const interval = setInterval(() => {
       elapsed += intervalMs;
-      if (priorReady()) {
+      if (noLongerTheCase('re-hang poll')) {
+        clearInterval(interval);
+      } else if (priorReady()) {
         clearInterval(interval);
         log('selected prior became matchable — re-hanging');
         reHang();
@@ -194,6 +218,9 @@ export async function selectPrior({
   } catch (error) {
     switching = false;
     console.warn('[pacsai-hp] selectPrior failed', error);
+    if (noLongerTheCase('failure')) {
+      return; // the previous case's failure is not the new case's to report
+    }
     uiNotificationService?.show?.({
       title: 'Comparison',
       message: 'Could not load the selected prior.',

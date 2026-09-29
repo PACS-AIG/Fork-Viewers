@@ -7,6 +7,7 @@ import {
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
 import { setAvailablePriors, setComparisonRoles, setSessionStudies } from './roleRegistry';
+import { pinCase } from './pinCase';
 import type { PriorOption } from './roleRegistry';
 import {
   getBodyPart,
@@ -45,6 +46,12 @@ import { getBrowsingMode, protocolIdForMode } from '../allinone/browsingMode';
  * Safe to call once per study open from `onSetupRouteComplete`; it no-ops for
  * non-comparison protocols, data sources without patient query, and patients
  * with no qualifying priors.
+ *
+ * A load is for ONE case, and it drops its result once that is no longer the
+ * case: after an in-document switch from A to B (the viewer's switchStudy —
+ * replaceState + popstate re-enters the mode, the attempt trace opens a new
+ * generation), A's load, still in flight, used to finish and run the protocol
+ * with A active and B as A's prior (milestone 6, V04). See pinCase.ts.
  */
 
 // Guards against concurrent re-entry for the same active study.
@@ -162,13 +169,25 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       loadingId = undefined;
     }
   };
+  // The case this load is for, pinned now and asked after every await and
+  // before every run(). Once it is not, the result is dropped (logged, the
+  // indicator dismissed): the caller returns, and the finally below releases
+  // the inFlight entry; the re-hang poll only stops, its load having returned
+  // (and released it) long before.
+  const { stillTheCase, noLongerTheCase } = pinCase({
+    hangingProtocolService,
+    studyInstanceUID: currentStudyUID,
+    job: 'its priors loaded',
+    log,
+    onDrop: dismissLoading,
+  });
 
   inFlight.add(currentStudyUID);
   try {
     const qidoForStudyUID = await dataSource.query.studies.search({
       studyInstanceUid: currentStudyUID,
     });
-    if (!qidoForStudyUID?.length) {
+    if (noLongerTheCase('study query') || !qidoForStudyUID?.length) {
       return;
     }
     const current = toStudyLike(qidoForStudyUID[0]);
@@ -176,9 +195,17 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
 
     let patientStudies: Array<Record<string, unknown>>;
     try {
-      patientStudies = (await getStudiesForPatientByMRN(dataSource, qidoForStudyUID)) ?? [];
+      // Two statements: in the test env (babel.config.js) the regenerator plugin
+      // runs before `??` is lowered and throws on an await inside one ('??' !== '||').
+      const found = await getStudiesForPatientByMRN(dataSource, qidoForStudyUID);
+      patientStudies = found ?? [];
     } catch (error) {
       console.warn('[pacsai-hp] Failed to query patient studies for priors', error);
+      return;
+    }
+    // Before anything is published: the session studies, the switchable priors
+    // and the comparison roles are the CASE's, and the roles steer its hang.
+    if (noLongerTheCase('patient query')) {
       return;
     }
     log(`patient query returned ${patientStudies.length} studies`);
@@ -441,6 +468,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         requestDisplaySetCreationForStudy(dataSource, displaySetService, uid, false)
       )
     );
+    if (noLongerTheCase('display sets')) {
+      return;
+    }
 
     // Re-hang with current (index 0) + priors + sibling regions, ordered. Matching
     // is role-/region-based (not order-based), so order only affects the prior
@@ -521,7 +551,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       const intervalMs = 750;
       const interval = setInterval(() => {
         elapsed += intervalMs;
-        if (currentReady()) {
+        if (noLongerTheCase('re-hang poll')) {
+          clearInterval(interval);
+        } else if (currentReady()) {
           clearInterval(interval);
           log('current study became matchable — re-hanging');
           reHang();
@@ -536,6 +568,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
   } catch (error) {
     dismissLoading();
     console.warn('[pacsai-hp] loadRelevantPriors failed', error);
+    if (!stillTheCase()) {
+      return; // the previous case's failure is not the new case's to report
+    }
     uiNotificationService?.show?.({
       title: 'Relevant priors',
       message: 'Could not load prior studies for comparison.',

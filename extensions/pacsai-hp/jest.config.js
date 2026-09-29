@@ -11,6 +11,12 @@ module.exports = {
   testMatch: ['<rootDir>/src/**/*.test.[jt]s?(x)'],
   moduleNameMapper: {
     ...base.moduleNameMapper,
+    // Before the catch-all, which maps any `@ohif/…` to a platform package's
+    // src and so could not load a file inside one (pinGeneration, imported as
+    // OHIFCornerstoneViewport imports it) or an extension (the priors loader's
+    // @ohif/extension-default) — not even as a mock.
+    '^@ohif/core/src/(.*)$': '<rootDir>/../../platform/core/src/$1',
+    '^@ohif/extension-default$': '<rootDir>/../default/src',
     '@ohif/(.*)': '<rootDir>/../../platform/$1/src',
   },
 };
