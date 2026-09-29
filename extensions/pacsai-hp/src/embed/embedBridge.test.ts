@@ -643,6 +643,47 @@ describe('viewer.error', () => {
     expect(h.of('viewer.error')).toHaveLength(1);
   });
 
+  it('carries the auth path\'s code: AUTH_UNAVAILABLE queued, deduped, sent once, not again on the replay', () => {
+    const h = setup();
+    h.trace.fail('AUTH_UNAVAILABLE', 'auth_ready'); // preInitSignIn records it …
+    h.bridge.authRequired('AUTH_UNAVAILABLE'); // … and tells the bridge
+    h.bridge.authRequired('AUTH_UNAVAILABLE');
+    expect(h.of('viewer.error')).toEqual([]);
+    expect(h.bridge.getState().pendingErrors).toEqual([{ code: 'AUTH_UNAVAILABLE', stage: 'auth_ready' }]);
+
+    h.shell.hello(2);
+    expect(h.of('viewer.error')).toEqual([
+      buildEmbedMessage('viewer.error', {
+        nonce: NONCE,
+        caseGeneration: 2,
+        payload: { documentId: DOC, code: 'AUTH_UNAVAILABLE', stage: 'auth_ready' },
+      }),
+    ]);
+    expect(h.bridge.getState()).toMatchObject({
+      pendingErrors: [],
+      lastError: { caseGeneration: 2, code: 'AUTH_UNAVAILABLE', stage: 'auth_ready' },
+    });
+
+    // Binding the study replays the trace's own AUTH_UNAVAILABLE: the same error, not sent again.
+    h.shell.study(2, A);
+    h.bridge.authRequired('AUTH_UNAVAILABLE');
+    expect(h.of('viewer.error')).toHaveLength(1);
+    // No code is AUTH_REQUIRED, as before: another error, sent once.
+    h.bridge.authRequired();
+    h.bridge.authRequired(undefined);
+    expect(h.of('viewer.error').map(m => m.payload.code)).toEqual(['AUTH_UNAVAILABLE', 'AUTH_REQUIRED']);
+  });
+
+  it('keeps an auth code that breaks the rule postable, as the trace does', () => {
+    const h = setup();
+    h.shell.hello();
+    h.bridge.authRequired('auth unavailable');
+    h.bridge.authRequired('A'.repeat(41));
+    expect(h.of('viewer.error').map(m => m.payload)).toEqual([
+      { documentId: DOC, code: 'UNSPECIFIED_ERROR', stage: 'auth_ready' },
+    ]);
+  });
+
   it('sends every failure of the bound attempt generation, once per code and stage until a ready', () => {
     const h = setup();
     h.shell.hello();

@@ -158,8 +158,13 @@ export interface EmbedBridgeState {
 export interface EmbedBridge {
   /** Hand every `message` event of the window to this (the adapter does, only while active). */
   receive(event: EmbedInboundEvent): void;
-  /** The auth paths (§3): sign-in is needed and the frame will not navigate to it. */
-  authRequired(): void;
+  /**
+   * The auth paths (§3): sign-in is needed and the frame will not navigate to
+   * it. `code` is AUTH_REQUIRED, or AUTH_UNAVAILABLE when the identity provider
+   * did not answer the frame's silent sign-in; a viewer.error on auth_ready,
+   * queued and deduped like every other.
+   */
+  authRequired(code?: string): void;
   /**
    * Suspend/resume. A listener added while parked is told 'parked' at once (a
    * visibility that arrived before its owner booted is not lost), then every
@@ -616,9 +621,9 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
 
   return {
     receive,
-    authRequired: () => {
+    authRequired: (code = 'AUTH_REQUIRED') => {
       if (!disposed) {
-        reportError('AUTH_REQUIRED', 'auth_ready');
+        reportError(code, 'auth_ready');
       }
     },
     onVisibilityChange: listener => {

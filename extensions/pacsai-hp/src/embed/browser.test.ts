@@ -228,9 +228,11 @@ describe('installEmbedBridge in a framed document', () => {
   it('passes the auth paths and the visibility through the handle', () => {
     const handle = browser.getEmbedBridge()!;
     handle.authRequired();
-    expect(postedOf('viewer.error').map(p => p.message.payload.code)).toEqual([
-      'STUDY_GATEWAY_MISMATCH',
-      'AUTH_REQUIRED',
+    handle.authRequired('AUTH_UNAVAILABLE');
+    expect(postedOf('viewer.error').map(p => p.message.payload)).toEqual([
+      { documentId, code: 'STUDY_GATEWAY_MISMATCH', stage: 'launch' },
+      { documentId, code: 'AUTH_REQUIRED', stage: 'auth_ready' },
+      { documentId, code: 'AUTH_UNAVAILABLE', stage: 'auth_ready' },
     ]);
     const states: string[] = [];
     handle.onVisibilityChange(state => states.push(state));

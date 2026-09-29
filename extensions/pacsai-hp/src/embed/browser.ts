@@ -28,8 +28,11 @@ import {
 export type { EmbedBridgeState, EmbedVisibilityState };
 
 export interface EmbedBridgeHandle {
-  /** The auth paths: sign-in is needed and the framed viewer will not navigate to it. */
-  authRequired(): void;
+  /**
+   * The auth paths: sign-in is needed and the framed viewer will not navigate
+   * to it. AUTH_REQUIRED unless `code` says otherwise (AUTH_UNAVAILABLE).
+   */
+  authRequired(code?: string): void;
   /** Told 'parked' at once when already parked, then on every change; returns an unsubscribe. */
   onVisibilityChange(listener: (state: EmbedVisibilityState) => void): () => void;
   getState(): EmbedBridgeState;
@@ -175,7 +178,7 @@ function create(): InstalledBridge {
     }
   });
   const handle: EmbedBridgeHandle = {
-    authRequired: () => bridge.authRequired(),
+    authRequired: code => bridge.authRequired(code),
     onVisibilityChange: listener => bridge.onVisibilityChange(listener),
     getState: () => bridge.getState(),
   };

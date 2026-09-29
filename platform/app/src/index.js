@@ -54,7 +54,8 @@ try {
  * the redirect happens now instead of after a boot that would be thrown away.
  * Any unexpected failure lets the boot proceed exactly as before. Framed by
  * the report window (milestone 6 part 2), the sign-in page refuses to be
- * framed: without a user the shell is told and this document does not boot.
+ * framed: without a user the shell is told and this document does not boot —
+ * AUTH_REQUIRED, or AUTH_UNAVAILABLE when the identity provider did not answer.
  */
 const routerBasename = String(viewerPublicUrl || '/').replace(/\/$/, '') || '/';
 const preInit = preInitSignIn({
@@ -71,9 +72,9 @@ const preInit = preInitSignIn({
   })(),
   onAuthReady: () => ohifUtils.attempt.mark('auth_ready'),
   framed: isFramed(),
-  onAuthRequired: () => {
-    ohifUtils.attempt.fail('AUTH_REQUIRED', 'auth_ready');
-    getEmbedBridge()?.authRequired();
+  onAuthRequired: code => {
+    ohifUtils.attempt.fail(code, 'auth_ready');
+    getEmbedBridge()?.authRequired(code);
   },
 }).catch(err => {
   console.warn('[pacsai] pre-init sign-in skipped:', err);
@@ -88,7 +89,7 @@ preInit.then(outcome => {
   if (outcome.action === 'auth-required') {
     // Framed without a user: the report window offers the sign-in in a
     // top-level window; nothing to boot here, only a notice in the frame.
-    writeAuthRequiredNotice(document, window.location.href);
+    writeAuthRequiredNotice(document, window.location.href, outcome.code);
     return;
   }
   return loadDynamicConfig(window.config).then(config_json => {

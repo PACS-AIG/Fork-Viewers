@@ -124,6 +124,23 @@ describe('the bridge over the real attempt trace, across an F5', () => {
     h.bridge.dispose();
   });
 
+  it('posts a framed AUTH_UNAVAILABLE once: told before the handshake, recorded by the trace, not again on the replay', () => {
+    const doc = loadDocument();
+    const h = bridgeOver(doc);
+    // index.js's onAuthRequired: the trace records the code, the bridge is told it.
+    expect(doc.fail('AUTH_UNAVAILABLE', 'auth_ready')).toMatchObject({ stage: 'auth_ready', ok: false, error: { code: 'AUTH_UNAVAILABLE' } });
+    h.bridge.authRequired('AUTH_UNAVAILABLE');
+    h.handshake();
+    expect(h.of('viewer.error')).toEqual([
+      buildEmbedMessage('viewer.error', {
+        nonce: NONCE,
+        caseGeneration: 1,
+        payload: { documentId: DOC, code: 'AUTH_UNAVAILABLE', stage: 'auth_ready' },
+      }),
+    ]);
+    h.bridge.dispose();
+  });
+
   it('posts no viewer.error from a signed-in reload for the first document’s AUTH_REQUIRED', () => {
     const doc1 = loadDocument();
     doc1.fail('AUTH_REQUIRED', 'auth_ready'); // framed without a user: nothing boots
