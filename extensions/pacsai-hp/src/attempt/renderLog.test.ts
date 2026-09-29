@@ -7,17 +7,18 @@ import {
 } from './renderLog';
 
 describe('createRenderLog', () => {
-  it('records each render with its time, generation and deduplicated refs, oldest first', () => {
+  it('records each render with its time, generation, deduplicated refs and whether it showed an image, oldest first', () => {
     const log = createRenderLog();
-    log.record({ tMs: 1234.4, generation: 1, studyRefs: ['fnv1a64:aa', 'fnv1a64:aa', 'fnv1a64:bb'], activeRef: 'fnv1a64:aa' });
-    log.record({ tMs: 1300.6, generation: 2, studyRefs: ['fnv1a64:bb'], activeRef: 'fnv1a64:bb' });
+    log.record({ tMs: 1234.4, generation: 1, studyRefs: ['fnv1a64:aa', 'fnv1a64:aa', 'fnv1a64:bb'], activeRef: 'fnv1a64:aa', image: true });
+    log.record({ tMs: 1300.6, generation: 2, studyRefs: ['fnv1a64:bb'], activeRef: 'fnv1a64:bb', image: false });
     log.record({ tMs: 1400, generation: null, studyRefs: [] });
-    log.record({ tMs: Number.NaN, studyRefs: [], activeRef: 42 as unknown as string });
+    log.record({ tMs: Number.NaN, studyRefs: [], activeRef: 42 as unknown as string, image: 1 as unknown as boolean });
     expect(log.entries()).toEqual([
-      { tMs: 1234, generation: 1, studyRefs: ['fnv1a64:aa', 'fnv1a64:bb'], activeRef: 'fnv1a64:aa' },
-      { tMs: 1301, generation: 2, studyRefs: ['fnv1a64:bb'], activeRef: 'fnv1a64:bb' },
-      { tMs: 1400, generation: null, studyRefs: [], activeRef: null },
-      { tMs: 0, generation: null, studyRefs: [], activeRef: null },
+      { tMs: 1234, generation: 1, studyRefs: ['fnv1a64:aa', 'fnv1a64:bb'], activeRef: 'fnv1a64:aa', image: true },
+      { tMs: 1301, generation: 2, studyRefs: ['fnv1a64:bb'], activeRef: 'fnv1a64:bb', image: false },
+      // Unsaid or not a boolean: not an image.
+      { tMs: 1400, generation: null, studyRefs: [], activeRef: null, image: false },
+      { tMs: 0, generation: null, studyRefs: [], activeRef: null, image: false },
     ]);
   });
 
@@ -36,13 +37,14 @@ describe('createRenderLog', () => {
   it('hands out copies: a reader cannot change the log', () => {
     const log = createRenderLog(3);
     const refs = ['r1'];
-    log.record({ tMs: 1, generation: 1, studyRefs: refs });
+    log.record({ tMs: 1, generation: 1, studyRefs: refs, image: true });
     refs.push('r2');
     const first = log.entries();
     first[0].studyRefs.push('tampered');
     first[0].generation = 99;
+    first[0].image = false;
     first.pop();
-    expect(log.entries()).toEqual([{ tMs: 1, generation: 1, studyRefs: ['r1'], activeRef: null }]);
+    expect(log.entries()).toEqual([{ tMs: 1, generation: 1, studyRefs: ['r1'], activeRef: null, image: true }]);
   });
 });
 
@@ -62,8 +64,8 @@ describe('installRenderLogHook', () => {
     expect(RENDER_LOG_VERSION).toBe(1);
     expect(Object.keys(hook).sort()).toEqual(['entries', 'version']);
 
-    log.record({ tMs: 5, generation: 1, studyRefs: ['r'] });
-    expect(hook.entries()).toEqual([{ tMs: 5, generation: 1, studyRefs: ['r'], activeRef: null }]);
+    log.record({ tMs: 5, generation: 1, studyRefs: ['r'], image: true });
+    expect(hook.entries()).toEqual([{ tMs: 5, generation: 1, studyRefs: ['r'], activeRef: null, image: true }]);
 
     // A second install (another module copy) cannot replace it.
     expect(installRenderLogHook(target, createRenderLog())).toBe(false);

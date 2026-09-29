@@ -2,7 +2,9 @@
  * The render log for the harness (Rev 11 milestone 6 part 2, V04): the last
  * grid viewport renders, each with the attempt generation current at that
  * moment and the studies the rendered viewport shows — as the trace's study
- * refs (a hash of the UID), never the UIDs.
+ * refs (a hash of the UID), never the UIDs — and whether it showed an image
+ * at all (`image`; version 1 gained it additively, so a reader of an older
+ * build sees no such field).
  *
  * The attempt trace stamps every event with the CURRENT generation's study, so
  * after an in-document switch from A to B it cannot tell whether an image of A
@@ -30,6 +32,12 @@ export interface RenderLogEntry {
    * render legitimately as B's prior pane — then activeRef is B's.
    */
   activeRef: string | null;
+  /**
+   * Whether the viewport showed decoded image data. Cornerstone renders a
+   * grid viewport before anything is decoded; those renders are logged with
+   * false, and they are neither first_pixels nor a rendered study.
+   */
+  image: boolean;
 }
 
 export interface RenderLog {
@@ -38,6 +46,7 @@ export interface RenderLog {
     generation?: number | null;
     studyRefs: readonly string[];
     activeRef?: string | null;
+    image?: boolean;
   }): void;
   /** A copy, oldest first. */
   entries(): RenderLogEntry[];
@@ -52,12 +61,13 @@ export interface RenderLogHook {
 export function createRenderLog(capacity: number = RENDER_LOG_CAPACITY): RenderLog {
   const ring: RenderLogEntry[] = [];
   return {
-    record: ({ tMs, generation, studyRefs, activeRef }) => {
+    record: ({ tMs, generation, studyRefs, activeRef, image }) => {
       ring.push({
         tMs: Number.isFinite(tMs) ? Math.round(tMs) : 0,
         generation: typeof generation === 'number' ? generation : null,
         studyRefs: Array.from(new Set(studyRefs)),
         activeRef: typeof activeRef === 'string' ? activeRef : null,
+        image: image === true,
       });
       if (ring.length > capacity) {
         ring.splice(0, ring.length - capacity);
@@ -69,6 +79,7 @@ export function createRenderLog(capacity: number = RENDER_LOG_CAPACITY): RenderL
         generation: e.generation,
         studyRefs: e.studyRefs.slice(),
         activeRef: e.activeRef,
+        image: e.image,
       })),
   };
 }

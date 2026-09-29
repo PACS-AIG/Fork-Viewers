@@ -40,16 +40,17 @@ function fakeClock() {
 }
 
 function fakeSignal() {
-  let fire: (() => void) | null = null;
+  let fire: ((reason?: 'first_render' | 'volume_render') => void) | null = null;
   let unsubscribed = 0;
   return {
-    onFirstRender: (listener: () => void) => {
+    onFirstRender: (listener: (reason?: 'first_render' | 'volume_render') => void) => {
       fire = listener;
       return () => {
         unsubscribed++;
       };
     },
     render: () => fire?.(),
+    volumeRender: () => fire?.('volume_render'),
     get unsubscribed() {
       return unsubscribed;
     },
@@ -71,6 +72,23 @@ describe('holdImagePoolsUntilFirstRender', () => {
     expect(hold.reason).toBe('first_render');
     expect(calls.filter(([t]) => t === 'interaction')).toEqual([]);
     expect(HELD_POOL_TYPES).toEqual(['thumbnail', 'prefetch']);
+  });
+
+  it('releases with the reason its signal names: a volume viewport’s first render (volume_render)', () => {
+    const { pool, limits } = fakePool({ interaction: 100, thumbnail: 75, prefetch: 25 });
+    const clock = fakeClock();
+    const signal = fakeSignal();
+    const hold = holdImagePoolsUntilFirstRender({
+      pool,
+      onFirstRender: signal.onFirstRender,
+      ...clock,
+    });
+    signal.volumeRender();
+    expect(hold.released).toBe(true);
+    expect(hold.reason).toBe('volume_render');
+    expect(limits).toEqual({ interaction: 100, thumbnail: 75, prefetch: 25 });
+    expect(clock.timers[0].cancelled).toBe(true);
+    expect(signal.unsubscribed).toBe(1);
   });
 
   it('wakes the pool on release (raising a limit alone leaves queued requests asleep)', () => {
