@@ -135,22 +135,43 @@ function candidateParentOrigins(allowed: readonly string[]): string[] {
 /** The params a switch keeps from the document's query: the attempt's own (§6). */
 const KEPT_ATTEMPT_PARAMS = ['attempt', 'attemptT0'];
 
+/** The URL this document was opened with, as a switch reads it (once, at install). */
+interface OpenedRoute {
+  /** Its path when it named a study — the case's viewer address, a Mode route; else null. */
+  pathname: string | null;
+  query: URLSearchParams;
+}
+
+function openedRoute(): OpenedRoute {
+  return {
+    pathname: routeStudyUid() ? window.location.pathname : null,
+    query: new URLSearchParams(window.location.search),
+  };
+}
+
 /**
- * Open another study inside this document: the query is REBUILT for the case
- * — StudyInstanceUIDs, the document's gatewayAET values (the data sources
- * were built for them), attempt and attemptT0, nothing else, so the previous
- * case's SeriesInstanceUIDs, initial series or image, hanging protocol, stage
- * and token never reach the next one — then a popstate lets react-router's
- * BrowserRouter re-read the location, so the Mode route re-enters the mode and
- * onModeEnter's attempt.begin opens a new generation. Before the boot there is
- * no router yet; the boot opens the new URL.
+ * Open another study inside this document: the URL is REBUILT for the case —
+ * the Mode route the document was opened on, and a query of StudyInstanceUIDs,
+ * the document's gatewayAET values (the data sources were built for them),
+ * attempt and attemptT0, nothing else, so the previous case's
+ * SeriesInstanceUIDs, initial series or image, hanging protocol, stage and
+ * token never reach the next one, and nor does where OHIF navigated it (the
+ * not-found page an empty study query sends it to, which drops the query too:
+ * the attempt's params are then the ones it was opened with). Then a popstate
+ * lets react-router's BrowserRouter re-read the location, so the Mode route
+ * re-enters the mode and onModeEnter's attempt.begin opens a new generation.
+ * Before the boot there is no router yet; the boot opens the new URL.
  */
 function switchStudy(
   studyInstanceUid: string,
   gatewayAet: string,
-  documentGateways: readonly string[]
+  documentGateways: readonly string[],
+  opened: OpenedRoute
 ): void {
   const url = new URL(window.location.href);
+  if (opened.pathname) {
+    url.pathname = opened.pathname;
+  }
   const query = new URLSearchParams();
   query.set('StudyInstanceUIDs', studyInstanceUid);
   const gateways = documentGateways.includes(gatewayAet)
@@ -158,7 +179,7 @@ function switchStudy(
     : [...documentGateways, gatewayAet];
   gateways.forEach(gateway => query.append('gatewayAET', gateway));
   for (const key of KEPT_ATTEMPT_PARAMS) {
-    const value = url.searchParams.get(key);
+    const value = url.searchParams.get(key) ?? opened.query.get(key);
     if (value !== null) {
       query.set(key, value);
     }
@@ -260,8 +281,9 @@ function inert(reason: EmbedInactiveReason, allowed: readonly string[] = []): In
 function create(): InstalledBridge {
   const allowedOrigins = normalizeEmbedOrigins((window as EmbedWindow).PACSAI_EMBED_ORIGINS);
   const framed = isFramed();
-  // This document's gateways, as it was opened (a switch keeps them).
-  const gateways = new URLSearchParams(window.location.search).getAll('gatewayAET');
+  // This document's route and gateways, as it was opened (a switch keeps them).
+  const opened = openedRoute();
+  const gateways = opened.query.getAll('gatewayAET');
   const bridge = createEmbedBridge({
     allowedOrigins,
     framed,
@@ -274,7 +296,7 @@ function create(): InstalledBridge {
     studyRefFor: uid => utils.studyRefFor(uid),
     routeStudyUid,
     documentGateways: () => gateways,
-    switchStudy: (uid, gatewayAet) => switchStudy(uid, gatewayAet, gateways),
+    switchStudy: (uid, gatewayAet) => switchStudy(uid, gatewayAet, gateways, opened),
     scheduler: {
       setTimeout: (fn, ms) => window.setTimeout(fn, ms),
       clearTimeout: handle => window.clearTimeout(handle as number),

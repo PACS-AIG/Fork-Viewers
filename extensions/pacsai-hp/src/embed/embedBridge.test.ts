@@ -1071,20 +1071,34 @@ describe('failures while a switch is unbound (m6-case-switch.md §6)', () => {
     expect(errors(h)).toHaveLength(2);
   });
 
-  it('replays boot failures, never an earlier document’s, and forwards later ones while unbound', () => {
+  it('replays boot failures, never an earlier document’s, then answers that the document cannot switch', () => {
     const h = setup({}, { earlierDocument: t => t.fail('AUTH_REQUIRED', 'auth_ready') });
-    h.trace.fail('CONFIG_NO_DATASOURCES', 'config_ready');
+    h.trace.fail('CONFIG_NO_DATASOURCES', 'config_ready'); // no data source: no case opens here
     h.shell.hello();
     h.shell.study(1, B); // a switch before the boot
-    expect(errors(h)).toEqual([[1, 'CONFIG_NO_DATASOURCES', 'config_ready']]);
-    h.shell.study(2, C);
-    h.trace.fail('MODE_EXIT_BEFORE_RENDER', 'cancelled'); // never a failure
-    h.trace.fail('AUTH_UNAVAILABLE', 'auth_ready');
     expect(errors(h)).toEqual([
       [1, 'CONFIG_NO_DATASOURCES', 'config_ready'],
-      [2, 'CONFIG_NO_DATASOURCES', 'config_ready'],
-      [2, 'AUTH_UNAVAILABLE', 'auth_ready'],
+      [1, 'STUDY_SWITCH_FAILED', 'launch'],
     ]);
+    h.shell.study(2, C);
+    expect(errors(h)).toEqual([
+      [1, 'CONFIG_NO_DATASOURCES', 'config_ready'],
+      [1, 'STUDY_SWITCH_FAILED', 'launch'],
+      [2, 'CONFIG_NO_DATASOURCES', 'config_ready'],
+      [2, 'STUDY_SWITCH_FAILED', 'launch'],
+    ]);
+  });
+
+  it('forwards this document’s later failures while a switch is unbound, never a mode exit', () => {
+    const h = setup({}, { earlierDocument: t => t.fail('AUTH_REQUIRED', 'auth_ready') });
+    h.shell.hello();
+    h.shell.study(1, B); // a switch before the boot: nothing has failed in this document
+    h.shell.study(2, C);
+    expect(errors(h)).toEqual([]);
+    h.trace.fail('MODE_EXIT_BEFORE_RENDER', 'cancelled'); // never a failure
+    h.trace.fail('AUTH_UNAVAILABLE', 'auth_ready');
+    expect(errors(h)).toEqual([[2, 'AUTH_UNAVAILABLE', 'auth_ready']]);
+    expect(h.bridge.getState()).toMatchObject({ pendingStudyRef: ref(C), switchTimeout: 'off' });
   });
 
   it('never carries a case failure of the previous study to the new case generation, replayed or live', () => {
@@ -1107,6 +1121,157 @@ describe('failures while a switch is unbound (m6-case-switch.md §6)', () => {
     h.trace.mark(RENDER);
     expect(h.of('viewer.ready').map(m => m.caseGeneration)).toEqual([1, 2]);
     expect(errors(h)).toHaveLength(1);
+  });
+});
+
+describe('a document whose boot failed answers a switch at once (STUDY_SWITCH_FAILED)', () => {
+  const errors = (h: ReturnType<typeof setup>) =>
+    h.of('viewer.error').map(m => [m.caseGeneration, m.payload.code, m.payload.stage]);
+  const switchFailed = (caseGeneration: number) =>
+    buildEmbedMessage('viewer.error', {
+      nonce: NONCE,
+      caseGeneration,
+      payload: { documentId: DOC, code: 'STUDY_SWITCH_FAILED', stage: 'launch' },
+    });
+  /** Nothing waits in this document for the case any more: no deadline, no timer. */
+  const answered = (h: ReturnType<typeof setup>, caseGeneration: number) => {
+    expect(h.bridge.getState()).toMatchObject({
+      caseGeneration,
+      boundAttemptGeneration: null,
+      pendingStudyRef: null,
+      switchTimeout: 'off',
+      lastError: { caseGeneration, code: 'STUDY_SWITCH_FAILED', stage: 'launch' },
+    });
+    expect(h.scheduler.pending()).toEqual([]);
+  };
+
+  it('init failed before the runtime (APP_INIT_FAILED, no router): answered at the switch, not left awaiting a runtime', () => {
+    const h = setup();
+    h.trace.mark('auth_ready');
+    h.trace.mark('config_ready');
+    h.trace.fail('APP_INIT_FAILED'); // App.tsx: appInit rejected, so no Mode route ever mounts
+    h.shell.hello();
+    h.shell.study(1, A); // the document's own case: the trace's own code, as in slice 1
+    expect(errors(h)).toEqual([[1, 'APP_INIT_FAILED', 'failed']]);
+    h.shell.study(2, B);
+    expect(h.of('viewer.error')[1]).toEqual(switchFailed(2));
+    expect(errors(h)).toHaveLength(2);
+    answered(h, 2);
+    // Told again (a second init failure): the case is answered once.
+    h.trace.fail('APP_INIT_FAILED');
+    expect(errors(h)).toHaveLength(2);
+  });
+
+  it('init failed after the runtime (the modes did not load): answered at the switch, not after 20 s', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    BOOT.forEach(stage => h.trace.mark(stage));
+    h.trace.fail('APP_INIT_FAILED');
+    h.shell.study(2, B);
+    expect(errors(h)).toEqual([
+      [1, 'APP_INIT_FAILED', 'failed'],
+      [2, 'STUDY_SWITCH_FAILED', 'launch'],
+    ]);
+    answered(h, 2);
+  });
+
+  it('a boot that fails while the switch waits for it is answered when it fails, before or after the runtime', () => {
+    // Before the runtime: the switch was waiting for a runtime_ready that will not come.
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.shell.study(2, B);
+    expect(h.bridge.getState().switchTimeout).toBe('awaiting-runtime');
+    h.trace.mark('auth_ready');
+    h.trace.fail('APP_INIT_FAILED');
+    expect(h.of('viewer.error')).toEqual([switchFailed(2)]);
+    answered(h, 2);
+
+    // After it: the 20 s clock was counting.
+    const h2 = setup();
+    h2.shell.hello();
+    h2.shell.study(1, A);
+    BOOT.forEach(stage => h2.trace.mark(stage));
+    h2.shell.study(2, B);
+    expect(h2.bridge.getState().switchTimeout).toBe('armed');
+    h2.trace.fail('APP_INIT_FAILED');
+    expect(h2.of('viewer.error')).toEqual([switchFailed(2)]);
+    answered(h2, 2);
+
+    // The config came back with no data source: forwarded as itself, then answered.
+    const h3 = setup();
+    h3.shell.hello();
+    h3.shell.study(1, A);
+    h3.shell.study(2, B);
+    h3.trace.mark('auth_ready');
+    h3.trace.fail('CONFIG_NO_DATASOURCES', 'config_ready');
+    expect(errors(h3)).toEqual([
+      [2, 'CONFIG_NO_DATASOURCES', 'config_ready'],
+      [2, 'STUDY_SWITCH_FAILED', 'launch'],
+    ]);
+    answered(h3, 2);
+  });
+
+  it('answers a case once: an init that fails after the deadline fired adds no second switch code', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    BOOT.forEach(stage => h.trace.mark(stage));
+    h.shell.study(2, B);
+    h.scheduler.tick(); // 20 s: the mode never began B
+    expect(errors(h)).toEqual([[2, 'STUDY_SWITCH_TIMEOUT', 'launch']]);
+    h.trace.fail('APP_INIT_FAILED'); // the modes' load gave up later still
+    expect(errors(h)).toEqual([[2, 'STUDY_SWITCH_TIMEOUT', 'launch']]);
+  });
+
+  it('only this document’s boot: never an earlier document’s, a case’s failure after the runtime, or a mode exit', () => {
+    // An earlier document of the attempt failed its init; this one boots.
+    const earlier = setup({}, { earlierDocument: t => t.fail('APP_INIT_FAILED') });
+    earlier.shell.hello();
+    earlier.shell.study(1, A);
+    earlier.shell.study(2, B);
+    expect(earlier.bridge.getState()).toMatchObject({ pendingStudyRef: ref(B), switchTimeout: 'awaiting-runtime' });
+
+    // A's own failures, at stage failed like APP_INIT_FAILED: the case's, not the document's.
+    const caseFailures = setup();
+    caseFailures.shell.hello();
+    caseFailures.shell.study(1, A);
+    BOOT.forEach(stage => caseFailures.trace.mark(stage));
+    caseFailures.trace.fail('VIEWPORT_LOAD_FAILED');
+    caseFailures.trace.fail('WEBGL_CONTEXT_LOST');
+    caseFailures.trace.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+    caseFailures.shell.study(2, B);
+    expect(caseFailures.bridge.getState()).toMatchObject({ pendingStudyRef: ref(B), switchTimeout: 'armed' });
+    caseFailures.trace.fail('WEBGL_CONTEXT_LOST_OFFSCREEN'); // A's engine, after the switch
+    expect(caseFailures.bridge.getState().switchTimeout).toBe('armed');
+
+    // A mode exit before the runtime is no failure at all.
+    const cancelled = setup();
+    cancelled.trace.fail('MODE_EXIT_BEFORE_RENDER', 'cancelled');
+    cancelled.shell.hello();
+    cancelled.shell.study(1, A);
+    cancelled.shell.study(2, B);
+    expect(cancelled.bridge.getState().switchTimeout).toBe('awaiting-runtime');
+
+    for (const h of [earlier, caseFailures, cancelled]) {
+      expect(errors(h).filter(([g]) => g === 2)).toEqual([]);
+    }
+  });
+
+  it('leaves a sign-in on record to the shell’s card: no remount under a reader who may be signing in', () => {
+    const h = setup();
+    h.trace.fail('AUTH_UNAVAILABLE', 'auth_ready');
+    h.trace.fail('APP_INIT_FAILED');
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.shell.study(2, B);
+    expect(errors(h)).toEqual([
+      [1, 'AUTH_UNAVAILABLE', 'auth_ready'],
+      [1, 'APP_INIT_FAILED', 'failed'],
+      [2, 'AUTH_UNAVAILABLE', 'auth_ready'],
+    ]);
+    expect(h.bridge.getState().switchTimeout).toBe('off');
   });
 });
 

@@ -25,8 +25,10 @@
  * Slice 2 (the app's docs/rev11/m6-case-switch.md §6) adds the switch target
  * (routeTarget, requestedAtGeneration) so a switch back A → B → A never binds
  * A's old generation; STUDY_SWITCH_TIMEOUT for a switch the trace never
- * begins; and, while a switch is unbound, this document's own boot failures
- * (the sign-in above all) answered at the new case generation.
+ * begins; while a switch is unbound, this document's own boot failures (the
+ * sign-in above all) answered at the new case generation; and
+ * STUDY_SWITCH_FAILED at once from a document whose boot failed, which no
+ * runtime will come to rescue (isBootFailure).
  */
 import {
   buildEmbedMessage,
@@ -70,6 +72,10 @@ const RUNTIME_STAGE: EmbedStage = 'runtime_ready';
 /** The trace's own fallback for a code that breaks its rule. */
 const FALLBACK_CODE = 'UNSPECIFIED_ERROR';
 const SWITCH_TIMEOUT_CODE = 'STUDY_SWITCH_TIMEOUT';
+/** A switch this document cannot make: the shell reloads the frame, once (§3b). */
+const SWITCH_FAILED_CODE = 'STUDY_SWITCH_FAILED';
+/** App.tsx's code when appInit rejects: this document never mounts its router. */
+const APP_INIT_FAILED_CODE = 'APP_INIT_FAILED';
 /** The auth paths' codes (AUTH_REQUIRED, AUTH_UNAVAILABLE): the shell shows its sign-in card. */
 const AUTH_CODE = /^AUTH_/;
 /**
@@ -85,6 +91,24 @@ const DOCUMENT_STAGES: ReadonlySet<string> = new Set<EmbedStage>([
   'config_ready',
   'runtime_ready',
 ]);
+
+/**
+ * A failure that stops this document opening ANY case, so a switch it is asked
+ * for can only fail: its init rejected (APP_INIT_FAILED, whenever it came), or
+ * anything failed before its runtime was up (the sign-in, the config with no
+ * data source, the extensions). No case can fail before the runtime, so this
+ * never takes a case's own failure — a viewport's load or a lost context share
+ * the stage `failed` with APP_INIT_FAILED, which is why that stage is not a
+ * document stage, and the engine's comes later still. A mode exit is not a
+ * failure. A sign-in is the shell's card's to answer, never a remount's: the
+ * callers answer nothing in a case generation that posted one (authPosted).
+ */
+function isBootFailure(event: EmbedAttemptEvent, runtimeUp: boolean): boolean {
+  if (event.ok || event.stage === CANCELLED_STAGE) {
+    return false;
+  }
+  return event.error?.code === APP_INIT_FAILED_CODE || !runtimeUp;
+}
 
 export type EmbedVisibilityState = EmbedVisibility;
 
@@ -500,6 +524,19 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
     }
   };
 
+  /** The switch's deadline has not answered yet: it waits for the runtime, or counts. */
+  const switchWaiting = (): boolean => awaitingRuntime || switchTimer !== null;
+
+  /**
+   * The case cannot open in this document (a switch code, stage launch): the
+   * shell reloads the frame instead (§3b), so nothing waits for it here.
+   */
+  const refuseCase = (code: string): void => {
+    pendingStudyRef = null;
+    stopSwitchTimeout();
+    reportError(code, 'launch');
+  };
+
   const onSwitchTimeout = (): void => {
     switchTimer = null;
     if (disposed || pendingStudyRef === null) {
@@ -524,6 +561,24 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
     for (let i = eventBaseline; i < events.length; i++) {
       if (events[i].stage === RUNTIME_STAGE && events[i].ok) {
         return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * A boot failure of THIS document on record (isBootFailure): an earlier
+   * document's (before eventBaseline) does not count.
+   */
+  const bootFailedInThisDocument = (): boolean => {
+    const events = snapshot()?.events ?? [];
+    let runtimeUp = false;
+    for (let i = eventBaseline; i < events.length; i++) {
+      if (isBootFailure(events[i], runtimeUp)) {
+        return true;
+      }
+      if (events[i].ok && events[i].stage === RUNTIME_STAGE) {
+        runtimeUp = true;
       }
     }
     return false;
@@ -618,6 +673,13 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
       }
       // Unbound: only what stops this document opening ANY case is the new case's.
       forwardDocumentFailure(event);
+      // The boot failed while the switch waited on it: no runtime will come to
+      // begin the study (or the one that came cannot), so the answer is now.
+      // Waiting, so not answered yet: no deadline has fired, and no sign-in
+      // was posted in this case generation (one stops the deadline).
+      if (!event.ok && switchWaiting() && isBootFailure(event, runtimeReadyInThisDocument())) {
+        refuseCase(SWITCH_FAILED_CODE);
+      }
       return;
     }
     if (boundAttemptGeneration === null || event.generation !== boundAttemptGeneration) {
@@ -681,7 +743,9 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
   /**
    * Wait for the trace to begin the case's study (the switch target): bound
    * at once when it already has; otherwise this document's boot failures so
-   * far are answered at the case generation, and the deadline is armed.
+   * far are answered at the case generation, and the deadline is armed — or,
+   * when its boot failed and no sign-in is the shell's to answer, the case is
+   * refused now: the clock would wait for a runtime that is not coming.
    */
   const awaitStudy = (ref: string): void => {
     pendingStudyRef = ref;
@@ -691,6 +755,10 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
     const events = snapshot()?.events ?? [];
     for (let i = eventBaseline; i < events.length; i++) {
       forwardDocumentFailure(events[i]);
+    }
+    if (!authPosted && bootFailedInThisDocument()) {
+      refuseCase(SWITCH_FAILED_CODE);
+      return;
     }
     armSwitchTimeout();
   };
@@ -719,9 +787,7 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
     }
     if (!gateways.includes(gatewayAet)) {
       // Not openable in this document: the shell reloads the frame instead.
-      pendingStudyRef = null;
-      stopSwitchTimeout();
-      reportError('STUDY_GATEWAY_MISMATCH', 'launch');
+      refuseCase('STUDY_GATEWAY_MISMATCH');
       return;
     }
     // Another study — the trace may still name it (the switch back A → B → A):
@@ -730,9 +796,7 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
     try {
       deps.switchStudy(studyInstanceUid, gatewayAet);
     } catch (_) {
-      pendingStudyRef = null;
-      stopSwitchTimeout();
-      reportError('STUDY_SWITCH_FAILED', 'launch');
+      refuseCase(SWITCH_FAILED_CODE);
       return;
     }
     routeTarget = ref;

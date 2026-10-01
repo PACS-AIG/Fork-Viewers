@@ -211,3 +211,27 @@ describe('the bridge over the real attempt trace, across an in-document switch b
     h.bridge.dispose();
   });
 });
+
+describe('the bridge over the real attempt trace, in a document whose init failed', () => {
+  const OTHER = '1.2.3.4.6';
+
+  it('answers the next case at once with STUDY_SWITCH_FAILED: App.tsx’s APP_INIT_FAILED is stage failed, never a document stage', () => {
+    const doc = loadDocument();
+    const h = bridgeOver(doc);
+    OPEN.slice(0, 2).forEach(stage => doc.mark(stage)); // auth, config: no runtime
+    // App.tsx's catch when appInit rejects: the recorder's default stage.
+    expect(doc.fail('APP_INIT_FAILED')).toMatchObject({ stage: 'failed', ok: false, error: { code: 'APP_INIT_FAILED' } });
+    h.handshake();
+    h.study(2, OTHER);
+    const errors = h.of('viewer.error').map(m => {
+      const { code, stage } = m.payload as { code: string; stage: string };
+      return [m.caseGeneration, code, stage];
+    });
+    expect(errors).toEqual([
+      [1, 'APP_INIT_FAILED', 'failed'],
+      [2, 'STUDY_SWITCH_FAILED', 'launch'],
+    ]);
+    expect(h.bridge.getState()).toMatchObject({ pendingStudyRef: null, switchTimeout: 'off' });
+    h.bridge.dispose();
+  });
+});

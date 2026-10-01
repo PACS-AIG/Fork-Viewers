@@ -366,4 +366,35 @@ describe('installEmbedBridge in a framed document', () => {
     delete services.services;
     expect(hook().getState().caseView).toEqual(empty);
   });
+
+  it('re-enters the route it was opened on: a previous case’s not-found page does not keep the next one out', () => {
+    // The case's study query came back empty: OHIF navigated to its not-found
+    // page (PanelStudyBrowserTracking), a push that drops the query as well.
+    window.history.pushState({ idx: 1, key: 'k2' }, '', '/viewer/notfoundstudy');
+    const before = popstates.length;
+    deliver(
+      buildEmbedMessage('shell.study', {
+        nonce: NONCE,
+        caseGeneration: 4,
+        payload: { studyInstanceUid: '1.2.6', gatewayAet: 'GW_1' },
+      })
+    );
+    // The Mode route again, so the mode is entered and begins the new study.
+    expect(window.location.pathname).toBe('/viewer/viewer');
+    // The attempt's own params, as the document was opened, though the URL lost them.
+    expect([...new URLSearchParams(window.location.search).entries()]).toEqual([
+      ['StudyInstanceUIDs', '1.2.6'],
+      ['gatewayAET', 'GW_1'],
+      ['gatewayAET', 'GW_3'],
+      ['attempt', 'att-1'],
+      ['attemptT0', '1727740800000'],
+    ]);
+    expect(window.history.state).toEqual({ idx: 1, key: 'k2' });
+    expect(popstates.slice(before)).toEqual([{ idx: 1, key: 'k2' }]);
+    expect(hook().getState()).toMatchObject({
+      caseGeneration: 4,
+      routeTarget: studyRefFor('1.2.6'),
+      pendingStudyRef: studyRefFor('1.2.6'),
+    });
+  });
 });
