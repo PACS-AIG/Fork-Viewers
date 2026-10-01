@@ -47,12 +47,14 @@ function viewOf(recorder: AttemptRecorder): EmbedAttemptView {
         ? { attemptId: trace.attemptId, generation: trace.generation, studyRef: trace.studyRef, events: trace.events }
         : null;
     },
+    requestFreshGeneration: () => recorder.requestFreshGeneration(),
   };
 }
 
 function bridgeOver(recorder: AttemptRecorder) {
   const parent = { role: 'parent' };
   const posts: ToShellMessage[] = [];
+  const switches: string[] = [];
   const bridge = createEmbedBridge({
     allowedOrigins: [SHELL],
     framed: true,
@@ -64,23 +66,33 @@ function bridgeOver(recorder: AttemptRecorder) {
     documentId: DOC,
     attempt: viewOf(recorder),
     studyRefFor,
+    routeStudyUid: () => new URLSearchParams(window.location.search).get('StudyInstanceUIDs'),
     documentGateways: () => [GW],
-    switchStudy: () => undefined,
+    // browser.ts's switch, minus the popstate: the URL names the new study.
+    switchStudy: uid => {
+      switches.push(uid);
+      const url = `/viewer?StudyInstanceUIDs=${uid}&gatewayAET=${GW}&attempt=att-f5-test`;
+      window.history.replaceState(null, '', url);
+    },
     scheduler: { setTimeout: () => null, clearTimeout: () => undefined },
   });
   const deliver = (data: unknown) => bridge.receive({ source: parent, origin: SHELL, data });
+  const study = (caseGeneration: number, studyInstanceUid: string) =>
+    deliver(
+      buildEmbedMessage('shell.study', {
+        nonce: NONCE,
+        caseGeneration,
+        payload: { studyInstanceUid, gatewayAet: GW },
+      })
+    );
   return {
     bridge,
+    switches,
+    study,
     of: (type: ToShellMessage['type']) => posts.filter(m => m.type === type),
     handshake: () => {
       deliver(buildEmbedMessage('shell.hello', { nonce: NONCE, caseGeneration: 1, payload: { documentId: DOC } }));
-      deliver(
-        buildEmbedMessage('shell.study', {
-          nonce: NONCE,
-          caseGeneration: 1,
-          payload: { studyInstanceUid: STUDY, gatewayAet: GW },
-        })
-      );
+      study(1, STUDY);
     },
   };
 }
@@ -154,6 +166,47 @@ describe('the bridge over the real attempt trace, across an F5', () => {
     OPEN.slice(1).forEach(stage => doc2.mark(stage));
     doc2.mark(RENDER);
     expect(h.of('viewer.ready')).toHaveLength(1);
+    expect(h.of('viewer.error')).toEqual([]);
+    h.bridge.dispose();
+  });
+});
+
+describe('the bridge over the real attempt trace, across an in-document switch back', () => {
+  const OTHER = '1.2.3.4.6';
+  const pairs = (h: ReturnType<typeof bridgeOver>) =>
+    h
+      .of('viewer.ready')
+      .map(m => [m.caseGeneration, (m.payload as { attemptGeneration: number }).attemptGeneration]);
+
+  it('A → B → A delivered before the frame re-renders: case 3 is ready only from the re-entered mode’s render', () => {
+    const doc = loadDocument();
+    const h = bridgeOver(doc);
+    OPEN.slice(0, 3).forEach(stage => doc.mark(stage)); // the boot: auth, config, runtime
+    h.handshake();
+    doc.begin([STUDY]); // the first mode entry, with the route's studyInstanceUIDs
+    OPEN.slice(3).forEach(stage => doc.mark(stage));
+    doc.mark(RENDER);
+    expect(pairs(h)).toEqual([[1, 1]]);
+
+    h.study(2, OTHER);
+    h.study(3, STUDY); // both before the router re-rendered: B never began
+    expect(h.switches).toEqual([OTHER, STUDY]);
+    expect(h.bridge.getState()).toMatchObject({ caseGeneration: 3, boundAttemptGeneration: null });
+    expect(pairs(h)).toEqual([[1, 1]]);
+
+    // A's mode exits (it had rendered: nothing to cancel), and the router
+    // enters the mode again for the URL's A: a new generation, the one case 3 binds.
+    doc.cancelIfIncomplete('MODE_EXIT_BEFORE_RENDER');
+    expect(doc.begin([STUDY])).toBe(2);
+    expect(doc.mark('engine_created')).not.toBeNull();
+    expect(h.bridge.getState().boundAttemptGeneration).toBe(2);
+    expect(pairs(h)).toEqual([[1, 1]]);
+    OPEN.slice(4).forEach(stage => doc.mark(stage));
+    expect(doc.mark(RENDER)).not.toBeNull();
+    expect(pairs(h)).toEqual([
+      [1, 1],
+      [3, 2],
+    ]);
     expect(h.of('viewer.error')).toEqual([]);
     h.bridge.dispose();
   });

@@ -10,7 +10,10 @@ let browser: typeof BrowserModule;
 beforeAll(() => {
   (window as unknown as { PACSAI_EMBED_ORIGINS: unknown }).PACSAI_EMBED_ORIGINS = ['http://localhost:3000'];
   jest.doMock('@ohif/core', () => ({
-    utils: { attempt: { subscribe, snapshot: () => null }, studyRefFor: (uid: string) => `ref:${uid}` },
+    utils: {
+      attempt: { subscribe, snapshot: () => null, requestFreshGeneration: jest.fn() },
+      studyRefFor: (uid: string) => `ref:${uid}`,
+    },
   }));
   browser = require('./browser');
 });
@@ -44,6 +47,18 @@ describe('installEmbedBridge in a top-level document', () => {
       lastReady: null,
       lastError: null,
       pendingErrors: [],
+      caps: [],
+      routeTarget: null,
+      requestedAtGeneration: 0,
+      pendingStudyRef: null,
+      switchTimeout: 'off',
+      caseView: {
+        caseGeneration: 0,
+        displaySetStudies: [],
+        sessionStudies: [],
+        roles: { priors: [], siblings: [], availablePriors: [] },
+        activeStudy: null,
+      },
     });
     expect(Object.getOwnPropertyDescriptor(window, '__pacsaiEmbed')).toMatchObject({ writable: false });
 

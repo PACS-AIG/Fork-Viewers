@@ -7,17 +7,25 @@
 import type * as BrowserModule from './browser';
 import type { EmbedAttemptEvent } from './embedBridge';
 import { buildEmbedMessage, isEmbedId, parseEmbedMessage } from './embedProtocol';
+import { studyRefFor } from '../../../../platform/core/src/utils/attempt/attemptTrace';
+import {
+  clearComparisonRoles,
+  setAvailablePriors,
+  setComparisonRoles,
+  setSessionStudies,
+} from '../priors/roleRegistry';
 
 const SHELL = 'http://localhost:3000';
 const OTHER_ALLOWED = 'https://app-dev.pacsai.net';
 const NONCE = 'nonceABCDEFGHIJKLMNOPq';
 
 const listeners = new Set<(e: EmbedAttemptEvent) => void>();
-const trace = { generation: 1, studyRef: 'ref:1.2.3', events: [] as EmbedAttemptEvent[] };
+const trace = { generation: 1, studyRef: studyRefFor('1.2.3'), events: [] as EmbedAttemptEvent[] };
 const subscribe = jest.fn((listener: (e: EmbedAttemptEvent) => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
 });
+const requestFreshGeneration = jest.fn();
 const fakeAttempt = {
   subscribe,
   snapshot: () => ({
@@ -26,6 +34,7 @@ const fakeAttempt = {
     studyRef: trace.studyRef,
     events: trace.events.slice(),
   }),
+  requestFreshGeneration,
 };
 const mark = (stage: string) => {
   const event = { attemptId: 'att-1', generation: trace.generation, stage, ok: true };
@@ -69,14 +78,19 @@ beforeAll(() => {
     `${OTHER_ALLOWED}/viewer`,
     OTHER_ALLOWED,
   ];
+  // A deep link's query: the case's own params, and A's series, protocol,
+  // stage and token, which a switch to another study must not carry.
   window.history.replaceState(
     { idx: 0, key: 'k1' },
     '',
-    '/viewer/viewer?StudyInstanceUIDs=1.2.3&gatewayAET=GW_1&attempt=att-1&hangingProtocolId=hp'
+    '/viewer/viewer?StudyInstanceUIDs=1.2.3&gatewayAET=GW_1&gatewayAET=GW_3&attempt=att-1' +
+      '&attemptT0=1727740800000&attemptCache=cold&SeriesInstanceUIDs=1.2.3.9' +
+      '&initialSeriesInstanceUID=1.2.3.9&initialSOPInstanceUID=1.2.3.9.1&hangingProtocolId=hp' +
+      '&hangingprotocolid=hp2&stageid=s1&token=t0k3n&studyinstanceuids=1.2.3#frag'
   );
   window.addEventListener('popstate', (event: PopStateEvent) => popstates.push(event.state));
   jest.doMock('@ohif/core', () => ({
-    utils: { attempt: fakeAttempt, studyRefFor: (uid: string) => `ref:${uid}` },
+    utils: { attempt: fakeAttempt, studyRefFor },
   }));
   browser = require('./browser');
 });
@@ -161,6 +175,27 @@ describe('installEmbedBridge in a framed document', () => {
     expect(postedOf('viewer.hello')).toHaveLength(3);
   });
 
+  it('advertises the in-document case switch after each accepted shell.hello', () => {
+    const caps = () =>
+      buildEmbedMessage('viewer.caps', {
+        nonce: NONCE,
+        caseGeneration: 1,
+        payload: { documentId, caps: ['case-switch'] },
+      });
+    expect(postedOf('viewer.caps')).toEqual([{ message: caps(), targetOrigin: SHELL }]);
+    // The shell answered a second hello of ours: an idempotent re-hello, answered again.
+    const rehello = { nonce: NONCE, caseGeneration: 1, payload: { documentId } };
+    deliver(buildEmbedMessage('shell.hello', rehello));
+    expect(postedOf('viewer.caps')).toEqual([
+      { message: caps(), targetOrigin: SHELL },
+      { message: caps(), targetOrigin: SHELL },
+    ]);
+    expect(hook().getState()).toMatchObject({
+      caps: ['case-switch'],
+      routeTarget: studyRefFor('1.2.3'),
+    });
+  });
+
   it('reports the matching render as ready once the study is bound', () => {
     deliver(
       buildEmbedMessage('shell.study', {
@@ -183,27 +218,41 @@ describe('installEmbedBridge in a framed document', () => {
     ]);
   });
 
-  it('switches study in the document: the URL, the router’s state kept, one popstate', () => {
+  it('switches study in the document: the query rebuilt for the case, the router’s state kept, one popstate', () => {
+    expect(requestFreshGeneration).not.toHaveBeenCalled();
     deliver(
       buildEmbedMessage('shell.study', {
         nonce: NONCE,
         caseGeneration: 2,
-        payload: { studyInstanceUid: '1.2.4', gatewayAet: 'GW_1' },
+        payload: { studyInstanceUid: '1.2.4', gatewayAet: 'GW_3' },
       })
     );
-    const params = new URLSearchParams(window.location.search);
     expect(window.location.pathname).toBe('/viewer/viewer');
-    expect(params.get('StudyInstanceUIDs')).toBe('1.2.4');
-    expect(params.getAll('gatewayAET')).toEqual(['GW_1']);
-    expect(params.get('attempt')).toBe('att-1');
-    expect(params.get('hangingProtocolId')).toBe('hp');
+    expect(window.location.hash).toBe('#frag');
+    // Only the case's study, the document's gateways and the attempt's own
+    // params: A's series, initial image, protocol, stage and token are gone.
+    expect([...new URLSearchParams(window.location.search).entries()]).toEqual([
+      ['StudyInstanceUIDs', '1.2.4'],
+      ['gatewayAET', 'GW_1'],
+      ['gatewayAET', 'GW_3'],
+      ['attempt', 'att-1'],
+      ['attemptT0', '1727740800000'],
+    ]);
     expect(window.history.state).toEqual({ idx: 0, key: 'k1' });
     expect(popstates).toEqual([{ idx: 0, key: 'k1' }]);
-    expect(hook().getState()).toMatchObject({ caseGeneration: 2, boundAttemptGeneration: null });
+    // The next mode entry opens a new attempt generation (m6-case-switch.md §6).
+    expect(requestFreshGeneration).toHaveBeenCalledTimes(1);
+    expect(hook().getState()).toMatchObject({
+      caseGeneration: 2,
+      boundAttemptGeneration: null,
+      routeTarget: studyRefFor('1.2.4'),
+      requestedAtGeneration: 1,
+      pendingStudyRef: studyRefFor('1.2.4'),
+    });
 
     // The mode re-enters: attempt.begin opens generation 2 for the new study.
     trace.generation = 2;
-    trace.studyRef = 'ref:1.2.4';
+    trace.studyRef = studyRefFor('1.2.4');
     mark('metadata_loaded');
     expect(hook().getState()).toMatchObject({ boundAttemptGeneration: 2 });
     mark('image_rendered_matching_study');
@@ -245,5 +294,76 @@ describe('installEmbedBridge in a framed document', () => {
     );
     expect(states).toEqual(['parked']);
     expect(handle.getState().suspended).toBe(true);
+  });
+
+  it('shows the case on the hook as refs only: display sets, session studies, roles, active study', () => {
+    const current = '1.2.4';
+    const prior = '1.2.4.1.99';
+    const sibling = '1.2.4.2.98';
+    const offered = '9.9.9';
+    const empty = {
+      caseGeneration: 3,
+      displaySetStudies: [],
+      sessionStudies: [],
+      roles: { priors: [], siblings: [], availablePriors: [] },
+      activeStudy: null,
+    };
+    // Before the cornerstone extension published window.services.
+    expect(hook().getState().caseView).toEqual(empty);
+
+    const services = window as unknown as { services?: unknown };
+    services.services = {
+      displaySetService: {
+        getActiveDisplaySets: () => [
+          { StudyInstanceUID: current },
+          { StudyInstanceUID: prior },
+          { StudyInstanceUID: current },
+          {},
+        ],
+      },
+      hangingProtocolService: { getState: () => ({ activeStudyUID: current }) },
+    };
+    setSessionStudies([
+      { uid: current, label: 'CT HEAD WO' },
+      { uid: sibling, label: 'CT CERVICAL SPINE' },
+    ]);
+    setComparisonRoles({ priors: [prior], siblings: [sibling] });
+    setAvailablePriors([
+      { uid: prior, qualifying: true },
+      { uid: offered, qualifying: false },
+    ]);
+    expect(hook().getState().caseView).toEqual({
+      caseGeneration: 3,
+      displaySetStudies: [studyRefFor(current), studyRefFor(prior)].sort(),
+      sessionStudies: [studyRefFor(current), studyRefFor(sibling)],
+      roles: {
+        priors: [studyRefFor(prior)],
+        siblings: [studyRefFor(sibling)],
+        availablePriors: [studyRefFor(prior), studyRefFor(offered)],
+      },
+      activeStudy: studyRefFor(current),
+    });
+    const text = JSON.stringify(hook().getState());
+    for (const value of [current, prior, sibling, offered, 'CT HEAD']) {
+      expect(text).not.toContain(value);
+    }
+
+    // Read lazily, every call: the hanging protocol's study before a protocol
+    // is set, and a service that throws, never break the hook.
+    services.services = {
+      displaySetService: {
+        getActiveDisplaySets: () => {
+          throw new Error('not ready');
+        },
+      },
+      hangingProtocolService: {
+        getState: () => undefined,
+        activeStudy: { StudyInstanceUID: prior },
+      },
+    };
+    clearComparisonRoles();
+    expect(hook().getState().caseView).toEqual({ ...empty, activeStudy: studyRefFor(prior) });
+    delete services.services;
+    expect(hook().getState().caseView).toEqual(empty);
   });
 });

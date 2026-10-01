@@ -225,6 +225,15 @@ export class AttemptTrace {
   private eventsAtConstruct = 0;
   /** Where the latest Retry viewer's window starts (the stages it re-runs). */
   private eventsAtRetry = 0;
+  /**
+   * The embed bridge switched this document's URL to a case (the app's
+   * docs/rev11/m6-case-switch.md §6): the next begin() that names a study
+   * opens a new generation, even for the study the trace already names. The
+   * switch back A → B → A, made before B's mode entry began B, otherwise finds
+   * A's old generation current, and the bridge would report A's old render as
+   * the new case's. Per document, so never in the stored state.
+   */
+  private freshGeneration = false;
 
   constructor(deps: AttemptTraceDeps, init: AttemptTraceInit) {
     this.deps = deps;
@@ -272,19 +281,37 @@ export class AttemptTrace {
     return this.state.documentLoads;
   }
 
+  /** True while a requestFreshGeneration() waits for the begin that names a study. */
+  get freshGenerationRequested(): boolean {
+    return this.freshGeneration;
+  }
+
+  /** The next begin() that names a study opens a new generation (see freshGeneration). */
+  requestFreshGeneration(): void {
+    this.freshGeneration = true;
+  }
+
   /**
    * A new study inside the same document starts a new generation. Same study:
-   * no-op, so a re-entered mode does not inflate the count.
+   * no-op, so a re-entered mode does not inflate the count — unless a fresh
+   * generation was requested, which this begin then consumes. A begin that
+   * names no study keeps the request for the one that does.
    */
   begin(studyRef: string): number {
-    if (studyRef === 'none' || studyRef === this.state.studyRef) {
+    if (studyRef === 'none') {
       return this.state.generation;
     }
-    if (this.state.studyRef === 'none') {
+    const fresh = this.freshGeneration;
+    this.freshGeneration = false;
+    if (!fresh && studyRef === this.state.studyRef) {
+      return this.state.generation;
+    }
+    if (!fresh && this.state.studyRef === 'none') {
       // The first document did not know the study (callback URL); fill it in.
       this.state.studyRef = studyRef;
     } else {
-      // A different study in the same document: a new generation, so a stale
+      // A different study in the same document (or the same one after a
+      // switch asked for a fresh generation): a new generation, so a stale
       // callback from the previous study cannot count as this one's success.
       this.state.generation += 1;
       this.state.studyRef = studyRef;

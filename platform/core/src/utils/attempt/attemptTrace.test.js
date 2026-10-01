@@ -337,6 +337,60 @@ describe('attempt trace: dedupe and generations', () => {
     expect(trace.studyRef).toBe(studyRefFor('1.2.3'));
   });
 
+  it('opens a new generation for the same study after requestFreshGeneration (the switch back)', () => {
+    // m6-case-switch.md §6: the embed bridge moved the URL A → B → A before
+    // B's mode entry began B. The trace still names A in generation 1, so the
+    // re-entry's begin(A) must not leave A's old generation current.
+    const { deps } = memoryDeps();
+    const trace = new AttemptTrace(deps, init);
+    trace.mark('launch');
+    trace.mark('image_rendered_matching_study'); // A rendered in generation 1
+    expect(trace.freshGenerationRequested).toBe(false);
+    trace.requestFreshGeneration();
+    expect(trace.freshGenerationRequested).toBe(true);
+    expect(trace.begin(studyRefFor('1.2.3'))).toBe(2);
+    expect(trace.studyRef).toBe(studyRefFor('1.2.3'));
+    expect(trace.freshGenerationRequested).toBe(false);
+    // The render owed is the new generation's; generation 1's does not count.
+    expect(trace.needs('image_rendered_matching_study')).toBe(true);
+    expect(trace.mark('metadata_loaded').generation).toBe(2);
+    // Consumed: the next begin of the same study is a no-op again.
+    expect(trace.begin(studyRefFor('1.2.3'))).toBe(2);
+    // A different study after a request: one new generation, not two.
+    trace.requestFreshGeneration();
+    expect(trace.begin(studyRefFor('9.9.9'))).toBe(3);
+    expect(trace.begin(studyRefFor('9.9.9'))).toBe(3);
+  });
+
+  it('keeps the request across a begin that names no study, and opens a generation even from none', () => {
+    const { deps } = memoryDeps();
+    const trace = new AttemptTrace(deps, init);
+    trace.requestFreshGeneration();
+    expect(trace.begin('none')).toBe(1);
+    expect(trace.freshGenerationRequested).toBe(true);
+    expect(trace.begin(studyRefFor('1.2.3'))).toBe(2);
+
+    // A trace that did not know its study (the callback URL) fills it in
+    // without a new generation — unless a switch asked for a fresh one,
+    // which the bridge binds only above the generation it asked at.
+    const { deps: deps2 } = memoryDeps();
+    const callback = new AttemptTrace(deps2, { ...init, studyRef: 'none' });
+    callback.requestFreshGeneration();
+    expect(callback.begin(studyRefFor('1.2.3'))).toBe(2);
+    expect(callback.studyRef).toBe(studyRefFor('1.2.3'));
+  });
+
+  it('keeps the request in this document only: the stored state never carries it', () => {
+    const { deps, store } = memoryDeps();
+    const doc1 = new AttemptTrace(deps, init);
+    doc1.requestFreshGeneration();
+    expect(store.state).not.toContain('fresh');
+    const doc2 = new AttemptTrace(deps, init); // a reload of the same attempt
+    expect(doc2.freshGenerationRequested).toBe(false);
+    expect(doc2.begin(studyRefFor('1.2.3'))).toBe(1);
+    expect(Object.keys(doc1.snapshot())).not.toContain('freshGenerationRequested');
+  });
+
   it('keeps working when storage throws', () => {
     const deps = {
       now: () => 1500,

@@ -2,9 +2,12 @@ import {
   createEmbedBridge,
   EMBED_HELLO_DELAYS_MS,
   EMBED_HELLO_MAX_POSTS,
+  EMBED_VIEWER_CAPS,
+  STUDY_SWITCH_TIMEOUT_MS,
   type EmbedAttemptEvent,
   type EmbedBridge,
   type EmbedBridgeDeps,
+  type EmbedScheduler,
 } from './embedBridge';
 import { buildEmbedMessage, parseEmbedMessage, type ToShellMessage } from './embedProtocol';
 
@@ -16,8 +19,11 @@ const NONCE = 'nonceABCDEFGHIJKLMNOPq';
 const OTHER_NONCE = 'nonce2_-abcdefghijklmn';
 const A = '1.2.3.4.5';
 const B = '1.2.3.4.6';
+const C = '1.2.3.4.7';
 const GW = 'GATEWAY_AET_1';
 const RENDER = 'image_rendered_matching_study';
+/** The boot stages a document records before its first mode entry. */
+const BOOT = ['auth_ready', 'config_ready', 'runtime_ready'];
 
 const ref = (uid: string) => `ref:${uid}`;
 
@@ -25,12 +31,16 @@ type TraceEvent = EmbedAttemptEvent & { studyRef: string };
 
 /**
  * The attempt recorder's observable behaviour: record, then notify; begin(other)
- * = a new generation. Like the real recorder, it stamps EVERY event with the
- * CURRENT generation and study: nothing can arrive tagged with an older one.
+ * = a new generation, and so is begin(same) after requestFreshGeneration (the
+ * bridge's switch, m6-case-switch.md §6). Like the real recorder, it stamps
+ * EVERY event with the CURRENT generation and study: nothing can arrive tagged
+ * with an older one.
  */
 function fakeTrace(studyUid: string, attemptId = 'att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f') {
   let generation = 1;
   let studyRef = ref(studyUid);
+  let fresh = false;
+  let freshRequests = 0;
   const events: TraceEvent[] = [];
   const listeners = new Set<(e: EmbedAttemptEvent) => void>();
   let subscriptions = 0;
@@ -50,9 +60,16 @@ function fakeTrace(studyUid: string, attemptId = 'att-3f1c2a9e-7b4d-4c1a-9e2f-0a
         return () => listeners.delete(listener);
       },
       snapshot: () => ({ attemptId, generation, studyRef, events: events.slice() }),
+      requestFreshGeneration: () => {
+        fresh = true;
+        freshRequests++;
+      },
     },
     get generation() {
       return generation;
+    },
+    get studyRef() {
+      return studyRef;
     },
     get subscriptions() {
       return subscriptions;
@@ -60,11 +77,20 @@ function fakeTrace(studyUid: string, attemptId = 'att-3f1c2a9e-7b4d-4c1a-9e2f-0a
     get listening() {
       return listeners.size;
     },
+    get freshRequests() {
+      return freshRequests;
+    },
+    /** A mode entry (no event: the real begin records none). */
     begin(uid: string) {
-      if (ref(uid) !== studyRef) {
+      if (fresh || ref(uid) !== studyRef) {
         generation++;
         studyRef = ref(uid);
       }
+      fresh = false;
+    },
+    /** The trace names a study in the generation it is in (the real one's fill-in of 'none'). */
+    rename(uid: string) {
+      studyRef = ref(uid);
     },
     mark(stage: string) {
       emit({ stage, ok: true });
@@ -135,6 +161,8 @@ function setup(
     documentId: DOC,
     attempt: trace.view,
     studyRefFor: ref,
+    // The document's URL names the study its trace opened.
+    routeStudyUid: () => opts.study ?? A,
     documentGateways: () => [GW],
     switchStudy: (uid, gw) => {
       switches.push([uid, gw]);
@@ -400,8 +428,21 @@ describe('binding', () => {
         'lastReady',
         'lastError',
         'pendingErrors',
+        'caps',
+        'routeTarget',
+        'requestedAtGeneration',
+        'pendingStudyRef',
+        'switchTimeout',
       ].sort()
     );
+    // The switch target starts as the document URL's study; nothing switched yet.
+    expect(state).toMatchObject({
+      caps: ['case-switch'],
+      routeTarget: ref(A),
+      requestedAtGeneration: 0,
+      pendingStudyRef: null,
+      switchTimeout: 'off',
+    });
   });
 
   it('takes a re-sent hello with the same nonce as a no-op, and drops another nonce', () => {
@@ -420,7 +461,9 @@ describe('binding', () => {
     expect(h.bridge.getState().suspended).toBe(false);
     h.shell.visibility('parked');
     expect(h.bridge.getState().suspended).toBe(true);
-    expect(h.posts.filter(p => p.message.type !== 'viewer.hello')).toEqual([]);
+    // Each accepted hello is answered with the capabilities, nothing else.
+    const after = h.posts.filter(p => p.message.type !== 'viewer.hello');
+    expect(after.map(p => p.message.type)).toEqual(['viewer.caps', 'viewer.caps']);
   });
 
   it('drops a message from an older case generation (stale-generation)', () => {
@@ -568,7 +611,9 @@ describe('a study switch inside the document (V04)', () => {
       subscribe: trace.view.subscribe,
       snapshot: () => (snapshotNull ? null : trace.view.snapshot()),
     };
-    const h = setup({ attempt: view });
+    const h = setup({
+      attempt: { ...view, requestFreshGeneration: trace.view.requestFreshGeneration },
+    });
     h.shell.hello();
     h.shell.study(1, B);
     expect(h.switches).toEqual([[B, GW]]);
@@ -615,6 +660,453 @@ describe('a study switch inside the document (V04)', () => {
       received: { 'shell.hello': 1, 'shell.study': 2 },
       dropped: { 'generation-reuse': 2 },
     });
+  });
+});
+
+describe('viewer.caps (m6-case-switch.md §6)', () => {
+  it('answers the binding hello with the capabilities first, at the bound case generation', () => {
+    const h = setup();
+    h.bridge.authRequired(); // queued until the shell's hello
+    h.shell.hello(3);
+    const after = h.posts.filter(p => p.message.type !== 'viewer.hello');
+    expect(after.map(p => p.message.type)).toEqual(['viewer.caps', 'viewer.error']);
+    expect(after[0]).toEqual({
+      message: buildEmbedMessage('viewer.caps', {
+        nonce: NONCE,
+        caseGeneration: 3,
+        payload: { documentId: DOC, caps: ['case-switch'] },
+      }),
+      targetOrigin: SHELL,
+    });
+    expect(EMBED_VIEWER_CAPS).toEqual(['case-switch']);
+  });
+
+  it('answers every accepted re-hello, at the current case generation, and no dropped one', () => {
+    const h = setup();
+    h.shell.hello(1);
+    h.shell.study(2, A);
+    h.shell.hello(2); // idempotent: accepted
+    h.shell.hello(3); // a hello never moves the case generation: accepted, caps at 2
+    h.shell.hello(1); // stale-generation
+    h.shell.hello(2, OTHER_NONCE); // nonce-mismatch
+    h.shell.hello(2, NONCE, 'otherDocABCDEFGHIJKLMNOP'); // unknown-document
+    expect(h.of('viewer.caps').map(m => m.caseGeneration)).toEqual([1, 2, 2]);
+    expect(h.bridge.getState()).toMatchObject({
+      sent: { 'viewer.caps': 3 },
+      dropped: { 'stale-generation': 1, 'nonce-mismatch': 1, 'unknown-document': 1 },
+    });
+  });
+
+  it('posts nothing before a hello binds, however many hellos go out', () => {
+    const h = setup();
+    h.scheduler.tick();
+    h.scheduler.tick();
+    h.shell.study(1, A); // not-bound
+    expect(h.of('viewer.caps')).toEqual([]);
+  });
+});
+
+describe('the switch target (m6-case-switch.md §6)', () => {
+  const readyPairs = (h: ReturnType<typeof setup>) =>
+    h.of('viewer.ready').map(m => [m.caseGeneration, m.payload.attemptGeneration]);
+
+  it('A → B → A in a booted document: switches back, and binds only a generation begun after it', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    BOOT.forEach(stage => h.trace.mark(stage));
+    h.trace.mark(RENDER);
+    expect(readyPairs(h)).toEqual([[1, 1]]);
+
+    h.shell.study(2, B); // B's mode entry has not begun B …
+    h.shell.study(3, A); // … when the reader goes back to A
+    // The switch back is a real switch: the URL is B's, though the trace still names A.
+    expect(h.switches).toEqual([
+      [B, GW],
+      [A, GW],
+    ]);
+    expect(h.trace.freshRequests).toBe(2);
+    expect(h.bridge.getState()).toMatchObject({
+      caseGeneration: 3,
+      boundAttemptGeneration: null,
+      routeTarget: ref(A),
+      requestedAtGeneration: 1,
+      pendingStudyRef: ref(A),
+    });
+    // A's generation 1 is not case 3's: neither its replay nor a late render is a ready.
+    expect(readyPairs(h)).toEqual([[1, 1]]);
+    h.trace.mark(RENDER);
+    expect(readyPairs(h)).toEqual([[1, 1]]);
+
+    // The router re-enters the mode for A: a new generation although the study is the same.
+    h.trace.begin(A);
+    expect(h.trace.generation).toBe(2);
+    h.trace.mark('engine_created');
+    expect(h.bridge.getState()).toMatchObject({ boundAttemptGeneration: 2, pendingStudyRef: null });
+    expect(readyPairs(h)).toEqual([[1, 1]]);
+    h.trace.mark(RENDER);
+    expect(h.of('viewer.ready')[1]).toEqual(
+      buildEmbedMessage('viewer.ready', {
+        nonce: NONCE,
+        caseGeneration: 3,
+        payload: {
+          documentId: DOC,
+          attemptId: 'att-3f1c2a9e-7b4d-4c1a-9e2f-0a1b2c3d4e5f',
+          attemptGeneration: 2,
+          shown: true,
+        },
+      })
+    );
+    expect(h.of('viewer.error')).toEqual([]);
+  });
+
+  it('A → B → A before the boot: the boot’s first mode entry opens the generation case 3 binds', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A); // the trace names the URL's A in generation 1; nothing has booted
+    expect(h.bridge.getState().boundAttemptGeneration).toBe(1);
+    h.shell.study(2, B);
+    h.shell.study(3, A);
+    expect(h.switches).toEqual([
+      [B, GW],
+      [A, GW],
+    ]);
+    BOOT.forEach(stage => h.trace.mark(stage)); // still generation 1: not case 3's
+    expect(h.bridge.getState()).toMatchObject({
+      boundAttemptGeneration: null,
+      pendingStudyRef: ref(A),
+    });
+    h.trace.begin(A); // the boot's first mode entry, with the fresh request still pending
+    h.trace.mark('engine_created');
+    h.trace.mark(RENDER);
+    expect(readyPairs(h)).toEqual([[3, 2]]);
+  });
+
+  it('binds at once a new case generation for the study the URL and the trace are on (no switch)', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.trace.mark(RENDER);
+    h.shell.study(2, A); // the shell never sent another study: generation 1 is still A's
+    expect(h.switches).toEqual([]);
+    expect(h.trace.freshRequests).toBe(0);
+    expect(readyPairs(h)).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
+  });
+
+  it('waits when the trace names the target only in the generation the switch was asked at', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.shell.study(2, B);
+    h.trace.rename(B); // the trace names B, but still in generation 1
+    h.shell.study(3, B); // B is the target: no second switch, and no bind of generation 1
+    expect(h.switches).toEqual([[B, GW]]);
+    h.trace.mark('first_pixels');
+    expect(h.bridge.getState()).toMatchObject({
+      caseGeneration: 3,
+      boundAttemptGeneration: null,
+      pendingStudyRef: ref(B),
+    });
+    h.trace.begin(B); // the switch's fresh request: generation 2
+    h.trace.mark('engine_created');
+    expect(h.bridge.getState().boundAttemptGeneration).toBe(2);
+  });
+
+  it('B → C → B: switches to a study the trace still names once the URL has moved on', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.shell.study(2, B);
+    h.trace.begin(B);
+    h.trace.mark(RENDER);
+    expect(readyPairs(h)).toEqual([[2, 2]]);
+    h.shell.study(3, C); // C's mode entry has not begun C
+    h.shell.study(4, B);
+    expect(h.switches).toEqual([
+      [B, GW],
+      [C, GW],
+      [B, GW],
+    ]);
+    expect(h.bridge.getState()).toMatchObject({
+      requestedAtGeneration: 2,
+      boundAttemptGeneration: null,
+    });
+    h.trace.mark(RENDER); // B's old generation 2: not case 4's
+    expect(readyPairs(h)).toEqual([[2, 2]]);
+    h.trace.begin(B);
+    h.trace.mark(RENDER);
+    expect(readyPairs(h)).toEqual([
+      [2, 2],
+      [4, 3],
+    ]);
+  });
+
+  it('leaves the switch target where it was on a gateway mismatch or a refused switch', () => {
+    let refuse = false;
+    const h = setup(
+      {},
+      {
+        onSwitch: () => {
+          if (refuse) {
+            throw new Error('SecurityError');
+          }
+        },
+      }
+    );
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.shell.study(2, B, 'OTHER_GW');
+    expect(h.bridge.getState()).toMatchObject({ routeTarget: ref(A), pendingStudyRef: null });
+    h.shell.study(3, A); // still the URL's study, and no switch ever happened: bound at once
+    expect(h.bridge.getState().boundAttemptGeneration).toBe(1);
+    refuse = true;
+    h.shell.study(4, B);
+    expect(h.bridge.getState()).toMatchObject({
+      routeTarget: ref(A),
+      requestedAtGeneration: 0,
+      pendingStudyRef: null,
+      switchTimeout: 'off',
+    });
+    expect(h.trace.freshRequests).toBe(0); // the URL never moved
+    h.shell.study(5, A);
+    expect(h.bridge.getState().boundAttemptGeneration).toBe(1);
+    expect(h.of('viewer.error').map(m => [m.caseGeneration, m.payload.code])).toEqual([
+      [2, 'STUDY_GATEWAY_MISMATCH'],
+      [4, 'STUDY_SWITCH_FAILED'],
+    ]);
+  });
+});
+
+describe('STUDY_SWITCH_TIMEOUT (fake timers)', () => {
+  /** The adapter's clock, so jest's fake timers drive it. */
+  const windowClock: EmbedScheduler = {
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  };
+  const timeouts = (h: ReturnType<typeof setup>) =>
+    h.of('viewer.error').filter(m => m.payload.code === 'STUDY_SWITCH_TIMEOUT');
+
+  /** A document booted on A (its runtime is up), bound and rendered as case 1. */
+  const booted = () => {
+    const h = setup({ scheduler: windowClock });
+    h.shell.hello();
+    h.shell.study(1, A);
+    BOOT.forEach(stage => h.trace.mark(stage));
+    h.trace.mark(RENDER);
+    return h;
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('is 20 s, and posts once at the switch’s case generation with stage launch', () => {
+    expect(STUDY_SWITCH_TIMEOUT_MS).toBe(20000);
+    const h = booted();
+    h.shell.study(2, B);
+    expect(h.bridge.getState().switchTimeout).toBe('armed');
+    jest.advanceTimersByTime(19_999);
+    expect(timeouts(h)).toEqual([]);
+    jest.advanceTimersByTime(1);
+    expect(timeouts(h)).toEqual([
+      buildEmbedMessage('viewer.error', {
+        nonce: NONCE,
+        caseGeneration: 2,
+        payload: { documentId: DOC, code: 'STUDY_SWITCH_TIMEOUT', stage: 'launch' },
+      }),
+    ]);
+    jest.advanceTimersByTime(60_000);
+    expect(timeouts(h)).toHaveLength(1);
+    expect(h.bridge.getState()).toMatchObject({
+      switchTimeout: 'off',
+      lastError: { caseGeneration: 2, code: 'STUDY_SWITCH_TIMEOUT', stage: 'launch' },
+    });
+  });
+
+  it('counts from this document’s first runtime_ready when the switch came during the boot', () => {
+    // An earlier document's runtime_ready (the trace resumes) does not count.
+    const h = setup({ scheduler: windowClock }, { earlierDocument: t => t.mark('runtime_ready') });
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.shell.study(2, B);
+    expect(h.bridge.getState().switchTimeout).toBe('awaiting-runtime');
+    jest.advanceTimersByTime(60_000); // a slow silent sign-in, config and module load
+    expect(timeouts(h)).toEqual([]);
+    BOOT.forEach(stage => h.trace.mark(stage));
+    expect(h.bridge.getState().switchTimeout).toBe('armed');
+    jest.advanceTimersByTime(19_999);
+    expect(timeouts(h)).toEqual([]);
+    jest.advanceTimersByTime(1);
+    expect(timeouts(h).map(m => m.caseGeneration)).toEqual([2]);
+  });
+
+  it('is not posted when the switch begins at 19.9 s: the deadline binds it, or the event did', () => {
+    const h = booted();
+    h.shell.study(2, B);
+    jest.advanceTimersByTime(19_900);
+    h.trace.begin(B); // a mode entry records no event: only the deadline sees it
+    jest.advanceTimersByTime(100);
+    expect(timeouts(h)).toEqual([]);
+    expect(h.bridge.getState()).toMatchObject({
+      boundAttemptGeneration: 2,
+      pendingStudyRef: null,
+      switchTimeout: 'off',
+    });
+    h.trace.mark(RENDER);
+    expect(h.of('viewer.ready').map(m => m.caseGeneration)).toEqual([1, 2]);
+
+    const h2 = booted();
+    h2.shell.study(2, B);
+    jest.advanceTimersByTime(19_900);
+    h2.trace.begin(B);
+    h2.trace.mark('engine_created'); // bound on the event: the deadline is cancelled
+    expect(h2.bridge.getState()).toMatchObject({ boundAttemptGeneration: 2, switchTimeout: 'off' });
+    jest.advanceTimersByTime(60_000);
+    expect(timeouts(h2)).toEqual([]);
+  });
+
+  it('is re-armed by a newer case generation: a superseded request never fires', () => {
+    const h = booted();
+    h.shell.study(2, B);
+    jest.advanceTimersByTime(10_000);
+    h.shell.study(3, C);
+    jest.advanceTimersByTime(19_999);
+    expect(timeouts(h)).toEqual([]);
+    jest.advanceTimersByTime(1);
+    expect(timeouts(h).map(m => m.caseGeneration)).toEqual([3]);
+  });
+
+  it('is cancelled by an AUTH_* posted in its case generation, and not armed after one', () => {
+    const h = booted();
+    h.shell.study(2, B);
+    jest.advanceTimersByTime(10_000);
+    h.bridge.authRequired('AUTH_UNAVAILABLE');
+    expect(h.bridge.getState().switchTimeout).toBe('off');
+    jest.advanceTimersByTime(60_000);
+    expect(h.of('viewer.error').map(m => [m.caseGeneration, m.payload.code])).toEqual([
+      [2, 'AUTH_UNAVAILABLE'],
+    ]);
+
+    // The session ended before the case's study arrived, in the same generation.
+    const h2 = setup({ scheduler: windowClock });
+    BOOT.forEach(stage => h2.trace.mark(stage));
+    h2.shell.hello(1);
+    h2.bridge.authRequired();
+    h2.shell.study(1, B);
+    expect(h2.switches).toEqual([[B, GW]]);
+    expect(h2.bridge.getState().switchTimeout).toBe('off');
+    jest.advanceTimersByTime(60_000);
+    expect(timeouts(h2)).toEqual([]);
+  });
+
+  it('scopes the AUTH_* rule to its case generation: the next switch arms its own', () => {
+    const h = booted();
+    h.shell.study(2, B);
+    h.bridge.authRequired(); // the auth path only: the trace holds nothing to replay at 3
+    expect(h.bridge.getState().switchTimeout).toBe('off');
+    h.shell.study(3, C);
+    expect(h.bridge.getState().switchTimeout).toBe('armed');
+    jest.advanceTimersByTime(STUDY_SWITCH_TIMEOUT_MS);
+    expect(timeouts(h).map(m => m.caseGeneration)).toEqual([3]);
+  });
+
+  it('is not armed when the switch’s replay posts an AUTH_* (a document stopped at boot auth)', () => {
+    const h = setup({ scheduler: windowClock });
+    h.trace.fail('AUTH_UNAVAILABLE', 'auth_ready'); // index.js records it …
+    h.bridge.authRequired('AUTH_UNAVAILABLE'); // … and tells the bridge; nothing boots
+    h.shell.hello();
+    h.shell.study(1, A);
+    h.shell.study(2, B);
+    expect(h.bridge.getState().switchTimeout).toBe('off');
+    jest.advanceTimersByTime(120_000);
+    expect(h.of('viewer.error').map(m => [m.caseGeneration, m.payload.code])).toEqual([
+      [1, 'AUTH_UNAVAILABLE'],
+      [2, 'AUTH_UNAVAILABLE'],
+    ]);
+  });
+
+  it('arms nothing for a gateway mismatch or a bind at once', () => {
+    const h = booted();
+    h.shell.study(2, B, 'OTHER_GW');
+    expect(h.bridge.getState().switchTimeout).toBe('off');
+    h.shell.study(3, A);
+    expect(h.bridge.getState().switchTimeout).toBe('off');
+    jest.advanceTimersByTime(60_000);
+    expect(timeouts(h)).toEqual([]);
+  });
+});
+
+describe('failures while a switch is unbound (m6-case-switch.md §6)', () => {
+  const errors = (h: ReturnType<typeof setup>) =>
+    h.of('viewer.error').map(m => [m.caseGeneration, m.payload.code, m.payload.stage]);
+
+  it('replays this document’s auth code at the new case generation: a document stopped at boot auth answers it', () => {
+    const h = setup();
+    h.trace.fail('AUTH_REQUIRED', 'auth_ready');
+    h.bridge.authRequired();
+    h.shell.hello();
+    h.shell.study(1, A);
+    expect(errors(h)).toEqual([[1, 'AUTH_REQUIRED', 'auth_ready']]);
+    h.shell.study(2, B);
+    expect(h.of('viewer.error')[1]).toEqual(
+      buildEmbedMessage('viewer.error', {
+        nonce: NONCE,
+        caseGeneration: 2,
+        payload: { documentId: DOC, code: 'AUTH_REQUIRED', stage: 'auth_ready' },
+      })
+    );
+    expect(h.bridge.getState()).toMatchObject({
+      pendingStudyRef: ref(B),
+      boundAttemptGeneration: null,
+    });
+    // Told again by the auth path: the same error, not sent twice in the generation.
+    h.bridge.authRequired();
+    expect(errors(h)).toHaveLength(2);
+  });
+
+  it('replays boot failures, never an earlier document’s, and forwards later ones while unbound', () => {
+    const h = setup({}, { earlierDocument: t => t.fail('AUTH_REQUIRED', 'auth_ready') });
+    h.trace.fail('CONFIG_NO_DATASOURCES', 'config_ready');
+    h.shell.hello();
+    h.shell.study(1, B); // a switch before the boot
+    expect(errors(h)).toEqual([[1, 'CONFIG_NO_DATASOURCES', 'config_ready']]);
+    h.shell.study(2, C);
+    h.trace.fail('MODE_EXIT_BEFORE_RENDER', 'cancelled'); // never a failure
+    h.trace.fail('AUTH_UNAVAILABLE', 'auth_ready');
+    expect(errors(h)).toEqual([
+      [1, 'CONFIG_NO_DATASOURCES', 'config_ready'],
+      [2, 'CONFIG_NO_DATASOURCES', 'config_ready'],
+      [2, 'AUTH_UNAVAILABLE', 'auth_ready'],
+    ]);
+  });
+
+  it('never carries a case failure of the previous study to the new case generation, replayed or live', () => {
+    // A pane of A failed and another rendered; then the reader moved on. A's
+    // load that settles after the switch is still stamped with A's generation
+    // (begin(B) has not run): it is A's, and B must not open on an error card.
+    const h = setup();
+    h.shell.hello();
+    h.shell.study(1, A);
+    BOOT.forEach(stage => h.trace.mark(stage));
+    h.trace.fail('VIEWPORT_LOAD_FAILED');
+    h.trace.mark(RENDER);
+    expect(errors(h)).toEqual([[1, 'VIEWPORT_LOAD_FAILED', 'failed']]);
+    h.shell.study(2, B);
+    h.trace.fail('VIEWPORT_LOAD_FAILED');
+    h.trace.fail('WEBGL_CONTEXT_LOST_OFFSCREEN');
+    h.trace.fail('ENGINE_CONSTRUCT_FAILED', 'engine_created');
+    expect(errors(h)).toEqual([[1, 'VIEWPORT_LOAD_FAILED', 'failed']]);
+    h.trace.begin(B);
+    h.trace.mark(RENDER);
+    expect(h.of('viewer.ready').map(m => m.caseGeneration)).toEqual([1, 2]);
+    expect(errors(h)).toHaveLength(1);
   });
 });
 
@@ -736,10 +1228,8 @@ describe('viewer.error', () => {
     h.trace.mark(RENDER);
     h.shell.hello();
     h.shell.study(1, A);
-    expect(h.posts.filter(p => p.message.type !== 'viewer.hello').map(p => p.message.type)).toEqual([
-      'viewer.error',
-      'viewer.ready',
-    ]);
+    const after = h.posts.filter(p => p.message.type !== 'viewer.hello');
+    expect(after.map(p => p.message.type)).toEqual(['viewer.caps', 'viewer.error', 'viewer.ready']);
   });
 
   it('ignores failures of another attempt generation, and replays those from before the binding', () => {
@@ -867,7 +1357,8 @@ describe('shell.visibility', () => {
     h.shell.visibility('parked');
     expect(states).toEqual(['parked', 'visible', 'parked']);
     expect(h.bridge.getState().received['shell.visibility']).toBe(5);
-    expect(h.posts.filter(p => p.message.type !== 'viewer.hello')).toEqual([]);
+    const after = h.posts.filter(p => !['viewer.hello', 'viewer.caps'].includes(p.message.type));
+    expect(after).toEqual([]);
   });
 
   it('tells a listener added while parked at once, and stops after unsubscribe', () => {

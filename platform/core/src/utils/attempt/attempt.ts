@@ -20,6 +20,7 @@ import {
   CacheState,
   studyRefFor,
 } from './attemptTrace';
+import { watchEngineContextLoss } from './engineContextLoss';
 
 const KEY_CURRENT = 'pacsai.attempt.current';
 const KEY_PREFIX = 'pacsai.attempt.';
@@ -31,8 +32,23 @@ type ContainerExtra = Pick<AttemptEvent, 'containerSize'>;
 export interface AttemptRecorder {
   /** Resolve the attempt for this document and record `launch`. Idempotent. */
   init(): void;
-  /** Tell the trace which study this document is opening (a switch = new generation). */
-  begin(studyInstanceUid?: string | null): number;
+  /**
+   * Tell the trace which study this document is opening (a switch = new
+   * generation). Pass the ROUTE's studyInstanceUIDs (the first names the
+   * case; a comma list is read the same way): the route can still be loading
+   * one study while the URL already names the next. Omitted (undefined), it
+   * reads window.location's StudyInstanceUIDs, as before; null, an empty list
+   * or a blank uid names no study, and begin is a no-op.
+   */
+  begin(studyInstanceUIDs?: string | readonly string[] | null): number;
+  /**
+   * The embed bridge moved this document's URL to a case
+   * (m6-case-switch.md §6): the next begin that names a study opens a new
+   * generation even when it is the study the trace already names (the switch
+   * back, A → B → A, whose B never began). Kept until that begin, the boot's
+   * first mode entry included; in memory only, never stored for the attempt.
+   */
+  requestFreshGeneration(): void;
   mark(stage: AttemptStage, extra?: ContainerExtra): AttemptEvent | null;
   fail(code: string, stage?: AttemptStage, extra?: ContainerExtra & { stackRef?: string }): AttemptEvent | null;
   has(stage: AttemptStage): boolean;
@@ -121,8 +137,14 @@ function readParams(): {
   const t0 = t0Raw && /^\d+$/.test(t0Raw) ? Number(t0Raw) : null;
   const cacheRaw = params.get('attemptCache');
   const cache: CacheState = cacheRaw === 'cold' || cacheRaw === 'warm' ? cacheRaw : 'unknown';
-  const studyUid = params.get('StudyInstanceUIDs')?.split(',')[0]?.trim() || null;
+  const studyUid = firstStudyUid(params.get('StudyInstanceUIDs'));
   return { attempt: params.get('attempt'), t0, cache, studyUid };
+}
+
+/** The case's study: the first of a list (the route's) or of a comma list (the URL's); blank is none. */
+function firstStudyUid(value: string | readonly string[] | null | undefined): string | null {
+  const first = Array.isArray(value) ? value[0] : value;
+  return typeof first === 'string' ? first.split(',')[0].trim() || null : null;
 }
 
 function debugEnabled(): boolean {
@@ -192,9 +214,19 @@ class BrowserAttemptRecorder implements AttemptRecorder {
     this.installWindowApi();
   }
 
-  begin(studyInstanceUid?: string | null): number {
+  begin(studyInstanceUIDs?: string | readonly string[] | null): number {
     this.init();
-    return this.trace ? this.trace.begin(studyRefFor(studyInstanceUid)) : 0;
+    if (!this.trace) {
+      return 0;
+    }
+    const studyUid =
+      studyInstanceUIDs === undefined ? readParams().studyUid : firstStudyUid(studyInstanceUIDs);
+    return this.trace.begin(studyRefFor(studyUid));
+  }
+
+  requestFreshGeneration(): void {
+    this.init();
+    this.trace?.requestFreshGeneration();
   }
 
   mark(stage: AttemptStage, extra: ContainerExtra = {}): AttemptEvent | null {
@@ -265,15 +297,12 @@ class BrowserAttemptRecorder implements AttemptRecorder {
     }
     this.observedEngines.add(engine);
     try {
-      const e = engine as {
-        offscreenMultiRenderWindow?: {
-          getOpenGLRenderWindow?: () => { getCanvas?: () => HTMLCanvasElement | null } | null;
-        };
-      };
-      const canvas = e.offscreenMultiRenderWindow?.getOpenGLRenderWindow?.()?.getCanvas?.();
-      canvas?.addEventListener?.('webglcontextlost', () =>
-        this.fail('WEBGL_CONTEXT_LOST_OFFSCREEN')
-      );
+      // Pinned to the generation the engine was made in, and removed when the
+      // engine is destroyed: an old engine's lost context is not this case's.
+      watchEngineContextLoss(engine, {
+        generation: () => this.trace?.generation ?? 0,
+        onLost: () => this.fail('WEBGL_CONTEXT_LOST_OFFSCREEN'),
+      });
     } catch (_) {
       /* the engine's internals are not ours; observing them is best effort */
     }
