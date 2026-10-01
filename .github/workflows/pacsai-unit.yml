@@ -28,5 +28,9 @@ jobs:
       # (platform/core/src/utils/attempt), which the extension-only command
       # never ran. Only the attempt folder of core's utils: the rest holds the
       # upstream Queue.test.js, which is timing-flaky.
+      # Rev 11 milestone 6 part 2: the route init scoped to its run
+      # (platform/app/src/routes/Mode) and the study-metadata cache's eviction
+      # (the default extension's retrieveStudyMetadata; only that file, the
+      # extension's other upstream suites are not this gate's).
       - name: PACS-AI unit tests
-        run: yarn jest extensions/pacsai-hp platform/app/src/utils platform/core/src/utils/attempt --ci
+        run: yarn jest extensions/pacsai-hp platform/app/src/utils platform/app/src/routes/Mode platform/core/src/utils/attempt extensions/default/src/DicomWebDataSource/retrieveStudyMetadata --ci

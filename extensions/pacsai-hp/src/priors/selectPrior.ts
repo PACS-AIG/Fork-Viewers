@@ -77,25 +77,29 @@ export async function selectPrior({
   }
 
   switching = true;
-  const notificationId = uiNotificationService?.show?.({
-    title: 'Comparison',
-    message: 'Loading selected prior…',
-    type: 'info',
-    autoClose: false,
-  });
-  const dismiss = () => notificationId && uiNotificationService?.hide?.(notificationId);
   // The case this pick is for. Once it is not, the pick is dropped: its
-  // indicator goes and the next click is taken, and nothing is written.
-  const { stillTheCase, noLongerTheCase } = pinCase({
+  // indicator goes (the pin hides what it showed), the next click is taken,
+  // and nothing is written. The mode's exit drops it too (pinCase's endCase),
+  // so a pick still in flight when the case ends cannot leave `switching` set
+  // for the next case.
+  const pin = pinCase({
     hangingProtocolService,
     studyInstanceUID: hangingProtocolService?.getState?.()?.activeStudyUID,
     job: `the picked prior ${studyInstanceUID} loaded`,
     log,
     onDrop: () => {
       switching = false;
-      dismiss();
     },
+    uiNotificationService,
   });
+  const { stillTheCase, noLongerTheCase } = pin;
+  const notificationId = pin.show({
+    title: 'Comparison',
+    message: 'Loading selected prior…',
+    type: 'info',
+    autoClose: false,
+  });
+  const dismiss = () => notificationId && uiNotificationService?.hide?.(notificationId);
 
   try {
     log('selectPrior ->', { chosen: studyInstanceUID, replaced: replaceUID, nextPriors });
@@ -156,7 +160,7 @@ export async function selectPrior({
       );
       log('post-switch check', { prior: studyInstanceUID, hung });
       if (!hung) {
-        uiNotificationService?.show?.({
+        pin.show({
           title: 'Comparison',
           message:
             'The selected prior is loaded but this protocol has no viewport for it ' +
@@ -221,7 +225,7 @@ export async function selectPrior({
     if (noLongerTheCase('failure')) {
       return; // the previous case's failure is not the new case's to report
     }
-    uiNotificationService?.show?.({
+    pin.show({
       title: 'Comparison',
       message: 'Could not load the selected prior.',
       type: 'info',

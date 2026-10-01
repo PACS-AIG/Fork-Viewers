@@ -1,6 +1,7 @@
 import getStudies from './studiesList';
 import { DicomMetadataStore, log, utils, Enums } from '@ohif/core';
 import isSeriesFilterUsed from '../../utils/isSeriesFilterUsed';
+import type { RouteRun } from './setupRouteInit';
 
 const { getSplitParam } = utils;
 
@@ -11,15 +12,27 @@ const { getSplitParam } = utils;
  * @param props.studyInstanceUIDs for a list of studies to read
  * @param props.dataSource to read the data from
  * @param props.filters filters from query params to read the data from
+ * @param props.run pacsai: the mode entry this init is for (setupRouteInit.ts).
+ *   Its INSTANCES_ADDED unsubscribe goes to the run as soon as it is made; a
+ *   superseded run applies no hanging protocol and starts no series; display
+ *   sets are made only for the run's case set. Without a run: upstream's.
  * @returns array of subscriptions to cancel
  */
 export async function defaultRouteInit(
-  { servicesManager, studyInstanceUIDs, dataSource, filters, appConfig }: withAppTypes,
+  {
+    servicesManager,
+    studyInstanceUIDs,
+    dataSource,
+    filters,
+    appConfig,
+    run,
+  }: withAppTypes<{ run?: RouteRun }>,
   hangingProtocolId,
   stageIndex
 ) {
   const { displaySetService, hangingProtocolService, uiNotificationService, customizationService } =
     servicesManager.services;
+  const superseded = () => !!run && !run.isCurrent();
   /**
    * Function to apply the hanging protocol when the minimum number of display sets were
    * received or all display sets retrieval were completed
@@ -50,6 +63,12 @@ export async function defaultRouteInit(
   const { unsubscribe: instanceAddedUnsubscribe } = DicomMetadataStore.subscribe(
     DicomMetadataStore.EVENTS.INSTANCES_ADDED,
     function ({ StudyInstanceUID, SeriesInstanceUID, madeInClient = false }) {
+      // pacsai: only the run's case set. A superseded run's study still
+      // arriving (its metadata was in flight at the switch) makes no display
+      // set in this one.
+      if (run && !run.inCaseSet(StudyInstanceUID)) {
+        return;
+      }
       const seriesMetadata = DicomMetadataStore.getSeries(StudyInstanceUID, SeriesInstanceUID);
 
       // checks if the series filter was used, if it exists
@@ -74,6 +93,9 @@ export async function defaultRouteInit(
   );
 
   unsubscriptions.push(instanceAddedUnsubscribe);
+  // pacsai: now, not when this resolves; a cleanup while the metadata is still
+  // loading must still remove it.
+  run?.addUnsubscribe(instanceAddedUnsubscribe);
 
   log.time(Enums.TimingEnum.STUDY_TO_DISPLAY_SETS);
   log.time(Enums.TimingEnum.STUDY_TO_FIRST_IMAGE);
@@ -107,6 +129,10 @@ export async function defaultRouteInit(
   }
 
   await Promise.allSettled(allRetrieves).then(async promises => {
+    // pacsai: the case moved on while its series list loaded; start none of them.
+    if (superseded()) {
+      return;
+    }
     log.timeEnd(Enums.TimingEnum.STUDY_TO_DISPLAY_SETS);
     log.time(Enums.TimingEnum.DISPLAY_SETS_TO_FIRST_IMAGE);
     log.time(Enums.TimingEnum.DISPLAY_SETS_TO_ALL_IMAGES);
@@ -140,7 +166,13 @@ export async function defaultRouteInit(
       }
     });
 
-    await Promise.allSettled(allPromises).then(applyHangingProtocol);
+    await Promise.allSettled(allPromises);
+    // pacsai: the case moved on while its required series loaded. Hanging this
+    // study now would make it the active study inside the next case.
+    if (superseded()) {
+      return;
+    }
+    applyHangingProtocol();
     startRemainingPromises(remainingPromises);
     applyHangingProtocol();
   });

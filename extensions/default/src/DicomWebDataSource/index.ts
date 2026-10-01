@@ -544,7 +544,10 @@ function createDicomWebApi(dicomWebConfig: DicomWebConfig, servicesManager) {
 
       return seriesSummaryMetadata;
     },
-    deleteStudyMetadataPromise,
+    // pacsai: with this source's config, whose name is half of the cache key
+    // (read at call time: initialize may replace the config).
+    deleteStudyMetadataPromise: (StudyInstanceUID: string) =>
+      deleteStudyMetadataPromise(StudyInstanceUID, dicomWebConfig),
     getImageIdsForDisplaySet(displaySet) {
       const images = displaySet.images;
       const imageIds = [];

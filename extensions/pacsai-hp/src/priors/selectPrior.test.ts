@@ -36,6 +36,7 @@ jest.mock('@ohif/extension-default', () => ({
 }));
 
 import selectPrior from './selectPrior';
+import { endCase } from './pinCase';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -236,5 +237,54 @@ describe('selectPrior: a pick the case has moved on from', () => {
       expect.objectContaining({ message: 'Could not load the selected prior.' })
     );
     expect(getPriorUIDs()).toEqual([PB]);
+  });
+});
+
+describe('selectPrior: the mode exit (pinCase endCase)', () => {
+  it('releases a pick whose display sets never arrive: its indicator goes at once, and the next case takes a pick', async () => {
+    const viewer = fakeViewer();
+    mockCreateDisplaySets.mockImplementation(() => new Promise(() => undefined)); // stuck
+    void viewer.pick();
+    expect(viewer.show).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Loading selected prior…' })
+    );
+
+    endCase(); // A's mode exit
+    expect(viewer.hide).toHaveBeenCalledWith(LOADING);
+    expect(getPriorUIDs()).toEqual([]); // the roles went with A
+
+    viewer.switchToB();
+    mockCreateDisplaySets.mockReset().mockResolvedValue(undefined);
+    await viewer.pick(P2, PB);
+    expect(mockCreateDisplaySets).toHaveBeenCalledTimes(1); // `switching` was reset
+    expect(getPriorUIDs()).toEqual([P2]);
+    expect(viewer.run.mock.calls.at(-1)[0].activeStudy).toBe(mockStudies[B]);
+  });
+
+  it('writes nothing when a pick in flight at the exit resolves before the next case begins', async () => {
+    const viewer = fakeViewer();
+    const createdP2 = deferred<void>();
+    mockCreateDisplaySets.mockImplementation(() => createdP2.promise);
+    const pickOnA = viewer.pick();
+    endCase(); // generation and active study unchanged yet
+    createdP2.resolve();
+    await pickOnA;
+    expect(getPriorUIDs()).toEqual([]);
+    expect(viewer.run).not.toHaveBeenCalled();
+    // Its one request was made at the click; nothing after its await.
+    expect(mockCreateDisplaySets).toHaveBeenCalledTimes(1);
+    dropped('display sets');
+  });
+
+  it('hides the “no viewport for it” advisory still on screen when the case ends', async () => {
+    const viewer = fakeViewer();
+    await viewer.pick();
+    viewer.state.shown = [`ds-${A}`]; // the protocol found no viewport for P2
+    jest.advanceTimersByTime(1500);
+    expect(viewer.show).toHaveBeenCalledWith(expect.objectContaining({ message: NOT_HUNG }));
+    const advisory = viewer.show.mock.results.at(-1)?.value;
+
+    endCase();
+    expect(viewer.hide).toHaveBeenCalledWith(advisory);
   });
 });

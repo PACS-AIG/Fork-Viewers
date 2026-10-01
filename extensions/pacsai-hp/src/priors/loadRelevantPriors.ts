@@ -7,7 +7,7 @@ import {
 import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
 import { setAvailablePriors, setComparisonRoles, setSessionStudies } from './roleRegistry';
-import { pinCase } from './pinCase';
+import { caseKey, pinCase } from './pinCase';
 import type { PriorOption } from './roleRegistry';
 import {
   getBodyPart,
@@ -54,7 +54,10 @@ import { getBrowsingMode, protocolIdForMode } from '../allinone/browsingMode';
  * with A active and B as A's prior (milestone 6, V04). See pinCase.ts.
  */
 
-// Guards against concurrent re-entry for the same active study.
+// Guards against concurrent re-entry for the same active study, per case
+// (caseKey: the mode entry, the attempt generation and the study). Keyed by the
+// study alone, A's load still unwinding after A→B→A kept A's own priors from
+// loading again on the return.
 const inFlight = new Set<string>();
 
 /**
@@ -148,7 +151,8 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
   log('policy', { minScore: policy.minScore, maxPriors: policy.maxPriors });
 
   const currentStudyUID = hangingProtocolService.getState()?.activeStudyUID;
-  if (!currentStudyUID || inFlight.has(currentStudyUID)) {
+  const inFlightKey = caseKey(currentStudyUID);
+  if (!currentStudyUID || inFlight.has(inFlightKey)) {
     return;
   }
 
@@ -173,16 +177,18 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
   // before every run(). Once it is not, the result is dropped (logged, the
   // indicator dismissed): the caller returns, and the finally below releases
   // the inFlight entry; the re-hang poll only stops, its load having returned
-  // (and released it) long before.
-  const { stillTheCase, noLongerTheCase } = pinCase({
+  // (and released it) long before. Its notices go with the case (pin.show).
+  const pin = pinCase({
     hangingProtocolService,
     studyInstanceUID: currentStudyUID,
     job: 'its priors loaded',
     log,
     onDrop: dismissLoading,
+    uiNotificationService,
   });
+  const { stillTheCase, noLongerTheCase } = pin;
 
-  inFlight.add(currentStudyUID);
+  inFlight.add(inFlightKey);
   try {
     const qidoForStudyUID = await dataSource.query.studies.search({
       studyInstanceUid: currentStudyUID,
@@ -442,7 +448,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       return;
     }
 
-    loadingId = uiNotificationService?.show?.({
+    loadingId = pin.show({
       title: 'Comparison',
       message: 'Setting up hanging protocol…',
       type: 'info',
@@ -571,14 +577,14 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     if (!stillTheCase()) {
       return; // the previous case's failure is not the new case's to report
     }
-    uiNotificationService?.show?.({
+    pin.show({
       title: 'Relevant priors',
       message: 'Could not load prior studies for comparison.',
       type: 'info',
       duration: 3000,
     });
   } finally {
-    inFlight.delete(currentStudyUID);
+    inFlight.delete(inFlightKey);
   }
 }
 

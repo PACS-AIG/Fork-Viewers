@@ -46,6 +46,7 @@ jest.mock('@ohif/extension-default', () => ({
 }));
 
 import loadRelevantPriors from './loadRelevantPriors';
+import { endCase } from './pinCase';
 
 const qido = (uid: string, date: string, time = '120000', description = 'CT HEAD WO CONTRAST') => ({
   studyInstanceUid: uid,
@@ -207,7 +208,25 @@ describe('loadRelevantPriors: a load the case has moved on from', () => {
     expect(getPriorUIDs()).toEqual([]);
     expect(viewer.show).not.toHaveBeenCalled();
     expect(viewer.run).not.toHaveBeenCalled();
+    // The stale job asks the data source for nothing more (the route init's
+    // case set relies on it): no display sets requested for A or its prior.
+    expect(mockPatient.createDisplaySets).not.toHaveBeenCalled();
     dropped('patient query');
+  });
+
+  it('asks for no patient studies when the case moved on during its study query', async () => {
+    const viewer = fakeViewer();
+    const studyOfA = deferred<unknown[]>();
+    viewer.search.mockImplementation(() => studyOfA.promise);
+    const loadOfA = viewer.load();
+    await new Promise(r => setTimeout(r, 0));
+    mockTrace.generation = 2;
+    viewer.state.active = B;
+    studyOfA.resolve([qido(A, '20260901')]);
+    await loadOfA;
+    expect(mockPatient.query).not.toHaveBeenCalled();
+    expect(mockPatient.createDisplaySets).not.toHaveBeenCalled();
+    dropped('study query');
   });
 
   it('stops its re-hang poll once the case moved on, and dismisses its indicator', async () => {
@@ -247,5 +266,95 @@ describe('loadRelevantPriors: a load the case has moved on from', () => {
     expect(viewer.show).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Relevant priors' })
     );
+  });
+});
+
+describe('loadRelevantPriors: per-case module state', () => {
+  it('inFlight is per generation: A → B → A while A’s first load is still held, the return loads A’s priors again', async () => {
+    const viewer = fakeViewer();
+    const heldOfA = deferred<void>();
+    mockPatient.createDisplaySets.mockImplementationOnce(() => heldOfA.promise);
+    const firstLoad = viewer.load();
+    await new Promise(r => setTimeout(r, 0)); // A's first load waits on its display sets
+
+    mockTrace.generation = 2; // the switch to B …
+    viewer.state.active = B;
+    mockTrace.generation = 3; // … and back to A, before the first load unwinds
+    viewer.state.active = A;
+    await viewer.load();
+    expect(viewer.run).toHaveBeenCalledTimes(1);
+    expect(viewer.run.mock.calls[0][0].activeStudy).toBe(mockStudies[A]);
+
+    heldOfA.resolve();
+    await firstLoad;
+    expect(viewer.run).toHaveBeenCalledTimes(1); // the first load's result is dropped
+  });
+
+  it('inFlight is per mode entry: the mode entered again for the same study and generation loads again', async () => {
+    const viewer = fakeViewer();
+    const heldOfA = deferred<void>();
+    mockPatient.createDisplaySets.mockImplementationOnce(() => heldOfA.promise);
+    const firstLoad = viewer.load();
+    await new Promise(r => setTimeout(r, 0));
+
+    endCase(); // the mode exits and enters again for A (no new generation, A hangs again)
+    await viewer.load();
+    expect(viewer.run).toHaveBeenCalledTimes(1);
+
+    heldOfA.resolve();
+    await firstLoad;
+    expect(viewer.run).toHaveBeenCalledTimes(1);
+    dropped('display sets');
+  });
+
+  it("the mode's exit drops a load before the next case begins (same generation, A still active): it requests nothing more and publishes nothing", async () => {
+    const viewer = fakeViewer();
+    const patientOfA = deferred<unknown[]>();
+    mockPatient.query.mockImplementation(() => patientOfA.promise);
+    const loadOfA = viewer.load();
+    await new Promise(r => setTimeout(r, 0));
+
+    endCase(); // A's mode exit; B's entry has not begun B's generation or hung B
+    patientOfA.resolve(PATIENT);
+    await loadOfA;
+
+    expect(mockPatient.createDisplaySets).not.toHaveBeenCalled();
+    expect(getSessionStudies()).toEqual([]);
+    expect(getAvailablePriors()).toEqual([]);
+    expect(getPriorUIDs()).toEqual([]);
+    expect(viewer.run).not.toHaveBeenCalled();
+    dropped('patient query');
+  });
+
+  it("the mode's exit hides the indicator of a load still in flight, at once", async () => {
+    const viewer = fakeViewer();
+    const heldOfA = deferred<void>();
+    mockPatient.createDisplaySets.mockImplementation(() => heldOfA.promise);
+    const loadOfA = viewer.load();
+    await new Promise(r => setTimeout(r, 0));
+    expect(viewer.show).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Setting up hanging protocol…' })
+    );
+
+    endCase();
+    expect(viewer.hide).toHaveBeenCalledWith(LOADING);
+    expect(viewer.hide).not.toHaveBeenCalledWith(undefined); // hide(undefined) dismisses every toast
+
+    heldOfA.resolve();
+    await loadOfA;
+    expect(viewer.run).not.toHaveBeenCalled();
+  });
+
+  it("the mode's exit clears the comparison roles, the session studies and the switchable priors (clearComparisonRoles)", async () => {
+    const viewer = fakeViewer();
+    await viewer.load();
+    expect(getPriorUIDs()).toEqual([P]);
+    expect(getSessionStudies().map(s => s.uid)).toEqual([A]);
+    expect(getAvailablePriors().map(p => p.uid)).toEqual([P]);
+
+    endCase();
+    expect(getPriorUIDs()).toEqual([]);
+    expect(getSessionStudies()).toEqual([]);
+    expect(getAvailablePriors()).toEqual([]);
   });
 });

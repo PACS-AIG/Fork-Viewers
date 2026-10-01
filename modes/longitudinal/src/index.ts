@@ -11,6 +11,7 @@ import {
   overlayTextLine,
 } from '@ohif/extension-pacsai-hp';
 import { installImagePoolHold } from '@ohif/extension-pacsai-hp';
+import { endCase as endPriorsCase } from '@ohif/extension-pacsai-hp/src/priors/pinCase';
 import { id } from './id';
 import initToolGroups from './initToolGroups';
 import toolbarButtons from './toolbarButtons';
@@ -146,11 +147,21 @@ function modeFactory({ modeConfiguration }) {
     /**
      * Lifecycle hooks
      */
-    onModeEnter: function ({ servicesManager, extensionManager, commandsManager }: withAppTypes) {
+    onModeEnter: function ({
+      servicesManager,
+      extensionManager,
+      commandsManager,
+      studyInstanceUIDs,
+    }: withAppTypes<{ studyInstanceUIDs?: string[] }>) {
       // B01 (Rev 11 milestone 2): the study this document is opening; a switch
       // inside the same document starts a new generation of the attempt trace.
+      // Rev 11 milestone 6 part 2: the route's studies (setupRouteInit hands
+      // them in), not window.location, which can already name the next case
+      // while this entry loads the one before it. The location only for a
+      // caller that passes none.
       ohifUtils.attempt.begin(
-        new URLSearchParams(window.location.search).get('StudyInstanceUIDs')?.split(',')[0]
+        studyInstanceUIDs?.[0] ??
+          new URLSearchParams(window.location.search).get('StudyInstanceUIDs')?.split(',')[0]
       );
       // B02 part 2: thumbnails and prefetch wait for the first grid render (or
       // 8 s), so the first viewport's own images are not queued behind them.
@@ -374,6 +385,12 @@ function modeFactory({ modeConfiguration }) {
 
       // B01: leaving the mode before the requested study rendered is a cancel.
       ohifUtils.attempt.cancelIfIncomplete('MODE_EXIT_BEFORE_RENDER');
+      // Rev 11 milestone 6 part 2: the case is over for the priors module
+      // state. Jobs still in flight are dropped (their notices hidden,
+      // selectPrior's switching released), and the comparison roles, session
+      // studies and switchable priors are cleared, so the next case in this
+      // document starts with none of this one's.
+      endPriorsCase();
       _imagePoolHold?.release('mode_exit');
       _imagePoolHold = null;
 
