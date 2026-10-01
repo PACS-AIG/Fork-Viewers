@@ -959,6 +959,306 @@
       },
       "ok": false,
       "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "viewer.caps at a later generation",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 4,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ]
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "viewer.caps sent to the viewer",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "wrong-direction"
+    },
+    {
+      "name": "viewer.caps without a nonce",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": null,
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-nonce"
+    },
+    {
+      "name": "viewer.caps with generation 0",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 0,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "viewer.caps an unknown cap",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch",
+            "prefetch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps a cap in another case",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "Case-Switch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps out of order (today that also means an unknown cap)",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "prefetch",
+            "case-switch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps a cap twice",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch",
+            "case-switch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps empty",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": []
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps as a string",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": "case-switch"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps as an array-like object",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": {
+            "0": "case-switch",
+            "length": 1
+          }
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps a cap that is not a string",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            1
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps payload with an extra key",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ],
+          "studyInstanceUid": "1.2.3"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps without caps",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "viewer.caps documentId too short",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "viewer.caps",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "short",
+          "caps": [
+            "case-switch"
+          ]
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
     }
   ],
   "build": [
@@ -1103,6 +1403,96 @@
         "payload": {
           "studyInstanceUid": "1.2.3.4.5",
           "gatewayAet": "GATEWAY_AET_1"
+        }
+      },
+      "throws": true
+    },
+    {
+      "name": "viewer.caps",
+      "type": "viewer.caps",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ]
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"viewer.caps\",\"nonce\":\"nonceABCDEFGHIJKLMNOPq\",\"caseGeneration\":1,\"payload\":{\"documentId\":\"docIdABCDEFGHIJKLMNOPQ\",\"caps\":[\"case-switch\"]}}"
+    },
+    {
+      "name": "viewer.caps payload keys in another order come out in the canonical order",
+      "type": "viewer.caps",
+      "fields": {
+        "nonce": "nonce2_-abcdefghijklmn",
+        "caseGeneration": 2,
+        "payload": {
+          "caps": [
+            "case-switch"
+          ],
+          "documentId": "docIdABCDEFGHIJKLMNOPQ"
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"viewer.caps\",\"nonce\":\"nonce2_-abcdefghijklmn\",\"caseGeneration\":2,\"payload\":{\"documentId\":\"docIdABCDEFGHIJKLMNOPQ\",\"caps\":[\"case-switch\"]}}"
+    },
+    {
+      "name": "viewer.caps with an unknown cap throws",
+      "type": "viewer.caps",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch",
+            "prefetch"
+          ]
+        }
+      },
+      "throws": true
+    },
+    {
+      "name": "viewer.caps with a cap twice throws (build does not de-duplicate)",
+      "type": "viewer.caps",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch",
+            "case-switch"
+          ]
+        }
+      },
+      "throws": true
+    },
+    {
+      "name": "viewer.caps with no caps throws",
+      "type": "viewer.caps",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": []
+        }
+      },
+      "throws": true
+    },
+    {
+      "name": "viewer.caps without a nonce throws",
+      "type": "viewer.caps",
+      "fields": {
+        "nonce": null,
+        "caseGeneration": 1,
+        "payload": {
+          "documentId": "docIdABCDEFGHIJKLMNOPQ",
+          "caps": [
+            "case-switch"
+          ]
         }
       },
       "throws": true

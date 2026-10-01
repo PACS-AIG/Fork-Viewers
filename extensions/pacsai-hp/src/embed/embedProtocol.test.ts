@@ -6,9 +6,12 @@ import { utils } from '@ohif/core';
 import {
   buildEmbedMessage,
   parseEmbedMessage,
+  isEmbedCaps,
+  isEmbedErrorCode,
   isEmbedId,
   mintEmbedId,
   normalizeEmbedOrigins,
+  EMBED_CAPS,
   EMBED_PARSE_REASONS,
   EMBED_PROTOCOL,
   EMBED_STAGES,
@@ -50,15 +53,16 @@ const vectors: {
 describe('the golden vectors (the app pins the same bytes)', () => {
   it('hash to EMBED_VECTORS_SHA256', () => {
     expect(createHash('sha256').update(VECTORS_BYTES).digest('hex')).toBe(EMBED_VECTORS_SHA256);
-    expect(EMBED_VECTORS_SHA256).toBe('ae68964be8e2e105bbdee95810e0746d8e14b0faec4b89d6f04109e2dbec1c32');
+    expect(EMBED_VECTORS_SHA256).toBe('b17036cb31484d097be1091920f6fcf149fe5245625b7f6d3b564d65192ed3dd');
   });
 
   it('name this protocol, version and check order', () => {
     expect(vectors.protocol).toBe(EMBED_PROTOCOL);
     expect(vectors.version).toBe(EMBED_VERSION);
     expect(vectors.checkOrder).toEqual([...EMBED_PARSE_REASONS]);
-    expect(vectors.parse).toHaveLength(58);
-    expect(vectors.build).toHaveLength(11);
+    // Slice 1's 58 and 11, then slice 2's viewer.caps (16 and 6) after them.
+    expect(vectors.parse).toHaveLength(74);
+    expect(vectors.build).toHaveLength(17);
   });
 
   describe('parse', () => {
@@ -146,7 +150,70 @@ describe('the stages', () => {
   it('are the attempt trace’s 13, in its order', () => {
     expect([...EMBED_STAGES]).toEqual([...utils.ATTEMPT_STAGES]);
     expect(EMBED_STAGES).toHaveLength(13);
-    expect(EMBED_TYPES).toHaveLength(6);
+  });
+});
+
+describe('the types', () => {
+  it('are slice 1’s six, then viewer.caps', () => {
+    expect([...EMBED_TYPES]).toEqual([
+      'viewer.hello',
+      'viewer.ready',
+      'viewer.error',
+      'shell.hello',
+      'shell.study',
+      'shell.visibility',
+      'viewer.caps',
+    ]);
+  });
+});
+
+describe('the error codes', () => {
+  it('take slice 2’s switch and deadline codes as they are (no protocol change)', () => {
+    expect(isEmbedErrorCode('STUDY_SWITCH_TIMEOUT')).toBe(true);
+    expect(isEmbedErrorCode('SHELL_READY_TIMEOUT')).toBe(true);
+    expect(isEmbedErrorCode('STUDY_GATEWAY_MISMATCH')).toBe(true);
+    expect(isEmbedErrorCode('STUDY_SWITCH_FAILED')).toBe(true);
+  });
+});
+
+describe('viewer.caps', () => {
+  it('is a closed set, sorted, each token once, never empty', () => {
+    expect([...EMBED_CAPS]).toEqual(['case-switch']);
+    // The whole set is itself a valid list (sorted, no repeats).
+    expect(isEmbedCaps([...EMBED_CAPS])).toBe(true);
+    expect(isEmbedCaps(['case-switch'])).toBe(true);
+    expect(isEmbedCaps([])).toBe(false);
+    expect(isEmbedCaps(['case-switch', 'case-switch'])).toBe(false);
+    expect(isEmbedCaps(['case-switch', 'prefetch'])).toBe(false);
+    expect(isEmbedCaps(['CASE-SWITCH'])).toBe(false);
+    expect(isEmbedCaps('case-switch')).toBe(false);
+    expect(isEmbedCaps(null)).toBe(false);
+    expect(isEmbedCaps([undefined])).toBe(false);
+    // A hole is not a cap.
+    expect(isEmbedCaps(new Array(1))).toBe(false);
+    expect(isEmbedCaps({ 0: 'case-switch', length: 1 })).toBe(false);
+  });
+
+  it('parse and build hand back their own caps array, never the caller’s', () => {
+    const raw = (vectors.parse.find(v => v.name === 'viewer.caps') as ParseVector).raw as {
+      nonce: string;
+      payload: { documentId: string; caps: string[] };
+    };
+    const parsed = parseEmbedMessage(raw, 'toShell');
+    expect(parsed.ok).toBe(true);
+    const parsedCaps =
+      parsed.ok && parsed.message.type === 'viewer.caps' && parsed.message.payload.caps;
+    expect(parsedCaps).toEqual(['case-switch']);
+    expect(parsedCaps).not.toBe(raw.payload.caps);
+    const caps: ['case-switch'] = ['case-switch'];
+    const built = buildEmbedMessage('viewer.caps', {
+      nonce: raw.nonce,
+      caseGeneration: 1,
+      payload: { documentId: raw.payload.documentId, caps },
+    });
+    expect(built.payload.caps).not.toBe(caps);
+    (caps as string[]).push('later');
+    expect(built.payload.caps).toEqual(['case-switch']);
   });
 });
 

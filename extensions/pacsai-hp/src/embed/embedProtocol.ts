@@ -14,7 +14,7 @@
 export const EMBED_PROTOCOL = 'pacsai.embed';
 export const EMBED_VERSION = 1;
 export const EMBED_VECTORS_SHA256 =
-  'ae68964be8e2e105bbdee95810e0746d8e14b0faec4b89d6f04109e2dbec1c32';
+  'b17036cb31484d097be1091920f6fcf149fe5245625b7f6d3b564d65192ed3dd';
 
 /** The attempt trace's 13 stages, in ATTEMPT_STAGES order (platform/core attemptTrace.ts). */
 export const EMBED_STAGES = [
@@ -34,6 +34,10 @@ export const EMBED_STAGES = [
 ] as const;
 export type EmbedStage = (typeof EMBED_STAGES)[number];
 
+/**
+ * The seventh, `viewer.caps`, is slice 2's (the app's docs/rev11/m6-case-switch.md
+ * §6), added at the end; a slice-1 parser drops it as `unknown-type`.
+ */
 export const EMBED_TYPES = [
   'viewer.hello',
   'viewer.ready',
@@ -41,8 +45,18 @@ export const EMBED_TYPES = [
   'shell.hello',
   'shell.study',
   'shell.visibility',
+  'viewer.caps',
 ] as const;
 export type EmbedType = (typeof EMBED_TYPES)[number];
+
+/**
+ * What this viewer document advertises in `viewer.caps`: a CLOSED set, in
+ * sorted order. `case-switch`: it switches cases inside the document. A new
+ * token is a protocol change (both copies, the vectors and the hash), never an
+ * extra token a parser skips.
+ */
+export const EMBED_CAPS = ['case-switch'] as const;
+export type EmbedCap = (typeof EMBED_CAPS)[number];
 
 export type EmbedDirection = 'toShell' | 'toViewer';
 
@@ -85,6 +99,11 @@ export type ViewerErrorMessage = Envelope<
   string,
   { documentId: string; code: string; stage: EmbedStage }
 >;
+export type ViewerCapsMessage = Envelope<
+  'viewer.caps',
+  string,
+  { documentId: string; caps: EmbedCap[] }
+>;
 export type ShellHelloMessage = Envelope<'shell.hello', string, { documentId: string }>;
 export type ShellStudyMessage = Envelope<
   'shell.study',
@@ -97,7 +116,11 @@ export type ShellVisibilityMessage = Envelope<
   { state: EmbedVisibility; width: number; height: number }
 >;
 
-export type ToShellMessage = ViewerHelloMessage | ViewerReadyMessage | ViewerErrorMessage;
+export type ToShellMessage =
+  | ViewerHelloMessage
+  | ViewerReadyMessage
+  | ViewerErrorMessage
+  | ViewerCapsMessage;
 export type ToViewerMessage = ShellHelloMessage | ShellStudyMessage | ShellVisibilityMessage;
 export type EmbedMessage = ToShellMessage | ToViewerMessage;
 export type EmbedMessageOf<T extends EmbedType> = Extract<EmbedMessage, { type: T }>;
@@ -145,6 +168,27 @@ export function isEmbedStage(value: unknown): value is EmbedStage {
   return isString(value) && (EMBED_STAGES as readonly string[]).includes(value);
 }
 
+/**
+ * A `viewer.caps` list: a non-empty array of tokens from EMBED_CAPS, each after
+ * the one before it (so sorted, and no token twice). An unknown token makes the
+ * list invalid rather than being skipped: the set is closed.
+ */
+export function isEmbedCaps(value: unknown): value is EmbedCap[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    const cap: unknown = value[i];
+    if (!isString(cap) || !(EMBED_CAPS as readonly string[]).includes(cap)) {
+      return false;
+    }
+    if (i > 0 && !(value[i - 1] < cap)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function isEmbedType(value: unknown): value is EmbedType {
   return isString(value) && (EMBED_TYPES as readonly string[]).includes(value);
 }
@@ -185,6 +229,10 @@ const PAYLOADS: { readonly [T in EmbedType]: ReadonlyArray<readonly [string, Che
     ['width', isFramePx],
     ['height', isFramePx],
   ],
+  'viewer.caps': [
+    ['documentId', isEmbedId],
+    ['caps', isEmbedCaps],
+  ],
 };
 
 function directionOf(type: EmbedType): EmbedDirection {
@@ -208,10 +256,12 @@ function canonicalPayload(type: EmbedType, payload: unknown): Record<string, unk
   }
   const out: Record<string, unknown> = {};
   for (const [key, check] of spec) {
-    if (!check(payload[key])) {
+    const value = payload[key];
+    if (!check(value)) {
       return null;
     }
-    out[key] = payload[key];
+    // An array (viewer.caps) is copied too: the message is ours, not the caller's.
+    out[key] = Array.isArray(value) ? value.slice() : value;
   }
   return out;
 }
