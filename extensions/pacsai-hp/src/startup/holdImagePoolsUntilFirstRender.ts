@@ -36,8 +36,13 @@ export const FIRST_RENDER_HOLD = 'first_render';
 
 export type HoldablePool = GovernedPool;
 
-/** The first-render signal's two: a grid render with pixels, a volume viewport's first render. */
-export type FirstRenderReason = 'first_render' | 'volume_render';
+/**
+ * The release signals: a grid render with pixels, a volume viewport's first
+ * render, or the frame parked by the report window (Rev 11 milestone 6: no
+ * render is drawn while parked, so there is no first render to protect, and
+ * prefetch and volume streaming should run while the reader is in Report).
+ */
+export type FirstRenderReason = 'first_render' | 'volume_render' | 'parked';
 /** Why a hold was released (`reason` on the hold; for the debug log only). */
 export type HoldReleaseReason = FirstRenderReason | 'timeout' | 'mode_exit' | 'manual';
 
@@ -111,8 +116,14 @@ export function holdImagePoolsUntilFirstRender(deps: HoldDeps): ImagePoolHold {
     released = true;
     reason = 'manual';
   } else {
-    unsubscribe = onFirstRender((why = 'first_render') => release(why));
-    timer = schedule(() => release('timeout'), timeoutMs);
+    const off = onFirstRender((why = 'first_render') => release(why));
+    if (released) {
+      // Released while subscribing (a mode entered while already parked).
+      off();
+    } else {
+      unsubscribe = off;
+      timer = schedule(() => release('timeout'), timeoutMs);
+    }
   }
 
   return {

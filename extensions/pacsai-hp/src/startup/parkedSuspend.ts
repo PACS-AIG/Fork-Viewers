@@ -20,9 +20,19 @@
 
 /** The part of Cornerstone's RenderingEngine (2.17.2) the gate needs. */
 export interface GatedRenderingEngine {
+  id?: string;
   /** Schedules one animation frame for the viewports flagged to render. */
   _render(): void;
 }
+
+/**
+ * Cornerstone's own engine for loadImageToCanvas / renderToCanvasGPU (the
+ * study browser's thumbnails, the scout inset). Its renders draw into
+ * detached canvases and a caller awaits each one, so the gate lets it through:
+ * deferred, the scout gave up after its attempts and stayed hidden. The
+ * thumbnail pool's `parked` hold already limits it to what was in flight.
+ */
+export const UNGATED_ENGINE_IDS: readonly string[] = ['_thumbnails'];
 
 /** The prototype the gate patches: every engine, including one made later. */
 export interface RenderingEnginePrototype {
@@ -65,7 +75,7 @@ export function createRenderGate(
   let paused = false;
   const deferred = new Set<GatedRenderingEngine>();
   proto._render = function gatedRender(this: GatedRenderingEngine) {
-    if (paused) {
+    if (paused && !UNGATED_ENGINE_IDS.includes(this.id ?? '')) {
       deferred.add(this);
       return;
     }
@@ -111,6 +121,8 @@ export interface CineLike {
   getState(): { cines?: Record<string, { isPlaying?: boolean; frameRate?: number } | undefined> } | undefined;
   setCine(arg: { id: string; isPlaying?: boolean; frameRate?: number }): unknown;
   playClip(element: unknown, options?: { viewportId?: string; framesPerSecond?: number }): unknown;
+  /** Called by the services manager when the mode exits (a case switch re-enters it). */
+  onModeExit?(): unknown;
 }
 
 /** What a viewport shows (its display sets, as one key), or null when it is gone. */
@@ -126,7 +138,15 @@ export interface CinePause {
 /**
  * Pause the cine service's clips while parked. Wraps the service's
  * `playClip` once, so a clip asked for while parked is recorded instead of
- * started, and its viewport's cine state is set back to paused.
+ * started, and its viewport's cine state is set back to paused; and its
+ * `onModeExit`, so a clip waiting from a case that ended (an in-document
+ * switch while parked re-enters the mode) is forgotten: viewport ids repeat
+ * across cases, and the grid can still read the old case's display sets.
+ *
+ * The provider's state is React state: a setCine shows in getState() only
+ * after the provider renders. So the return never skips a clip because the
+ * state still reads it as playing (that is the pause not yet applied); a
+ * second setCine(true) is a no-op in the provider.
  */
 export function createCinePause(cine: CineLike, shows: ViewportShows): CinePause {
   let parked = false;
@@ -146,6 +166,14 @@ export function createCinePause(cine: CineLike, shows: ViewportShows): CinePause
       /* the cine state is not mounted yet: nothing is playing */
     }
   };
+
+  const onModeExit = cine.onModeExit;
+  if (typeof onModeExit === 'function') {
+    cine.onModeExit = function forgetWaitingClips(...args: unknown[]) {
+      waiting.clear();
+      return onModeExit.apply(this, args);
+    };
+  }
 
   const playClip = cine.playClip;
   cine.playClip = function pausablePlayClip(element, options) {
@@ -183,12 +211,11 @@ export function createCinePause(cine: CineLike, shows: ViewportShows): CinePause
         return;
       }
       parked = false;
-      const now = cines();
       const entries = Array.from(waiting.entries());
       waiting.clear();
       for (const [viewportId, w] of entries) {
         const current = showsSafely(viewportId);
-        if (current === null || current !== w.shows || now[viewportId]?.isPlaying === true) {
+        if (current === null || current !== w.shows) {
           continue;
         }
         try {

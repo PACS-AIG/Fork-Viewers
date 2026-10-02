@@ -36,7 +36,31 @@ const STUDY = '1.2.840.99.1';
 type Install = (timeoutMs?: number) => ImagePoolHold | null;
 type Observers = (args: { servicesManager: unknown }) => void;
 
-function loadDocument(): {
+/** The embed bridge's visibility, as installImagePoolHold subscribes to it (a park replays at once). */
+function fakeBridge(parked = false) {
+  const subs = new Set<(state: 'visible' | 'parked') => void>();
+  let state: 'visible' | 'parked' = parked ? 'parked' : 'visible';
+  return {
+    onVisibilityChange: (listener: (state: 'visible' | 'parked') => void) => {
+      subs.add(listener);
+      if (state === 'parked') {
+        listener('parked');
+      }
+      return () => {
+        subs.delete(listener);
+      };
+    },
+    set: (next: 'visible' | 'parked') => {
+      state = next;
+      Array.from(subs).forEach(l => l(next));
+    },
+    get subscribers() {
+      return subs.size;
+    },
+  };
+}
+
+function loadDocument(bridge: ReturnType<typeof fakeBridge> | null = null): {
   recorder: AttemptRecorder;
   install: Install;
   initObservers: Observers;
@@ -65,6 +89,7 @@ function loadDocument(): {
         },
       };
     });
+    jest.doMock('../embed/browser', () => ({ getEmbedBridge: () => bridge }));
     initObservers = require('../attempt/initAttemptObservers').default;
     install = require('./installImagePoolHold').default;
   });
@@ -154,6 +179,33 @@ describe('installImagePoolHold', () => {
     expect(hold!.reason).toBe('first_render');
     expect(limits).toEqual({ interaction: 100, thumbnail: 75, prefetch: 25 });
     expect(install()).toBeNull(); // the mode re-entered for the same study
+  });
+
+  it('a park releases the hold (parked): nothing renders while parked, and prefetch must run', () => {
+    const bridge = fakeBridge(false);
+    const { install, liveGridListeners } = loadDocument(bridge);
+    const hold = install();
+    expect(limits).toEqual(HELD);
+    expect(bridge.subscribers).toBe(1);
+    bridge.set('parked');
+    expect(hold!.released).toBe(true);
+    expect(hold!.reason).toBe('parked');
+    expect(limits).toEqual(RESTORED);
+    expect(bridge.subscribers).toBe(0);
+    expect(liveGridListeners()).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('a mode entered while already parked holds nothing and leaves no listener or timer behind', () => {
+    const bridge = fakeBridge(true);
+    const { install, liveGridListeners } = loadDocument(bridge);
+    const hold = install();
+    expect(hold!.released).toBe(true);
+    expect(hold!.reason).toBe('parked');
+    expect(limits).toEqual(RESTORED);
+    expect(bridge.subscribers).toBe(0);
+    expect(liveGridListeners()).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   it('holds again in a document resumed after a render (an F5): the reload owes its own first render', () => {

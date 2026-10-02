@@ -79,6 +79,18 @@ describe('createRenderGate', () => {
     expect(frames).toEqual([]);
   });
 
+  it('lets Cornerstone\'s _thumbnails engine render while paused (loadImageToCanvas awaits it)', () => {
+    const { Engine, frames } = fakeEngineClass();
+    const grid = new Engine('grid');
+    const thumbs = Object.assign(new Engine('thumbs'), { id: '_thumbnails' });
+    const gate = createRenderGate(Engine.prototype, () => [grid, thumbs]);
+    gate.pause();
+    grid.renderViewport('v');
+    thumbs.renderViewport('t');
+    expect(frames).toEqual(['thumbs']);
+    expect(gate.deferredEngines()).toBe(1);
+  });
+
   it('degrades to no gate when the engine has no _render', () => {
     const gate = createRenderGate({}, () => []);
     expect(gate.installed).toBe(false);
@@ -192,16 +204,58 @@ describe('createCinePause', () => {
     expect(fc.cines.default.isPlaying).toBe(false);
   });
 
-  it('does not resume on a viewport that is gone, and does not touch one already playing again', () => {
-    const fc = fakeCine({ a: { isPlaying: true }, b: { isPlaying: true } });
-    const shows: Record<string, string | null> = { a: 'ds-1', b: 'ds-2' };
+  it('does not resume on a viewport that is gone', () => {
+    const fc = fakeCine({ a: { isPlaying: true } });
+    const shows: Record<string, string | null> = { a: 'ds-1' };
     const pause = createCinePause(fc.service, id => shows[id] ?? null);
     pause.park();
     shows.a = null;
-    fc.cines.b.isPlaying = true;
     const before = fc.setCalls.length;
     pause.show();
     expect(fc.setCalls.length).toBe(before);
+  });
+
+  it('a quick Report → Images round trip before the provider renders still resumes (state applied a tick late, as React does)', () => {
+    // React applies a setCine only when the provider renders: getState() lags.
+    const shown: Record<string, { isPlaying?: boolean; frameRate?: number }> = { x: { isPlaying: true, frameRate: 24 } };
+    const queued: Array<{ id: string; isPlaying?: boolean; frameRate?: number }> = [];
+    const service: CineLike = {
+      getState: () => ({ cines: shown }),
+      setCine: arg => {
+        queued.push(arg);
+      },
+      playClip: () => 'started',
+    };
+    const render = () =>
+      queued.splice(0).forEach(arg => {
+        const c = (shown[arg.id] ??= { isPlaying: false, frameRate: 24 });
+        c.isPlaying = arg.isPlaying ?? c.isPlaying;
+        c.frameRate = arg.frameRate ?? c.frameRate;
+      });
+    const pause = createCinePause(service, () => 'ds-A');
+    pause.park();
+    pause.show();
+    render();
+    expect(shown.x.isPlaying).toBe(true);
+  });
+
+  it('forgets a waiting clip when the mode exits (a case switched while parked), so the next case never inherits it', () => {
+    const fc = fakeCine({ default: { isPlaying: true } });
+    let exits = 0;
+    const service: CineLike = {
+      ...fc.service,
+      onModeExit: () => {
+        exits++;
+      },
+    };
+    const pause = createCinePause(service, () => 'ds-A');
+    pause.park();
+    expect(pause.waiting()).toHaveLength(1);
+    service.onModeExit!();
+    expect(exits).toBe(1);
+    expect(pause.waiting()).toEqual([]);
+    pause.show();
+    expect(fc.cines.default.isPlaying).toBe(false);
   });
 
   it('a later clip for the same viewport replaces the one waiting', () => {
