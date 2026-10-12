@@ -7,6 +7,7 @@ import CallbackPage from '../routes/CallbackPage';
 import SignoutCallbackComponent from '../routes/SignoutCallbackComponent';
 import { getOidcUserManager } from './oidcUserManager';
 import { unauthenticatedAction } from './embedAuth';
+import { setShellUserSink } from './shellAuth';
 
 function _isAbsoluteUrl(url) {
   return url.includes('http://') || url.includes('https://');
@@ -131,6 +132,11 @@ function OpenIdConnectRoutes({ oidc, routerBasename, userAuthenticationService }
   useEffect(() => {
     localStorage.removeItem('signoutEvent');
     const storageEventListener = event => {
+      // Framed, the user may be the report window's (the sign-in handoff):
+      // its sign-out is the app's, and a /logout here would revoke its token.
+      if (isFramed()) {
+        return;
+      }
       const signOutEvent = localStorage.getItem('signoutEvent');
       if (signOutEvent) {
         navigate(`/logout?redirect_uri=${encodeURIComponent(window.location.href)}`);
@@ -177,6 +183,11 @@ function OpenIdConnectRoutes({ oidc, routerBasename, userAuthenticationService }
       cancelled = true;
     };
   }, []);
+
+  // The sign-in handoff (pacsai.embed/1 §6): a later token from the report
+  // window is the live user, the one the Authorization header is read from.
+  // The boot's token needs no sink: it is the stored user read above.
+  useEffect(() => setShellUserSink(user => userAuthenticationService.setUser(user)), []);
 
   const oidcAuthority = oidc[0].authority;
 

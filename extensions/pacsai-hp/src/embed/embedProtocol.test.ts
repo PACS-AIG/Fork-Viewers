@@ -53,7 +53,7 @@ const vectors: {
 describe('the golden vectors (the app pins the same bytes)', () => {
   it('hash to EMBED_VECTORS_SHA256', () => {
     expect(createHash('sha256').update(VECTORS_BYTES).digest('hex')).toBe(EMBED_VECTORS_SHA256);
-    expect(EMBED_VECTORS_SHA256).toBe('b17036cb31484d097be1091920f6fcf149fe5245625b7f6d3b564d65192ed3dd');
+    expect(EMBED_VECTORS_SHA256).toBe('942c51a07b037acf1624208b8b0c054ac24606d04861cc6a04213c33ea347244');
   });
 
   it('name this protocol, version and check order', () => {
@@ -61,8 +61,8 @@ describe('the golden vectors (the app pins the same bytes)', () => {
     expect(vectors.version).toBe(EMBED_VERSION);
     expect(vectors.checkOrder).toEqual([...EMBED_PARSE_REASONS]);
     // Slice 1's 58 and 11, then slice 2's viewer.caps (16 and 6) after them.
-    expect(vectors.parse).toHaveLength(74);
-    expect(vectors.build).toHaveLength(17);
+    expect(vectors.parse).toHaveLength(86);
+    expect(vectors.build).toHaveLength(18);
   });
 
   describe('parse', () => {
@@ -154,7 +154,7 @@ describe('the stages', () => {
 });
 
 describe('the types', () => {
-  it('are slice 1’s six, then viewer.caps', () => {
+  it('are slice 1’s six, then viewer.caps, then shell.auth', () => {
     expect([...EMBED_TYPES]).toEqual([
       'viewer.hello',
       'viewer.ready',
@@ -163,6 +163,7 @@ describe('the types', () => {
       'shell.study',
       'shell.visibility',
       'viewer.caps',
+      'shell.auth',
     ]);
   });
 });

@@ -52,6 +52,7 @@ describe('installEmbedBridge in a top-level document', () => {
       requestedAtGeneration: 0,
       pendingStudyRef: null,
       switchTimeout: 'off',
+      auth: { fromShell: false, received: 0, expiresAt: null },
       caseView: {
         caseGeneration: 0,
         displaySetStudies: [],

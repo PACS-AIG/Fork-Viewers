@@ -29,6 +29,14 @@
  * sign-in above all) answered at the new case generation; and
  * STUDY_SWITCH_FAILED at once from a document whose boot failed, which no
  * runtime will come to rescue (isBootFailure).
+ *
+ * The sign-in handoff (the app's docs/rev11/m6-embed-protocol.md §6) adds
+ * `shell.auth`: the report window's access token, accepted once a shell.hello
+ * has set the session, at any case generation (a token is not a case's) and
+ * without moving it. The latest one is held in memory only — getState()
+ * reports that one is held and when it expires, never the token — for the
+ * sign-in to wait on (whenShellAuth) and for the live user to follow
+ * (onAuthToken).
  */
 import {
   buildEmbedMessage,
@@ -42,6 +50,7 @@ import {
   type EmbedParseReason,
   type EmbedStage,
   type EmbedVisibility,
+  type ShellAuthMessage,
   type ShellHelloMessage,
   type ShellStudyMessage,
   type ShellVisibilityMessage,
@@ -63,6 +72,14 @@ export const EMBED_VIEWER_CAPS: readonly EmbedCap[] = ['case-switch'];
  * boot must not cost a cold remount.
  */
 export const STUDY_SWITCH_TIMEOUT_MS = 20000;
+
+/**
+ * How long the sign-in waits for the shell's token (§6): for the shell.hello,
+ * then after it for the shell.auth, which the shell sends right behind its
+ * hello. Past either, the document signs itself in as before.
+ */
+export const EMBED_AUTH_HELLO_TIMEOUT_MS = 2500;
+export const EMBED_AUTH_GRACE_MS = 300;
 
 const RENDER_STAGE: EmbedStage = 'image_rendered_matching_study';
 /** A mode exit before the render (MODE_EXIT_BEFORE_RENDER): not a failure of the case. */
@@ -192,6 +209,25 @@ export interface EmbedErrorRecord {
   stage: EmbedStage;
 }
 
+/** The report window's access token as the bridge holds it (frozen; one record per token). */
+export interface EmbedShellToken {
+  readonly accessToken: string;
+  /** The token's `exp`, epoch seconds. */
+  readonly expiresAt: number;
+}
+
+export interface EmbedShellAuthOptions {
+  helloTimeoutMs?: number;
+  graceMs?: number;
+}
+
+/** One whenShellAuth call that is still waiting. */
+interface AuthWaiter {
+  resolve(token: EmbedShellToken | null): void;
+  graceMs: number;
+  timer: unknown;
+}
+
 export interface EmbedBridgeState {
   active: boolean;
   inactiveReason: EmbedInactiveReason | null;
@@ -230,6 +266,11 @@ export interface EmbedBridgeState {
   pendingStudyRef: string | null;
   /** STUDY_SWITCH_TIMEOUT: not running, waiting for this document's runtime_ready, or counting. */
   switchTimeout: 'off' | 'awaiting-runtime' | 'armed';
+  /**
+   * The sign-in handoff (§6): whether a token from the shell is held, how many
+   * shell.auth were accepted, and the held one's expiry. Never the token.
+   */
+  auth: { fromShell: boolean; received: number; expiresAt: number | null };
 }
 
 export interface EmbedBridge {
@@ -248,6 +289,19 @@ export interface EmbedBridge {
    * change; returns an unsubscribe.
    */
   onVisibilityChange(listener: (state: EmbedVisibilityState) => void): () => void;
+  /**
+   * The shell's token (§6). A listener added once one is held is told it at
+   * once, then each new one (the same token again is not news); returns an
+   * unsubscribe.
+   */
+  onAuthToken(listener: (token: EmbedShellToken) => void): () => void;
+  /**
+   * The shell's token for this document's sign-in: at once when one is held,
+   * else as soon as one arrives; null when no shell.hello came within
+   * helloTimeoutMs of the call, or no shell.auth within graceMs of the hello
+   * (of the call, when the hello came first). On the bridge's scheduler.
+   */
+  whenShellAuth(options?: EmbedShellAuthOptions): Promise<EmbedShellToken | null>;
   getState(): EmbedBridgeState;
   /** Stop the hello, the trace subscription and the listeners (tests; a document never needs it). */
   dispose(): void;
@@ -281,6 +335,7 @@ export function inertEmbedState(
     requestedAtGeneration: 0,
     pendingStudyRef: null,
     switchTimeout: 'off',
+    auth: { fromShell: false, received: 0, expiresAt: null },
   };
 }
 
@@ -318,6 +373,8 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
       receive: () => undefined,
       authRequired: () => undefined,
       onVisibilityChange: () => () => undefined,
+      onAuthToken: () => () => undefined,
+      whenShellAuth: () => Promise.resolve(null),
       getState: () => inertEmbedState(inactiveReason, allowed),
       dispose: () => undefined,
     };
@@ -380,6 +437,12 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
   let lastReady: EmbedBridgeState['lastReady'] = null;
   let lastError: EmbedBridgeState['lastError'] = null;
   const visibilityListeners = new Set<(state: EmbedVisibilityState) => void>();
+  /** The shell's latest token (§6): in memory only, never in getState(). */
+  let shellToken: EmbedShellToken | null = null;
+  let authReceived = 0;
+  const authListeners = new Set<(token: EmbedShellToken) => void>();
+  /** whenShellAuth calls still waiting: on the hello's deadline, then on the token's grace. */
+  const authWaiters = new Set<AuthWaiter>();
 
   const drop = (reason: EmbedDropReason): void => bump(dropped, reason);
 
@@ -688,6 +751,47 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
     consider(event);
   };
 
+  // --- the sign-in handoff (shell.auth) --------------------------------------
+
+  const settleWaiter = (waiter: AuthWaiter, token: EmbedShellToken | null): void => {
+    authWaiters.delete(waiter);
+    if (waiter.timer !== null) {
+      scheduler.clearTimeout(waiter.timer);
+      waiter.timer = null;
+    }
+    waiter.resolve(token);
+  };
+
+  /** Settle `waiter` with null after `ms`, unless a token settles it first. */
+  const armWaiter = (waiter: AuthWaiter, ms: number): void => {
+    if (waiter.timer !== null) {
+      scheduler.clearTimeout(waiter.timer);
+    }
+    waiter.timer = scheduler.setTimeout(() => {
+      waiter.timer = null;
+      settleWaiter(waiter, null);
+    }, ms);
+  };
+
+  const onShellAuth = (message: ShellAuthMessage): void => {
+    bump(received, message.type);
+    authReceived += 1;
+    const { accessToken, expiresAt } = message.payload;
+    if (shellToken && shellToken.accessToken === accessToken && shellToken.expiresAt === expiresAt) {
+      return; // the same token again: nothing new
+    }
+    const token: EmbedShellToken = Object.freeze({ accessToken, expiresAt });
+    shellToken = token;
+    Array.from(authWaiters).forEach(waiter => settleWaiter(waiter, token));
+    for (const listener of Array.from(authListeners)) {
+      try {
+        listener(token);
+      } catch (_) {
+        /* a listener must never break the bridge */
+      }
+    }
+  };
+
   // --- inbound -------------------------------------------------------------
 
   /** After each accepted shell.hello: this document switches cases in place (§6). */
@@ -711,6 +815,9 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
       caseGeneration = message.caseGeneration;
       bump(received, message.type);
       stopHello();
+      // The session is set: a sign-in waiting on the shell's token now waits
+      // only for the shell.auth the shell sends right behind its hello.
+      Array.from(authWaiters).forEach(waiter => armWaiter(waiter, waiter.graceMs));
       postCaps();
       const queued = queuedErrors;
       queuedErrors = [];
@@ -879,11 +986,23 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
       drop('nonce-mismatch');
       return;
     }
+    if (message.type === 'shell.auth') {
+      // A token is not a case's: taken at any generation, which it never moves.
+      onShellAuth(message);
+      return;
+    }
     if (message.caseGeneration < caseGeneration) {
       drop('stale-generation');
       return;
     }
     if (message.type === 'shell.study') {
+      // The shell sends shell.auth right behind its hello and before
+      // shell.study (§6): a study with no token held means none is coming
+      // (the app's handoff is off, or an older app), so the boot need not
+      // wait out the grace.
+      if (!shellToken) {
+        Array.from(authWaiters).forEach(waiter => settleWaiter(waiter, null));
+      }
       onShellStudy(message);
     } else {
       onShellVisibility(message);
@@ -922,6 +1041,38 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
         visibilityListeners.delete(listener);
       };
     },
+    onAuthToken: listener => {
+      if (disposed) {
+        return () => undefined;
+      }
+      authListeners.add(listener);
+      if (shellToken) {
+        try {
+          listener(shellToken);
+        } catch (_) {
+          /* a listener must never break the bridge */
+        }
+      }
+      return () => {
+        authListeners.delete(listener);
+      };
+    },
+    whenShellAuth: ({
+      helloTimeoutMs = EMBED_AUTH_HELLO_TIMEOUT_MS,
+      graceMs = EMBED_AUTH_GRACE_MS,
+    }: EmbedShellAuthOptions = {}) => {
+      if (shellToken) {
+        return Promise.resolve(shellToken);
+      }
+      if (disposed) {
+        return Promise.resolve(null);
+      }
+      return new Promise<EmbedShellToken | null>(resolve => {
+        const waiter: AuthWaiter = { resolve, graceMs, timer: null };
+        authWaiters.add(waiter);
+        armWaiter(waiter, binding ? graceMs : helloTimeoutMs);
+      });
+    },
     getState: () => ({
       active: true,
       inactiveReason: null,
@@ -945,6 +1096,11 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
       requestedAtGeneration,
       pendingStudyRef,
       switchTimeout: switchTimer !== null ? 'armed' : awaitingRuntime ? 'awaiting-runtime' : 'off',
+      auth: {
+        fromShell: shellToken !== null,
+        received: authReceived,
+        expiresAt: shellToken?.expiresAt ?? null,
+      },
     }),
     dispose: () => {
       disposed = true;
@@ -953,6 +1109,8 @@ export function createEmbedBridge(deps: EmbedBridgeDeps): EmbedBridge {
       unsubscribeAttempt?.();
       unsubscribeAttempt = null;
       visibilityListeners.clear();
+      authListeners.clear();
+      Array.from(authWaiters).forEach(waiter => settleWaiter(waiter, null));
     },
   };
 }

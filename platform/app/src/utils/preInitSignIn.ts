@@ -16,6 +16,14 @@
  * identity provider refused: it is asked once more before the frame reports
  * anything, and what it reports says which it was.
  *
+ * The sign-in handoff (pacsai.embed/1 §6): framed with the bridge, the report
+ * window hands this document its own access token (`shell.auth`), which is
+ * waited for before anything else. The browser's session at the identity
+ * provider idles out after an hour while the app's lasts its 10 h, so a
+ * reader signed in to the app met the frame's sign-in card; with the token,
+ * the frame is signed in whenever the app is. None in time, or one about to
+ * expire: the steps below, as before.
+ *
  * Everything is injected so the decision is testable without a browser.
  */
 import type { OidcClientSettings, UserManagerLike } from './oidcUserManager';
@@ -23,7 +31,7 @@ import { unauthenticatedAction, type FramedAuthCode } from './embedAuth';
 
 export type PreInitOutcome =
   | { action: 'skip'; reason: 'no-oidc' | 'code-flow' | 'auth-route' | 'no-client' }
-  | { action: 'continue'; via: 'storage' | 'silent' }
+  | { action: 'continue'; via: 'storage' | 'silent' | 'shell' }
   | { action: 'continue'; via: 'none'; reason: string }
   | { action: 'redirect' }
   | { action: 'auth-required'; code: FramedAuthCode };
@@ -45,8 +53,49 @@ export interface PreInitDeps {
    * session, AUTH_UNAVAILABLE when it did not answer, twice.
    */
   onAuthRequired?: (code: FramedAuthCode) => void;
+  /**
+   * Framed with an active bridge (§6): the report window's token, or null when
+   * none came in time (the bridge's whenShellAuth). Asked only together with
+   * storeShellUser.
+   */
+  shellToken?: () => Promise<ShellToken | null>;
+  /** Store the shell's token as this document's user (./shellAuth). */
+  storeShellUser?: (token: ShellToken) => Promise<void>;
+  now?: () => number;
   setTimeout?: (fn: () => void, ms: number) => unknown;
   clearTimeout?: (handle: unknown) => void;
+}
+
+/** The report window's access token (pacsai.embed/1 §6): a JWT and its `exp`, epoch seconds. */
+export interface ShellToken {
+  accessToken: string;
+  expiresAt: number;
+}
+
+/**
+ * The profile mark a user built from the shell's token carries (./shellAuth),
+ * so a stored one is told from the viewer's own sign-in (in the profile: it is
+ * what oidc-client v1 stores; it drops a User's `state`). It is used only by a
+ * document that was just handed it: a framed document whose shell sent no
+ * token this time (the app's handoff turned off) and an unframed window that
+ * inherited the tab's sessionStorage (window.open copies it) both discard it
+ * and sign themselves in, so a kill switch takes effect at the next document
+ * and the app's token never serves, or is revoked by, a viewer of its own.
+ */
+export const SHELL_USER_MARK = 'pacsai_shell_auth';
+export const isShellUser = (user: { profile?: Record<string, unknown> } | null | undefined): boolean =>
+  !!user && !!user.profile && user.profile[SHELL_USER_MARK] === true;
+
+/** A shell token with less than this left is not booted on: the document signs itself in. */
+export const SHELL_TOKEN_MIN_REMAINING_MS = 30000;
+
+/** A token that expires more than SHELL_TOKEN_MIN_REMAINING_MS after `nowMs`. */
+export function isUsableShellToken(token: ShellToken | null | undefined, nowMs: number): boolean {
+  return (
+    !!token &&
+    typeof token.expiresAt === 'number' &&
+    token.expiresAt * 1000 - nowMs > SHELL_TOKEN_MIN_REMAINING_MS
+  );
 }
 
 /** Routes the auth flow owns; the pre-init step must not touch them. */
@@ -97,6 +146,9 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
     onAuthReady,
     framed = false,
     onAuthRequired,
+    shellToken,
+    storeShellUser,
+    now = () => Date.now(),
     setTimeout: schedule = (fn, ms) => globalThis.setTimeout(fn, ms),
     clearTimeout: cancel = handle => globalThis.clearTimeout(handle as number),
   } = deps;
@@ -118,8 +170,23 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
     return { action: 'skip', reason: 'no-client' };
   }
 
+  // 0. Framed (§6): the report window's token, first. The shell sends it
+  // right behind its hello, so this waits at most for the hello and a short
+  // grace; a throw from either step is no token.
+  if (framed && shellToken && storeShellUser) {
+    if (await takeShellToken(shellToken, storeShellUser, now)) {
+      onAuthReady?.();
+      return { action: 'continue', via: 'shell' };
+    }
+  }
+
   // 1. A user this tab already holds (a reload, or a second study in the tab).
-  const stored = await userManager.getUser().catch(() => null);
+  // Not the shell's: this document was not handed it (see SHELL_USER_MARK).
+  let stored = await userManager.getUser().catch(() => null);
+  if (isShellUser(stored)) {
+    await userManager.removeUser().catch(() => undefined);
+    stored = null;
+  }
   if (stored && !stored.expired) {
     onAuthReady?.();
     return { action: 'continue', via: 'storage' };
@@ -175,6 +242,24 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
     return { action: 'redirect' };
   } catch (err) {
     return { action: 'continue', via: 'none', reason: String((err as Error)?.message ?? err) };
+  }
+}
+
+/** The shell's token stored as this document's user; false for none, one about to expire, or a throw. */
+async function takeShellToken(
+  ask: () => Promise<ShellToken | null>,
+  store: (token: ShellToken) => Promise<void>,
+  now: () => number
+): Promise<boolean> {
+  try {
+    const token = await ask();
+    if (!token || !isUsableShellToken(token, now())) {
+      return false;
+    }
+    await store(token);
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 

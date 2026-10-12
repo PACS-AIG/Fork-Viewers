@@ -123,7 +123,9 @@ function ViewerHeader({
     },
   ];
 
-  if (appConfig.oidc) {
+  // Framed, the user is the report window's (pacsai.embed/1 §6): a logout here
+  // would revoke the app's token and end the reader's session in the app.
+  if (appConfig.oidc && !framed) {
     menuOptions.push({
       title: t('Header:Logout'),
       icon: 'power-off',

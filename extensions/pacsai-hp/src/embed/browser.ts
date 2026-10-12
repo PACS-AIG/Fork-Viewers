@@ -13,8 +13,9 @@
  * One bridge per document: the instance is kept on a module variable AND a
  * non-enumerable window property, so the main bundle and the extension's chunk
  * (or two copies of this module) share it. The harness reads the read-only
- * `window.__pacsaiEmbed.getState()`, which never exposes the nonce, and whose
- * `caseView` shows what the viewer holds for the case as study refs, never UIDs.
+ * `window.__pacsaiEmbed.getState()`, which never exposes the nonce or the
+ * shell's token, and whose `caseView` shows what the viewer holds for the case
+ * as study refs, never UIDs.
  */
 import { utils } from '@ohif/core';
 import { EMBED_VERSION, mintEmbedId, normalizeEmbedOrigins } from './embedProtocol';
@@ -24,6 +25,8 @@ import {
   type EmbedAttemptView,
   type EmbedBridgeState,
   type EmbedInactiveReason,
+  type EmbedShellAuthOptions,
+  type EmbedShellToken,
   type EmbedVisibilityState,
 } from './embedBridge';
 import {
@@ -33,7 +36,7 @@ import {
   getSiblingUIDs,
 } from '../priors/roleRegistry';
 
-export type { EmbedBridgeState, EmbedVisibilityState };
+export type { EmbedBridgeState, EmbedShellToken, EmbedVisibilityState };
 
 /**
  * What the viewer holds for the case now, as FNV-1a study refs (the attempt
@@ -65,6 +68,13 @@ export interface EmbedBridgeHandle {
   authRequired(code?: string): void;
   /** Told 'parked' at once when already parked, then on every change; returns an unsubscribe. */
   onVisibilityChange(listener: (state: EmbedVisibilityState) => void): () => void;
+  /** The shell's token (§6): told at once when one is held, then each new one; returns an unsubscribe. */
+  onAuthToken(listener: (token: EmbedShellToken) => void): () => void;
+  /**
+   * The shell's token for the sign-in: as soon as one is held; null when no
+   * shell.hello came within 2.5 s, or no shell.auth within 0.3 s of it.
+   */
+  whenShellAuth(options?: EmbedShellAuthOptions): Promise<EmbedShellToken | null>;
   getState(): EmbedBridgeState;
 }
 
@@ -315,6 +325,8 @@ function create(): InstalledBridge {
   const handle: EmbedBridgeHandle = {
     authRequired: code => bridge.authRequired(code),
     onVisibilityChange: listener => bridge.onVisibilityChange(listener),
+    onAuthToken: listener => bridge.onAuthToken(listener),
+    whenShellAuth: options => bridge.whenShellAuth(options),
     getState: () => bridge.getState(),
   };
   return { handle, getState: handle.getState };

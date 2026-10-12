@@ -1,5 +1,7 @@
 import {
   createEmbedBridge,
+  EMBED_AUTH_GRACE_MS,
+  EMBED_AUTH_HELLO_TIMEOUT_MS,
   EMBED_HELLO_DELAYS_MS,
   EMBED_HELLO_MAX_POSTS,
   EMBED_VIEWER_CAPS,
@@ -8,6 +10,7 @@ import {
   type EmbedBridge,
   type EmbedBridgeDeps,
   type EmbedScheduler,
+  type EmbedShellToken,
 } from './embedBridge';
 import { buildEmbedMessage, parseEmbedMessage, type ToShellMessage } from './embedProtocol';
 
@@ -193,6 +196,14 @@ function setup(
           nonce,
           caseGeneration,
           payload: { state, width: 903, height: 869 },
+        })
+      ),
+    auth: (accessToken: string, expiresAt: number, caseGeneration = 1, nonce = NONCE) =>
+      deliver(
+        buildEmbedMessage('shell.auth', {
+          nonce,
+          caseGeneration,
+          payload: { accessToken, expiresAt },
         })
       ),
   };
@@ -433,6 +444,7 @@ describe('binding', () => {
         'requestedAtGeneration',
         'pendingStudyRef',
         'switchTimeout',
+        'auth',
       ].sort()
     );
     // The switch target starts as the document URL's study; nothing switched yet.
@@ -442,6 +454,7 @@ describe('binding', () => {
       requestedAtGeneration: 0,
       pendingStudyRef: null,
       switchTimeout: 'off',
+      auth: { fromShell: false, received: 0, expiresAt: null },
     });
   });
 
@@ -1552,6 +1565,275 @@ describe('shell.visibility', () => {
     h.shell.hello();
     h.shell.visibility('parked');
     expect(after).toHaveBeenCalledWith('parked');
+  });
+});
+
+describe('shell.auth (the sign-in handoff, m6-embed-protocol.md §6)', () => {
+  /** A JWT-shaped fake: three base64url segments, never a real token. */
+  const fakeJwt = (n: number) => `eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmYWtlLSR7bn0ifQ.c2lnLW${n}`;
+  const T1 = fakeJwt(1);
+  const T2 = fakeJwt(2);
+  const EXP = 1791234567;
+
+  /** Fire the pending timers of exactly `ms` (the fake scheduler's tick fires every timer). */
+  const fire = (scheduler: ReturnType<typeof fakeScheduler>, ms: number) =>
+    scheduler.pending()
+      .filter(t => t.ms === ms)
+      .forEach(t => {
+        t.fired = true;
+        t.fn();
+      });
+  /** A promise's settled value now, or 'pending' (after the queued reactions have run). */
+  function settled<T>(promise: Promise<T>): Promise<T | 'pending'> {
+    return Promise.race([promise, new Promise<'pending'>(resolve => setTimeout(() => resolve('pending'), 0))]);
+  }
+
+  it('is accepted once a shell.hello set the session, and held without the token in the state', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.auth(T1, EXP);
+    const state = h.bridge.getState();
+    expect(state.auth).toEqual({ fromShell: true, received: 1, expiresAt: EXP });
+    expect(state.received['shell.auth']).toBe(1);
+    expect(state.dropped).toEqual({});
+    // The bridge answers a token with nothing.
+    expect(h.posts.map(p => p.message.type)).toEqual(['viewer.hello', 'viewer.caps']);
+    // Nor is a token a visibility: a parked frame stays parked.
+    const states: string[] = [];
+    h.bridge.onVisibilityChange(s => states.push(s));
+    h.shell.visibility('parked');
+    h.shell.auth(fakeJwt(9), EXP + 900);
+    expect(h.bridge.getState()).toMatchObject({ suspended: true, auth: { received: 2 } });
+    expect(states).toEqual(['parked']);
+  });
+
+  it('is dropped before any shell.hello (not-bound) and with another nonce (nonce-mismatch)', async () => {
+    const h = setup();
+    const waiting = h.bridge.whenShellAuth();
+    h.shell.auth(T1, EXP);
+    expect(h.bridge.getState()).toMatchObject({
+      bound: false,
+      dropped: { 'not-bound': 1 },
+      auth: { fromShell: false, received: 0, expiresAt: null },
+    });
+    h.shell.hello();
+    h.shell.auth(T1, EXP, 1, OTHER_NONCE);
+    expect(h.bridge.getState()).toMatchObject({
+      dropped: { 'not-bound': 1, 'nonce-mismatch': 1 },
+      auth: { fromShell: false, received: 0, expiresAt: null },
+    });
+    // From another origin or window, as for every shell message.
+    h.deliver(
+      buildEmbedMessage('shell.auth', { nonce: NONCE, caseGeneration: 1, payload: { accessToken: T1, expiresAt: EXP } }),
+      { origin: OTHER_ALLOWED }
+    );
+    h.deliver(
+      buildEmbedMessage('shell.auth', { nonce: NONCE, caseGeneration: 1, payload: { accessToken: T1, expiresAt: EXP } }),
+      { source: { notTheParent: true } }
+    );
+    // A refresh token never travels: a payload with any other key is refused.
+    h.deliver({
+      protocol: 'pacsai.embed',
+      version: 1,
+      type: 'shell.auth',
+      nonce: NONCE,
+      caseGeneration: 1,
+      payload: { accessToken: T1, expiresAt: EXP, refreshToken: T2 },
+    });
+    expect(h.bridge.getState()).toMatchObject({
+      dropped: { 'not-bound': 1, 'nonce-mismatch': 1, 'bad-origin': 1, 'bad-source': 1, 'bad-payload': 1 },
+      auth: { fromShell: false, received: 0 },
+    });
+    expect(await settled(waiting)).toBe('pending');
+  });
+
+  it('is taken at any generation, and never moves the case generation or the bound case', () => {
+    const h = setup();
+    h.shell.hello(3);
+    h.shell.study(3, A);
+    expect(h.bridge.getState()).toMatchObject({ caseGeneration: 3, boundAttemptGeneration: 1 });
+    h.shell.auth(T1, EXP, 1); // older than the case: a token is not a case's
+    h.shell.auth(T2, EXP + 300, 9); // newer: no new case
+    expect(h.bridge.getState()).toMatchObject({
+      caseGeneration: 3,
+      boundAttemptGeneration: 1,
+      pendingStudyRef: null,
+      dropped: {},
+      auth: { fromShell: true, received: 2, expiresAt: EXP + 300 },
+    });
+    // The case goes on as before: the same study again is a no-op, and its render is ready at 3.
+    h.shell.study(3, A);
+    expect(h.bridge.getState().dropped).toEqual({});
+    h.trace.mark(RENDER);
+    expect(h.of('viewer.ready').map(m => m.caseGeneration)).toEqual([3]);
+    // A case message below the case generation is still stale.
+    h.shell.visibility('parked', 2);
+    expect(h.bridge.getState().dropped).toEqual({ 'stale-generation': 1 });
+  });
+
+  it('tells onAuthToken each new token, a late listener the held one at once, the same token once', () => {
+    const h = setup();
+    const early: EmbedShellToken[] = [];
+    const unsubscribeEarly = h.bridge.onAuthToken(t => early.push(t));
+    expect(early).toEqual([]); // nothing held yet
+    h.shell.hello();
+    h.shell.auth(T1, EXP);
+    h.shell.auth(T1, EXP); // the same token again: counted, not news
+    expect(h.bridge.getState().auth.received).toBe(2);
+    expect(early).toEqual([{ accessToken: T1, expiresAt: EXP }]);
+    expect(Object.isFrozen(early[0])).toBe(true);
+
+    const late = jest.fn();
+    const unsubscribeLate = h.bridge.onAuthToken(late);
+    expect(late.mock.calls).toEqual([[early[0]]]);
+    expect(late.mock.calls[0][0]).toBe(early[0]); // one record per token
+
+    // A refresh: everyone hears it; then the unsubscribed stop hearing.
+    h.shell.auth(T2, EXP + 300);
+    expect(early.map(t => t.accessToken)).toEqual([T1, T2]);
+    expect(late).toHaveBeenCalledTimes(2);
+    unsubscribeEarly();
+    unsubscribeLate();
+    h.shell.auth(T1, EXP + 600);
+    expect(early).toHaveLength(2);
+    expect(late).toHaveBeenCalledTimes(2);
+    expect(h.bridge.getState().auth).toEqual({ fromShell: true, received: 4, expiresAt: EXP + 600 });
+  });
+
+  it('survives an onAuthToken listener that throws', () => {
+    const h = setup();
+    const after = jest.fn();
+    h.bridge.onAuthToken(() => {
+      throw new Error('boom');
+    });
+    h.bridge.onAuthToken(after);
+    h.shell.hello();
+    h.shell.auth(T1, EXP);
+    expect(after).toHaveBeenCalledWith({ accessToken: T1, expiresAt: EXP });
+    expect(() =>
+      h.bridge.onAuthToken(() => {
+        throw new Error('boom at once');
+      })
+    ).not.toThrow();
+  });
+
+  it('whenShellAuth: the token as soon as it arrives after the hello', async () => {
+    const h = setup();
+    const waiting = h.bridge.whenShellAuth();
+    expect(EMBED_AUTH_HELLO_TIMEOUT_MS).toBe(2500);
+    expect(EMBED_AUTH_GRACE_MS).toBe(300);
+    expect(h.scheduler.pending().map(t => t.ms)).toEqual([500, 2500]); // the hello's repeat, the deadline
+    h.shell.hello();
+    // The hello's deadline gives way to the grace for the token.
+    expect(h.scheduler.pending().map(t => t.ms)).toEqual([300]);
+    h.shell.auth(T1, EXP);
+    expect(await waiting).toEqual({ accessToken: T1, expiresAt: EXP });
+    expect(h.scheduler.pending()).toEqual([]);
+    // Held: a later call has it at once, the same record, and arms nothing.
+    const again = h.bridge.whenShellAuth();
+    expect(h.scheduler.pending()).toEqual([]);
+    expect(await again).toBe(await waiting);
+  });
+
+  it('whenShellAuth: a shell.study with no token held ends the wait at once (the shell sends shell.auth before it)', async () => {
+    const h = setup();
+    const waiting = h.bridge.whenShellAuth();
+    h.shell.hello();
+    expect(h.scheduler.pending().map(t => t.ms)).toEqual([300]);
+    h.shell.study(1, '1.2.3');
+    expect(await waiting).toBeNull();
+    expect(h.scheduler.pending().filter(t => t.ms === 300)).toEqual([]);
+    // With a token held, a study changes nothing about it.
+    const h2 = setup();
+    h2.shell.hello();
+    h2.shell.auth(T1, EXP);
+    const held = h2.bridge.whenShellAuth();
+    h2.shell.study(1, '1.2.3');
+    expect(await held).toEqual({ accessToken: T1, expiresAt: EXP });
+  });
+
+  it('whenShellAuth: null when no shell.hello came within 2.5 s', async () => {
+    const h = setup();
+    const waiting = h.bridge.whenShellAuth();
+    fire(h.scheduler, 500); // the hello's own repeat is not the deadline
+    expect(await settled(waiting)).toBe('pending');
+    fire(h.scheduler, 2500);
+    expect(await waiting).toBeNull();
+    // A hello and a token after the deadline change nothing for that call, and are held.
+    h.shell.hello();
+    h.shell.auth(T1, EXP);
+    expect(h.bridge.getState().auth.fromShell).toBe(true);
+    expect(h.scheduler.pending()).toEqual([]);
+  });
+
+  it('whenShellAuth: null when no shell.auth came within 0.3 s of the hello', async () => {
+    const h = setup();
+    const waiting = h.bridge.whenShellAuth();
+    h.shell.hello();
+    h.shell.hello(); // a re-sent hello does not restart the grace
+    expect(h.scheduler.pending().map(t => t.ms)).toEqual([300]);
+    h.shell.auth(T1, EXP, 1, OTHER_NONCE); // dropped: not the session's
+    expect(await settled(waiting)).toBe('pending');
+    fire(h.scheduler, 300);
+    expect(await waiting).toBeNull();
+    expect(h.scheduler.pending()).toEqual([]);
+  });
+
+  it('whenShellAuth: after the hello, counts the grace from the call; honours its options', async () => {
+    const h = setup();
+    h.shell.hello();
+    const waiting = h.bridge.whenShellAuth();
+    expect(h.scheduler.pending().map(t => t.ms)).toEqual([300]);
+    fire(h.scheduler, 300);
+    expect(await waiting).toBeNull();
+
+    const custom = setup();
+    const short = custom.bridge.whenShellAuth({ helloTimeoutMs: 40, graceMs: 7 });
+    const other = custom.bridge.whenShellAuth();
+    expect(custom.scheduler.pending().map(t => t.ms)).toEqual([500, 40, 2500]);
+    custom.shell.hello();
+    expect(custom.scheduler.pending().map(t => t.ms)).toEqual([7, 300]);
+    fire(custom.scheduler, 7);
+    expect(await short).toBeNull();
+    custom.shell.auth(T1, EXP);
+    expect(await other).toEqual({ accessToken: T1, expiresAt: EXP });
+  });
+
+  it('whenShellAuth: null at once from an inert bridge, and on dispose', async () => {
+    const inert = setup({ framed: false });
+    expect(await inert.bridge.whenShellAuth()).toBeNull();
+    expect(inert.scheduler.timers).toEqual([]);
+    const listener = jest.fn();
+    inert.bridge.onAuthToken(listener);
+    inert.shell.hello();
+    inert.shell.auth(T1, EXP);
+    expect(listener).not.toHaveBeenCalled();
+    expect(inert.bridge.getState().auth).toEqual({ fromShell: false, received: 0, expiresAt: null });
+
+    const h = setup();
+    const waiting = h.bridge.whenShellAuth();
+    const told = jest.fn();
+    h.bridge.onAuthToken(told);
+    h.bridge.dispose();
+    expect(await waiting).toBeNull();
+    expect(h.scheduler.pending()).toEqual([]);
+    expect(await h.bridge.whenShellAuth()).toBeNull();
+    h.shell.hello();
+    h.shell.auth(T1, EXP);
+    expect(told).not.toHaveBeenCalled();
+  });
+
+  it('never puts the token, or any part of it, in the state', () => {
+    const h = setup();
+    h.shell.hello();
+    h.shell.auth(T1, EXP);
+    h.shell.auth(T2, EXP + 300);
+    const text = JSON.stringify(h.bridge.getState());
+    [T1, T2].forEach(token => {
+      expect(text).not.toContain(token);
+      token.split('.').forEach(segment => expect(text).not.toContain(segment));
+    });
+    expect(text).not.toContain(NONCE);
   });
 });
 

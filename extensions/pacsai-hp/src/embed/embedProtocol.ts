@@ -14,7 +14,7 @@
 export const EMBED_PROTOCOL = 'pacsai.embed';
 export const EMBED_VERSION = 1;
 export const EMBED_VECTORS_SHA256 =
-  'b17036cb31484d097be1091920f6fcf149fe5245625b7f6d3b564d65192ed3dd';
+  '942c51a07b037acf1624208b8b0c054ac24606d04861cc6a04213c33ea347244';
 
 /** The attempt trace's 13 stages, in ATTEMPT_STAGES order (platform/core attemptTrace.ts). */
 export const EMBED_STAGES = [
@@ -36,7 +36,10 @@ export type EmbedStage = (typeof EMBED_STAGES)[number];
 
 /**
  * The seventh, `viewer.caps`, is slice 2's (the app's docs/rev11/m6-case-switch.md
- * §6), added at the end; a slice-1 parser drops it as `unknown-type`.
+ * §6), added at the end; a slice-1 parser drops it as `unknown-type`. The
+ * eighth, `shell.auth`, is the sign-in handoff (the app's
+ * docs/rev11/m6-embed-protocol.md §2): the report window's access token for
+ * this document's own requests.
  */
 export const EMBED_TYPES = [
   'viewer.hello',
@@ -46,6 +49,7 @@ export const EMBED_TYPES = [
   'shell.study',
   'shell.visibility',
   'viewer.caps',
+  'shell.auth',
 ] as const;
 export type EmbedType = (typeof EMBED_TYPES)[number];
 
@@ -115,13 +119,19 @@ export type ShellVisibilityMessage = Envelope<
   string,
   { state: EmbedVisibility; width: number; height: number }
 >;
+/** The access token (a JWT) and its expiry in epoch seconds; never a refresh token. */
+export type ShellAuthMessage = Envelope<'shell.auth', string, { accessToken: string; expiresAt: number }>;
 
 export type ToShellMessage =
   | ViewerHelloMessage
   | ViewerReadyMessage
   | ViewerErrorMessage
   | ViewerCapsMessage;
-export type ToViewerMessage = ShellHelloMessage | ShellStudyMessage | ShellVisibilityMessage;
+export type ToViewerMessage =
+  | ShellHelloMessage
+  | ShellStudyMessage
+  | ShellVisibilityMessage
+  | ShellAuthMessage;
 export type EmbedMessage = ToShellMessage | ToViewerMessage;
 export type EmbedMessageOf<T extends EmbedType> = Extract<EmbedMessage, { type: T }>;
 
@@ -189,6 +199,21 @@ export function isEmbedCaps(value: unknown): value is EmbedCap[] {
   return true;
 }
 
+/** A compact JWS: three base64url segments. Its claims are the identity provider's business. */
+const ACCESS_TOKEN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+export const MAX_ACCESS_TOKEN_LENGTH = 16384;
+/** Epoch seconds, as a JWT's `exp`. */
+const MAX_EXPIRES_AT = 99999999999;
+
+/** A token the viewer may use as its bearer: JWT-shaped and of a sane size. */
+export function isEmbedAccessToken(value: unknown): value is string {
+  return isString(value) && value.length <= MAX_ACCESS_TOKEN_LENGTH && ACCESS_TOKEN.test(value);
+}
+
+function isExpiresAt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_EXPIRES_AT;
+}
+
 function isEmbedType(value: unknown): value is EmbedType {
   return isString(value) && (EMBED_TYPES as readonly string[]).includes(value);
 }
@@ -232,6 +257,10 @@ const PAYLOADS: { readonly [T in EmbedType]: ReadonlyArray<readonly [string, Che
   'viewer.caps': [
     ['documentId', isEmbedId],
     ['caps', isEmbedCaps],
+  ],
+  'shell.auth': [
+    ['accessToken', isEmbedAccessToken],
+    ['expiresAt', isExpiresAt],
   ],
 };
 

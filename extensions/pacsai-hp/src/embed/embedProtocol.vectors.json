@@ -1259,6 +1259,208 @@
       },
       "ok": false,
       "reason": "bad-payload"
+    },
+    {
+      "name": "shell.auth",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "shell.auth at a later generation",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 3,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000
+        }
+      },
+      "ok": true
+    },
+    {
+      "name": "shell.auth sent to the shell",
+      "direction": "toShell",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000
+        }
+      },
+      "ok": false,
+      "reason": "wrong-direction"
+    },
+    {
+      "name": "shell.auth without a nonce",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": null,
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000
+        }
+      },
+      "ok": false,
+      "reason": "bad-nonce"
+    },
+    {
+      "name": "shell.auth with generation 0",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 0,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000
+        }
+      },
+      "ok": false,
+      "reason": "bad-generation"
+    },
+    {
+      "name": "shell.auth a token that is not a JWT",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "not a token",
+          "expiresAt": 1790000000
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.auth a token with two segments",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ",
+          "expiresAt": 1790000000
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.auth expiresAt as a string",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": "1790000000"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.auth expiresAt not an integer",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000.5
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.auth expiresAt zero",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 0
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.auth payload with an extra key (a refresh token never travels)",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000,
+          "refreshToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
+    },
+    {
+      "name": "shell.auth without expiresAt",
+      "direction": "toViewer",
+      "raw": {
+        "protocol": "pacsai.embed",
+        "version": 1,
+        "type": "shell.auth",
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl"
+        }
+      },
+      "ok": false,
+      "reason": "bad-payload"
     }
   ],
   "build": [
@@ -1496,6 +1698,19 @@
         }
       },
       "throws": true
+    },
+    {
+      "name": "shell.auth",
+      "type": "shell.auth",
+      "fields": {
+        "nonce": "nonceABCDEFGHIJKLMNOPq",
+        "caseGeneration": 1,
+        "payload": {
+          "accessToken": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl",
+          "expiresAt": 1790000000
+        }
+      },
+      "json": "{\"protocol\":\"pacsai.embed\",\"version\":1,\"type\":\"shell.auth\",\"nonce\":\"nonceABCDEFGHIJKLMNOPq\",\"caseGeneration\":1,\"payload\":{\"accessToken\":\"eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ2ZWN0b3IifQ.c2lnbmF0dXJl\",\"expiresAt\":1790000000}}"
     }
   ]
 }

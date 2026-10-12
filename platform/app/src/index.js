@@ -18,8 +18,9 @@ import React from 'react';
 import { modes as defaultModes, extensions as defaultExtensions } from './pluginImports';
 import loadDynamicConfig from './loadDynamicConfig';
 import { utils as ohifUtils } from '@ohif/core';
-import { preInitSignIn } from './utils/preInitSignIn';
+import { preInitSignIn, isUsableShellToken } from './utils/preInitSignIn';
 import { writeAuthRequiredNotice } from './utils/embedAuth';
+import { storeShellUser } from './utils/shellAuth';
 import {
   installEmbedBridge,
   getEmbedBridge,
@@ -56,8 +57,18 @@ try {
  * the report window (milestone 6 part 2), the sign-in page refuses to be
  * framed: without a user the shell is told and this document does not boot —
  * AUTH_REQUIRED, or AUTH_UNAVAILABLE when the identity provider did not answer.
+ *
+ * The sign-in handoff (milestone 6, pacsai.embed/1 §6): framed with an active
+ * bridge, the report window's own access token is waited for first and stored
+ * as this document's user; each later one (the app refreshes it) replaces the
+ * stored user and the live one.
  */
 const routerBasename = String(viewerPublicUrl || '/').replace(/\/$/, '') || '/';
+const embedBridge = getEmbedBridge();
+const storeShellToken = token =>
+  storeShellUser(getOidcUserManager(window.PACSAI_OIDC, routerBasename), token);
+/** The token the boot stored, until the later-token listener has skipped its replay. */
+let bootShellToken = null;
 const preInit = preInitSignIn({
   oidc: window.PACSAI_OIDC,
   routerBasename,
@@ -76,6 +87,13 @@ const preInit = preInitSignIn({
     ohifUtils.attempt.fail(code, 'auth_ready');
     getEmbedBridge()?.authRequired(code);
   },
+  shellToken: embedBridge ? () => embedBridge.whenShellAuth() : undefined,
+  storeShellUser: embedBridge
+    ? token =>
+        storeShellToken(token).then(() => {
+          bootShellToken = token;
+        })
+    : undefined,
 }).catch(err => {
   console.warn('[pacsai] pre-init sign-in skipped:', err);
   return { action: 'continue', via: 'none', reason: String(err) };
@@ -90,7 +108,38 @@ preInit.then(outcome => {
     // Framed without a user: the report window offers the sign-in in a
     // top-level window; nothing to boot here, only a notice in the frame.
     writeAuthRequiredNotice(document, window.location.href, outcome.code);
+    // A token from the report window that came after the wait (a late hello):
+    // a new document is handed it at once (§6), so reload once.
+    // Once a minute at most, so a token that keeps arriving late cannot loop.
+    embedBridge?.onAuthToken(token => {
+      if (!isUsableShellToken(token, Date.now())) {
+        return;
+      }
+      try {
+        const last = Number(window.sessionStorage.getItem('pacsai.shellAuthReloadAt'));
+        if (Number.isFinite(last) && Date.now() - last < 60000) {
+          return;
+        }
+        window.sessionStorage.setItem('pacsai.shellAuthReloadAt', String(Date.now()));
+      } catch (_) {
+        return; // no storage to guard the reload with: the card stands
+      }
+      window.location.reload();
+    });
     return;
+  }
+  if (outcome.action === 'continue' && embedBridge) {
+    // Told the held token at once (the boot's own is stored already), then
+    // each new one. One nearly expired is not taken, as at the boot.
+    embedBridge.onAuthToken(token => {
+      if (token === bootShellToken || !isUsableShellToken(token, Date.now())) {
+        return;
+      }
+      storeShellToken(token).catch(() => {
+        console.warn("[pacsai] the report window's sign-in could not be stored");
+      });
+    });
+    bootShellToken = null;
   }
   return loadDynamicConfig(window.config).then(config_json => {
   // Reset Dynamic config if defined

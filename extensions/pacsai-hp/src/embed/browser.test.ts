@@ -397,4 +397,34 @@ describe('installEmbedBridge in a framed document', () => {
       pendingStudyRef: studyRefFor('1.2.6'),
     });
   });
+
+  it('passes the sign-in handoff through the handle, on the window clock, and keeps the token off the hook', async () => {
+    // A JWT-shaped fake, never a real token.
+    const token = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.ZmFrZS1zaWc';
+    const expiresAt = 1791234567;
+    const handle = browser.getEmbedBridge()!;
+    // Bound already: the grace for the token is counted from the call, on the window's timers.
+    const missed = handle.whenShellAuth();
+    jest.advanceTimersByTime(300);
+    expect(await missed).toBeNull();
+
+    const tokens: unknown[] = [];
+    handle.onAuthToken(t => tokens.push(t));
+    const waiting = handle.whenShellAuth();
+    const before = hook().getState();
+    deliver(
+      buildEmbedMessage('shell.auth', { nonce: NONCE, caseGeneration: 1, payload: { accessToken: token, expiresAt } })
+    );
+    expect(await waiting).toEqual({ accessToken: token, expiresAt });
+    expect(tokens).toEqual([{ accessToken: token, expiresAt }]);
+    expect(await handle.whenShellAuth()).toBe(await waiting);
+    const after = hook().getState();
+    expect(after).toMatchObject({
+      caseGeneration: before.caseGeneration,
+      pendingStudyRef: before.pendingStudyRef,
+      auth: { fromShell: true, received: 1, expiresAt },
+    });
+    expect(JSON.stringify(after)).not.toContain(token);
+    expect(postedOf('viewer.error')).toHaveLength(3); // nothing answered the token
+  });
 });

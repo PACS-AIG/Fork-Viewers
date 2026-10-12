@@ -23,9 +23,12 @@ export interface OidcClientSettings {
 
 /** oidc-client (v1) and oidc-client-ts share this surface. */
 export interface UserManagerLike {
-  getUser(): Promise<{ expired?: boolean; access_token?: string } | null>;
+  getUser(): Promise<{ expired?: boolean; access_token?: string; profile?: Record<string, unknown> } | null>;
   signinSilent(args?: unknown): Promise<{ expired?: boolean; access_token?: string } | null | undefined>;
   signinRedirect(args?: unknown): Promise<void>;
+  /** The sign-in handoff stores the report window's token as the user (./shellAuth). */
+  storeUser(user: unknown): Promise<void>;
+  removeUser(): Promise<void>;
   settings: Record<string, any>;
 }
 

@@ -1,5 +1,10 @@
 import { ErrorResponse as NextErrorResponse, ErrorTimeout as NextErrorTimeout } from 'oidc-client-ts';
-import { preInitSignIn, stripBasename, isNoSessionError } from './preInitSignIn';
+import {
+  preInitSignIn,
+  stripBasename,
+  isNoSessionError,
+  isUsableShellToken,
+  SHELL_TOKEN_MIN_REMAINING_MS, SHELL_USER_MARK, isShellUser } from './preInitSignIn';
 
 /**
  * oidc-client v1's ErrorResponse (its src/ErrorResponse.js; the bundle does not
@@ -47,6 +52,9 @@ function fakeManager({ stored = null, silent = 'reject', redirect = 'ok' } = {})
       signinRedirect: async () => {
         calls.push('signinRedirect');
         if (redirect === 'throw') throw new Error('popup blocked');
+      },
+      removeUser: async () => {
+        calls.push('removeUser');
       },
     },
   };
@@ -325,5 +333,160 @@ describe('preInitSignIn framed', () => {
     expect(d.fm.calls).toEqual(['getUser', 'signinSilent', 'signinRedirect']);
     expect(required.count).toBe(0);
     expect(JSON.parse(d.stored.get('ohif-redirect-to'))).toEqual({ pathname: '/viewer', search: '?StudyInstanceUIDs=1' });
+  });
+});
+
+// Rev 11 milestone 6, the sign-in handoff (pacsai.embed/1 §6): framed with the
+// bridge, the report window's own token is waited for first.
+describe('preInitSignIn framed, with the report window\'s token', () => {
+  /** A JWT-shaped fake, never a real token. */
+  const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.ZmFrZS1zaWc';
+  const NOW = 1791234000000;
+  const token = (secondsLeft = 300) => ({ accessToken: TOKEN, expiresAt: NOW / 1000 + secondsLeft });
+
+  /** framedDeps plus the bridge's token (`shell`: a token, null, a promise or { reject }) and the store. */
+  function shellDeps({ shell = token(), store = 'ok', ...extra } = {}) {
+    const d = deps(extra);
+    const required = { codes: [] };
+    const asked = { count: 0 };
+    const storedTokens = [];
+    d.required = required;
+    d.asked = asked;
+    d.storedTokens = storedTokens;
+    d.deps = {
+      ...d.deps,
+      framed: true,
+      onAuthRequired: code => required.codes.push(code),
+      now: () => NOW,
+      shellToken: () => {
+        asked.count++;
+        d.fm.calls.push('shellToken');
+        if (shell && typeof shell === 'object' && 'reject' in shell) return Promise.reject(shell.reject);
+        return Promise.resolve(shell);
+      },
+      storeShellUser: async t => {
+        d.fm.calls.push('storeShellUser');
+        if (store === 'throw') throw new Error('storage full');
+        storedTokens.push(t);
+      },
+    };
+    return d;
+  }
+
+  it('stores a token that has more than 30 s left and continues via the shell, without asking the identity provider', async () => {
+    const d = shellDeps({ manager: { stored: { expired: false, access_token: 'own' }, silent: { expired: false } } });
+    expect(await preInitSignIn(d.deps)).toEqual({ action: 'continue', via: 'shell' });
+    // First, and alone: no stored-user lookup, no silent sign-in, no redirect.
+    expect(d.fm.calls).toEqual(['shellToken', 'storeShellUser']);
+    expect(d.storedTokens).toEqual([token()]);
+    expect(d.ready.count).toBe(1);
+    expect(d.required.codes).toEqual([]);
+    expect(d.stored.size).toBe(0);
+  });
+
+  it('waits for the token before anything else', async () => {
+    let hand;
+    const d = shellDeps({ shell: new Promise(resolve => (hand = resolve)), manager: { stored: { expired: false } } });
+    const outcome = preInitSignIn(d.deps);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(d.fm.calls).toEqual(['shellToken']);
+    expect(d.ready.count).toBe(0);
+    hand(token(31));
+    expect(await outcome).toEqual({ action: 'continue', via: 'shell' });
+    expect(d.fm.calls).toEqual(['shellToken', 'storeShellUser']);
+  });
+
+  it('takes the steps as before when no token came: a stored user, a silent sign-in, else the shell is told', async () => {
+    const storedUser = shellDeps({ shell: null, manager: { stored: { expired: false, access_token: 'own' } } });
+    expect(await preInitSignIn(storedUser.deps)).toEqual({ action: 'continue', via: 'storage' });
+    expect(storedUser.fm.calls).toEqual(['shellToken', 'getUser']);
+
+    const silent = shellDeps({ shell: null, manager: { silent: { expired: false, access_token: 'own' } } });
+    expect(await preInitSignIn(silent.deps)).toEqual({ action: 'continue', via: 'silent' });
+    expect(silent.fm.calls).toEqual(['shellToken', 'getUser', 'signinSilent']);
+
+    const none = shellDeps({ shell: null, manager: { silent: 'reject' } });
+    expect(await preInitSignIn(none.deps)).toEqual({ action: 'auth-required', code: 'AUTH_REQUIRED' });
+    expect(none.fm.calls).toEqual(['shellToken', 'getUser', 'signinSilent']);
+    expect(none.required.codes).toEqual(['AUTH_REQUIRED']);
+
+    const cases = [storedUser, silent, none];
+    for (let i = 0; i < cases.length; i++) {
+      expect(cases[i].storedTokens).toEqual([]);
+      expect(cases[i].ready.count).toBe(i < 2 ? 1 : 0);
+    }
+  });
+
+  it('discards a stored user built from the shell\'s token when this document was not handed one (the handoff turned off, or an inherited window), and signs itself in', async () => {
+    const shellUser = { access_token: TOKEN, expired: false, profile: { sub: 'x', [SHELL_USER_MARK]: true } };
+    const own = { access_token: 'own.viewer.token', expired: false };
+    // Framed, no token this time: the stored shell user is removed, the silent sign-in runs.
+    const framedNone = shellDeps({ shell: null, manager: { stored: shellUser, silent: own } });
+    expect(await preInitSignIn(framedNone.deps)).toEqual({ action: 'continue', via: 'silent' });
+    expect(framedNone.fm.calls).toEqual(['shellToken', 'getUser', 'removeUser', 'signinSilent']);
+    // Not framed (a window that inherited the tab's sessionStorage): the same.
+    const unframed = deps({ manager: { stored: shellUser, silent: own } });
+    expect(await preInitSignIn(unframed.deps)).toEqual({ action: 'continue', via: 'silent' });
+    expect(unframed.fm.calls).toEqual(['getUser', 'removeUser', 'signinSilent']);
+    // An unmarked stored user (the viewer's own sign-in) is used as before.
+    const ownStored = deps({ manager: { stored: own } });
+    expect(await preInitSignIn(ownStored.deps)).toEqual({ action: 'continue', via: 'storage' });
+    expect(ownStored.fm.calls).not.toContain('removeUser');
+    expect(isShellUser(shellUser)).toBe(true);
+    expect(isShellUser(own)).toBe(false);
+    expect(isShellUser({ profile: { [SHELL_USER_MARK]: 'true' } })).toBe(false);
+  });
+
+  it('does not boot on a token with 30 s or less left: the steps as before', async () => {
+    const lefts = [30, 1, 0, -60];
+    for (let i = 0; i < lefts.length; i++) {
+      const d = shellDeps({ shell: token(lefts[i]), manager: { silent: { expired: false, access_token: 'own' } } });
+      expect(await preInitSignIn(d.deps)).toEqual({ action: 'continue', via: 'silent' });
+      expect(d.fm.calls).toEqual(['shellToken', 'getUser', 'signinSilent']);
+      expect(d.storedTokens).toEqual([]);
+    }
+    const justEnough = shellDeps({ shell: token(31) });
+    expect(await preInitSignIn(justEnough.deps)).toEqual({ action: 'continue', via: 'shell' });
+  });
+
+  it('takes the steps as before when asking for the token or storing it throws', async () => {
+    const asking = shellDeps({ shell: { reject: new Error('bridge gone') }, manager: { stored: { expired: false } } });
+    expect(await preInitSignIn(asking.deps)).toEqual({ action: 'continue', via: 'storage' });
+    expect(asking.fm.calls).toEqual(['shellToken', 'getUser']);
+
+    const storing = shellDeps({ store: 'throw', manager: { silent: 'hang' } });
+    expect(await preInitSignIn(storing.deps)).toEqual({ action: 'auth-required', code: 'AUTH_UNAVAILABLE' });
+    expect(storing.fm.calls).toEqual(['shellToken', 'storeShellUser', 'getUser', 'signinSilent', 'signinSilent']);
+    expect(storing.ready.count).toBe(0);
+    expect(storing.required.codes).toEqual(['AUTH_UNAVAILABLE']);
+  });
+
+  it('never asks for the token when not framed, without a store, or on a skipped document', async () => {
+    const notFramed = shellDeps({ manager: { stored: { expired: false } } });
+    expect(await preInitSignIn({ ...notFramed.deps, framed: false })).toEqual({ action: 'continue', via: 'storage' });
+    const noStore = shellDeps({ manager: { stored: { expired: false } } });
+    expect(await preInitSignIn({ ...noStore.deps, storeShellUser: undefined })).toEqual({ action: 'continue', via: 'storage' });
+    const noOidc = shellDeps();
+    expect(await preInitSignIn({ ...noOidc.deps, oidc: undefined })).toEqual({ action: 'skip', reason: 'no-oidc' });
+    const codeFlow = shellDeps();
+    expect(await preInitSignIn({ ...codeFlow.deps, oidc: [{ authority: 'a', client_id: 'c', response_type: 'code' }] })).toEqual({ action: 'skip', reason: 'code-flow' });
+    const callback = shellDeps();
+    expect(await preInitSignIn({ ...callback.deps, location: { pathname: '/viewer/callback', search: '' } })).toEqual({ action: 'skip', reason: 'auth-route' });
+    const noClient = shellDeps();
+    expect(await preInitSignIn({ ...noClient.deps, getUserManager: () => undefined })).toEqual({ action: 'skip', reason: 'no-client' });
+    const all = [notFramed, noStore, noOidc, codeFlow, callback, noClient];
+    for (let i = 0; i < all.length; i++) {
+      expect(all[i].asked.count).toBe(0);
+      expect(all[i].storedTokens).toEqual([]);
+    }
+  });
+
+  it('isUsableShellToken: more than 30 s left, by the injected clock', () => {
+    expect(SHELL_TOKEN_MIN_REMAINING_MS).toBe(30000);
+    expect(isUsableShellToken(token(31), NOW)).toBe(true);
+    expect(isUsableShellToken(token(30), NOW)).toBe(false);
+    expect(isUsableShellToken(token(-1), NOW)).toBe(false);
+    expect(isUsableShellToken(null, NOW)).toBe(false);
+    expect(isUsableShellToken({ accessToken: TOKEN }, NOW)).toBe(false);
   });
 });
