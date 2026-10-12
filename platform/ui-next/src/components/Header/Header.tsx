@@ -23,6 +23,8 @@ interface HeaderProps {
   }>;
   isReturnEnabled?: boolean;
   onClickReturnButton?: () => void;
+  /** False drops the logo; with no return button the whole left mark goes (an embedded viewer). */
+  showLogo?: boolean;
   isSticky?: boolean;
   WhiteLabeling?: {
     createLogoComponentFn?: (React: any, props: any) => ReactNode;
@@ -36,6 +38,7 @@ function Header({
   menuOptions,
   isReturnEnabled = true,
   onClickReturnButton,
+  showLogo = true,
   isSticky = false,
   WhiteLabeling,
   PatientInfo,
@@ -64,23 +67,34 @@ function Header({
           remaining space rather than the exact viewport center. */}
       <div className="flex h-[48px] items-center">
         <div className="flex shrink-0 items-center">
-          <div
-            className={classNames(
-              'mr-3 inline-flex items-center',
-              isReturnEnabled && 'cursor-pointer'
-            )}
-            onClick={onClickReturn}
-            data-cy="return-to-work-list"
-          >
-            {isReturnEnabled && <Icons.ArrowLeft className="text-primary-active w-8" />}
-            <div className="ml-1">
-              {WhiteLabeling?.createLogoComponentFn?.(React, props) || <Icons.OHIFLogo />}
+          {(isReturnEnabled || showLogo) && (
+            <div
+              className={classNames(
+                'mr-3 inline-flex items-center',
+                isReturnEnabled && 'cursor-pointer'
+              )}
+              onClick={onClickReturn}
+              data-cy="return-to-work-list"
+            >
+              {isReturnEnabled && <Icons.ArrowLeft className="text-primary-active w-8" />}
+              {showLogo && (
+                <div className="ml-1">
+                  {WhiteLabeling?.createLogoComponentFn?.(React, props) || <Icons.OHIFLogo />}
+                </div>
+              )}
             </div>
-          </div>
-          {Secondary ? <div className="ml-6 h-8">{Secondary}</div> : null}
+          )}
+          {Secondary ? (
+            <div className={classNames('h-8', isReturnEnabled || showLogo ? 'ml-6' : 'ml-1')}>
+              {Secondary}
+            </div>
+          ) : null}
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-center px-2">
-          <div className="flex items-center justify-center space-x-2 overflow-x-auto">
+          {/* `safe center`: when the tools overflow they scroll from the first
+              one; plain centering clipped the first tools off the left edge,
+              out of the scroll's reach. */}
+          <div className="flex items-center space-x-2 overflow-x-auto [justify-content:safe_center]">
             {children}
           </div>
         </div>

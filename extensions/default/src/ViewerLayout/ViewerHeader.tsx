@@ -13,6 +13,21 @@ import { preserveQueryParameters, publicUrl } from '@ohif/app';
 
 const { availableLanguages, defaultLanguage, currentLanguage } = i18n;
 
+/**
+ * Framed (Rev 11 milestone 6: the report window embeds the viewer beside the
+ * editor; frame-ancestors lets only the app do so). The report window's own
+ * header carries the product mark, and a return to the study list would load
+ * the worklist inside the frame, so a framed viewer shows neither. A throw (a
+ * cross-origin top that refuses the read) means framed.
+ */
+const isFramed = (): boolean => {
+  try {
+    return window.self !== window.top;
+  } catch (_) {
+    return true;
+  }
+};
+
 function ViewerHeader({
   hotkeysManager,
   extensionManager,
@@ -21,6 +36,7 @@ function ViewerHeader({
 }: withAppTypes<{ appConfig: AppTypes.Config }>) {
   const navigate = useNavigate();
   const location = useLocation();
+  const framed = isFramed();
 
   const onClickReturnButton = () => {
     const { pathname } = location;
@@ -120,7 +136,8 @@ function ViewerHeader({
   return (
     <Header
       menuOptions={menuOptions}
-      isReturnEnabled={!!appConfig.showStudyList}
+      isReturnEnabled={!!appConfig.showStudyList && !framed}
+      showLogo={!framed}
       onClickReturnButton={onClickReturnButton}
       WhiteLabeling={appConfig.whiteLabeling}
       Secondary={
@@ -134,6 +151,7 @@ function ViewerHeader({
           <HeaderPatientInfo
             servicesManager={servicesManager}
             appConfig={appConfig}
+            compact={framed}
           />
         )
       }

@@ -73,7 +73,11 @@ function getChipInfo(servicesManager: AppTypes.ServicesManager) {
   };
 }
 
-function HeaderPatientInfo({ servicesManager, appConfig }: withAppTypes) {
+function HeaderPatientInfo({
+  servicesManager,
+  appConfig,
+  compact = false,
+}: withAppTypes<{ compact?: boolean }>) {
   const { displaySetService, hangingProtocolService, panelService } = servicesManager.services;
   const [, forceRender] = useReducer((x: number) => x + 1, 0);
 
@@ -114,7 +118,9 @@ function HeaderPatientInfo({ servicesManager, appConfig }: withAppTypes) {
     <div
       // max-w keeps a long name/description from starving the toolbar zone —
       // both text lines truncate; full values live in the Study Info drawer.
-      className="hover:bg-primary-dark flex max-w-[380px] cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5"
+      // Compact in a framed viewer: the report window's header already names
+      // the patient, and its pane is narrower.
+      className={`hover:bg-primary-dark flex ${compact ? 'max-w-[220px]' : 'max-w-[380px]'} cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5`}
       onClick={openStudyInfo}
       title="Open Study Info"
       data-cy="header-study-chip"

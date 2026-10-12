@@ -6,6 +6,7 @@ import {
   BROWSING_MODE_LABELS,
   type BrowsingMode,
 } from '../allinone/browsingMode';
+import { isFramed } from '../embed/browser';
 
 /**
  * Toolbar control for the all-in-one browsing mode (a sticky, global reader
@@ -42,7 +43,9 @@ function BrowsingModeDropdown({ commandsManager }: Record<string, any>) {
         height: 36,
         alignSelf: 'center',
         verticalAlign: 'middle',
-        maxWidth: 200,
+        // Narrower in the report window's frame, where the header is shared
+        // with the pane's width; the label truncates, the options stay whole.
+        maxWidth: isFramed() ? 150 : 200,
         padding: '0 22px 0 8px',
         margin: '0 6px',
         background: 'rgb(var(--pacs-panel-elev))',
