@@ -138,6 +138,7 @@ function ViewerHeader({
       menuOptions={menuOptions}
       isReturnEnabled={!!appConfig.showStudyList && !framed}
       showLogo={!framed}
+      toolbarAlign={framed ? 'start' : 'center'}
       onClickReturnButton={onClickReturnButton}
       WhiteLabeling={appConfig.whiteLabeling}
       Secondary={

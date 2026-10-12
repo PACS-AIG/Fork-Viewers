@@ -25,6 +25,8 @@ interface HeaderProps {
   onClickReturnButton?: () => void;
   /** False drops the logo; with no return button the whole left mark goes (an embedded viewer). */
   showLogo?: boolean;
+  /** 'start' puts the tools at the left edge (an embedded viewer, which has no logo there). */
+  toolbarAlign?: 'center' | 'start';
   isSticky?: boolean;
   WhiteLabeling?: {
     createLogoComponentFn?: (React: any, props: any) => ReactNode;
@@ -39,6 +41,7 @@ function Header({
   isReturnEnabled = true,
   onClickReturnButton,
   showLogo = true,
+  toolbarAlign = 'center',
   isSticky = false,
   WhiteLabeling,
   PatientInfo,
@@ -90,11 +93,21 @@ function Header({
             </div>
           ) : null}
         </div>
-        <div className="flex min-w-0 flex-1 items-center justify-center px-2">
+        <div
+          className={classNames(
+            'flex min-w-0 flex-1 items-center px-2',
+            toolbarAlign === 'start' ? 'justify-start' : 'justify-center'
+          )}
+        >
           {/* `safe center`: when the tools overflow they scroll from the first
               one; plain centering clipped the first tools off the left edge,
               out of the scroll's reach. */}
-          <div className="flex items-center space-x-2 overflow-x-auto [justify-content:safe_center]">
+          <div
+            className={classNames(
+              'flex items-center space-x-2 overflow-x-auto',
+              toolbarAlign === 'start' ? 'justify-start' : '[justify-content:safe_center]'
+            )}
+          >
             {children}
           </div>
         </div>
