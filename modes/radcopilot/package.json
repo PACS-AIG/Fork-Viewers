@@ -22,6 +22,7 @@
   ],
   "peerDependencies": {
     "@ohif/core": "3.10.0-beta.84",
+    "@ohif/extension-measurement-tracking": "3.10.0-beta.84",
     "@ohif/extension-pacsai-hp": "3.10.0-beta.84",
     "@ohif/mode-longitudinal": "3.10.0-beta.84"
   },

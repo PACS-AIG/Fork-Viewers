@@ -38,6 +38,12 @@ jest.mock('@ohif/mode-longitudinal', () => ({
     extensionDependencies: { '@ohif/extension-default': '^3.0.0', '@ohif/extension-pacsai-hp': '^3.0.0' },
   },
 }));
+// The mode turns measurement-tracking's prompts off through this customization (trackingPrompts.ts).
+jest.mock('@ohif/extension-measurement-tracking', () => ({
+  TRACKING_PROMPTS_CUSTOMIZATION: jest.requireActual(
+    '../../../measurement-tracking/src/contexts/TrackedMeasurementsContext/trackingPrompts'
+  ).TRACKING_PROMPTS_CUSTOMIZATION,
+}));
 jest.mock('@ohif/extension-pacsai-hp', () => ({
   ...jest.requireActual('./session'),
   ...jest.requireActual('./islandLoader'),
@@ -54,11 +60,16 @@ import { currentReadingDock } from './session';
 const services = () => {
   const sections: Record<string, string[]> = {};
   const buttons: unknown[] = [];
+  const customizations: unknown[] = [];
   return {
     sections,
     buttons,
+    customizations,
     servicesManager: {
       services: {
+        customizationService: {
+          setCustomizations: (c: unknown, scope?: unknown) => customizations.push({ c, scope }),
+        },
         toolbarService: {
           addButtons: (b: unknown[]) => buttons.push(...b),
           createButtonSection: (name: string, ids: string[]) => {
@@ -132,11 +143,21 @@ describe('the radcopilot mode', () => {
     m.onModeEnter.call(m, { servicesManager: off.servicesManager });
     expect(mockCalls).toEqual(['base.enter this=@ohif/mode-radcopilot']);
     expect(off.sections.secondary).toBeUndefined();
+    expect(off.customizations).toEqual([]);
 
     (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = 'on';
     const on = services();
     m.onModeEnter.call(m, { servicesManager: on.servicesManager });
     expect(on.sections.secondary).toEqual(['ReadingModes', 'ReadingMic']);
+  });
+
+  it("with READING_DOCK on, turns OHIF's own report prompts off for this mode only (a mode customization)", () => {
+    const m = radcopilot.modeFactory({});
+    (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
+    const on = services();
+    m.onModeEnter.call(m, { servicesManager: on.servicesManager });
+    // The default scope (mode): cleared when the next mode enters.
+    expect(on.customizations).toEqual([{ c: { 'measurementTracking.prompts': { $set: false } }, scope: undefined }]);
   });
 
   it("mounts the dock at the route's first render (onModeInit), whether or not images load, and only when on", async () => {

@@ -21,6 +21,11 @@ module.exports = {
     // the mode from modes/ and mocks its two imports by these names.
     '^@ohif/mode-longitudinal$': '<rootDir>/../../modes/longitudinal/src/index.ts',
     '^@ohif/extension-pacsai-hp$': '<rootDir>/src/index.tsx',
+    // OHIF's tracking prompts off in radcopilot (src/readingDock/trackingPrompts.test.tsx,
+    // radcopilotMode.test.ts): measurement-tracking's context and panel, their
+    // imports mocked by these names.
+    '^@ohif/extension-measurement-tracking$': '<rootDir>/../measurement-tracking/src/index.tsx',
+    '^@ohif/extension-cornerstone$': '<rootDir>/../cornerstone/src/index.tsx',
     '@ohif/(.*)': '<rootDir>/../../platform/$1/src',
   },
 };

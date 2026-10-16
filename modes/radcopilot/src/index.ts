@@ -15,11 +15,15 @@
  *     Images / Both / Report;
  *   - with READING_DOCK on: the dock (mounted at the route's entry whether or
  *     not images load), the area below the header narrowed to the images'
- *     width, the header's reading controls, and no return to the study list.
+ *     width, the header's reading controls, no return to the study list, and
+ *     OHIF's own report (a DICOM SR) never asking anything: the tracking
+ *     machine's prompts are off (measurement-tracking's trackingPrompts.ts),
+ *     so there is no "track this series", no SR save and no SR hydrate prompt.
  * With READING_DOCK off it is the longitudinal viewer under another route.
  * The longitudinal mode's own files are not changed.
  */
 import longitudinal from '@ohif/mode-longitudinal';
+import { TRACKING_PROMPTS_CUSTOMIZATION } from '@ohif/extension-measurement-tracking';
 import {
   IMAGES_WIDTH_VAR,
   READING_MIC_UITYPE,
@@ -84,7 +88,12 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
     onModeEnter: function (args: withAppTypes<{ studyInstanceUIDs?: string[] }>) {
       base.onModeEnter.call(this, args);
       if (readingDockEnabled()) {
-        const { toolbarService } = args.servicesManager.services;
+        const { toolbarService, customizationService } = args.servicesManager.services;
+        // The reader's report is the app's: OHIF's own (an SR) asks nothing here.
+        // A mode customization, so the next mode entered starts without it.
+        customizationService.setCustomizations({
+          [TRACKING_PROMPTS_CUSTOMIZATION]: { $set: false },
+        });
         toolbarService.addButtons(readingButtons);
         toolbarService.createButtonSection(
           'secondary',

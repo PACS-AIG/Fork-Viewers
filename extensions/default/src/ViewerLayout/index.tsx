@@ -148,7 +148,14 @@ function ViewerLayout({
       />
       <div
         className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
-        style={contentWidth ? { height: 'calc(100vh - 52px)', width: contentWidth } : { height: 'calc(100vh - 52px)' }}
+        // pacsai: narrowed, the area also keeps its overlays (the loading
+        // indicator is z-50) in a stacking context of its own, so they stay
+        // under the report column beside or over it; dialogs portal to <body>.
+        style={
+          contentWidth
+            ? { height: 'calc(100vh - 52px)', width: contentWidth, isolation: 'isolate' }
+            : { height: 'calc(100vh - 52px)' }
+        }
       >
         <React.Fragment>
           {showLoadingIndicator && (

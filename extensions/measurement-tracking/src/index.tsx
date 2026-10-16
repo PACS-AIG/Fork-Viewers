@@ -41,3 +41,5 @@ const measurementTrackingExtension = {
 };
 
 export default measurementTrackingExtension;
+// pacsai (Rev 11 M6 approach C, phase 1 PR 2): the mode customization that turns the machine's prompts off.
+export { TRACKING_PROMPTS_CUSTOMIZATION } from './contexts/TrackedMeasurementsContext/trackingPrompts';

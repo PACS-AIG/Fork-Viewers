@@ -13,9 +13,10 @@
  *     the report has told its microphone state, so a hidden report never
  *     dictates unseen with no indicator. The images under the report in Report
  *     mode are parked (installParkedSuspend listens through `onParkedChange`).
- *   - Leaving the mode settles the report, then unmounts it. The viewer's
- *     error routes (a study not found) keep it, alone, and while a report is
- *     open the page asks before it unloads.
+ *   - Leaving the mode takes the report off the screen at once (its
+ *     recognizer stopped, the images unparked), settles it, then unmounts it.
+ *     The viewer's error routes (a study not found) keep it, alone, and while
+ *     a report is open the page asks before it unloads.
  *
  * The layout comes from dockModel.ts (the app's rules); the island from
  * islandLoader.ts. The header's controls (ReadingControls.tsx) read the state
@@ -190,6 +191,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let gone = false;
   let leaveTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Watches the app's sign-in pop-up until it closes; ends with the dock. */
+  let signInPoll: ReturnType<typeof setInterval> | null = null;
   const counts = { mounts: 0, unmounts: 0, setCases: 0, refusedImages: 0, settles: 0 };
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
@@ -481,7 +484,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
 
   const start = async () => {
     started = true;
-    doc.body.append(column, divider, goneLine);
+    // The divider before the column: the Tab order follows the screen (images, divider, report).
+    doc.body.append(divider, column, goneLine);
     apply();
     let result: IslandLoadResult;
     try {
@@ -635,16 +639,24 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     e.stopPropagation();
     setReportRatio(r);
   });
+  const stopSignInPoll = () => {
+    if (signInPoll) {
+      win.clearInterval(signInPoll);
+      signInPoll = null;
+    }
+  };
   coverAction.addEventListener('click', () => {
     const popup = deps.openAppSignIn?.();
     if (!popup) {
       return;
     }
-    const timer = win.setInterval(() => {
+    // One poll, for the newest pop-up (the same named window on a second click).
+    stopSignInPoll();
+    signInPoll = win.setInterval(() => {
       if (!popup.closed) {
         return;
       }
-      win.clearInterval(timer);
+      stopSignInPoll();
       if (!gone && phase === 'failed' && failure === 'APP_SIGNED_OUT') {
         phase = 'loading';
         failure = null;
@@ -723,6 +735,23 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     }
   };
 
+  /**
+   * The start of a leave: the next route is on screen already, so nothing of
+   * the report stays on it while the report settles (up to 10 s). The column
+   * parks off the window at its size, inert, as in Images; the divider and the
+   * images-gone line go; the images area loses its width rule; nothing is held
+   * parked (the next mode's images render at once).
+   */
+  const leaveScreen = () => {
+    column.style.left = `${widthNow()}px`;
+    (column as HTMLElement & { inert: boolean }).inert = true;
+    column.setAttribute('aria-hidden', 'true');
+    divider.hidden = true;
+    goneLine.style.display = 'none';
+    root.style.removeProperty(IMAGES_WIDTH_VAR);
+    publishParked('visible');
+  };
+
   const destroy = async () => {
     if (gone) {
       return;
@@ -735,12 +764,29 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     if (leaveTimer) {
       win.clearTimeout(leaveTimer);
     }
+    stopSignInPoll();
     win.removeEventListener('resize', onResize);
     win.removeEventListener('keydown', onKeyDown, true);
     win.removeEventListener('beforeunload', onBeforeUnload);
+    leaveScreen();
     const h = handle;
     handle = null;
     if (h) {
+      // A hidden report takes no more words: its recognizer stops first, by
+      // the footer's own toggle, when the report says it is running (between
+      // states, the unmount below stops it). Then its popups go too.
+      if (dictation?.started && !dictation.busy) {
+        try {
+          h.toggleDictation?.();
+        } catch (_) {
+          /* the unmount stops it */
+        }
+      }
+      try {
+        h.setVisibility(false);
+      } catch (_) {
+        /* the column is off the window already */
+      }
       counts.settles++;
       let timer: ReturnType<typeof setTimeout> | null = null;
       try {
@@ -767,8 +813,6 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     column.remove();
     divider.remove();
     goneLine.remove();
-    root.style.removeProperty(IMAGES_WIDTH_VAR);
-    publishParked('visible');
     notify();
   };
 

@@ -10,6 +10,7 @@ import promptTrackNewSeries from './promptTrackNewSeries';
 import promptTrackNewStudy from './promptTrackNewStudy';
 import promptHydrateStructuredReport from './promptHydrateStructuredReport';
 import hydrateStructuredReport from './hydrateStructuredReport';
+import { gateTrackingSend } from './trackingPrompts';
 import { useAppConfig } from '@state';
 
 const TrackedMeasurementsContext = React.createContext();
@@ -197,8 +198,13 @@ function TrackedMeasurementsContextProvider(
     return Machine(machineConfiguration, machineOptions);
   }, []); // Empty dependency array ensures this is only created once
 
-  const [trackedMeasurements, sendTrackedMeasurementsEvent] = useMachine(
-    measurementTrackingMachine
+  const [trackedMeasurements, sendToMachine] = useMachine(measurementTrackingMachine);
+  // pacsai (Rev 11 milestone 6, approach C, phase 1 PR 2): a mode can hold
+  // back the events that start the machine's prompts (trackingPrompts.ts).
+  // Every sender below and every consumer of this context goes through it.
+  const sendTrackedMeasurementsEvent = useMemo(
+    () => gateTrackingSend(sendToMachine, customizationService),
+    [sendToMachine, customizationService]
   );
 
   useEffect(() => {

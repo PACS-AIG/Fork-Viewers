@@ -88,6 +88,9 @@ describe('the reading dock', () => {
     expect(isl.options().studyInstanceUid).toBe(A);
     expect(isl.options().paneLayout).toBe(true);
     expect(column()?.parentElement).toBe(document.body);
+    // The Tab order follows the screen: the divider before the report.
+    const divider = document.querySelector('[data-pacsai-reading-divider]') as HTMLElement;
+    expect(divider.compareDocumentPosition(column() as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelector('[data-pacsai-reading-island]')).toBe(
       isl.module.mountReportEditor.mock.calls[0][0]
     );
@@ -227,6 +230,119 @@ describe('the reading dock', () => {
     expect(d.isGone()).toBe(true);
     expect(column()).toBeNull();
     expect(document.documentElement.style.getPropertyValue(IMAGES_WIDTH_VAR)).toBe('');
+  });
+
+  it('leaving: nothing of the report on screen while it settles, its recognizer stopped first, the images not held parked', async () => {
+    const isl = fakeIsland();
+    let release: () => void = () => undefined;
+    isl.handle.settle.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          release = () => resolve({ studyInstanceUid: A, generation: 1, state: 'reportable', draft: 'saved' });
+        })
+    );
+    const parked: string[] = [];
+    const off = onParkedChange(s => parked.push(s));
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    await flush();
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    isl.options().onDictation({ started: true, busy: false, available: true, pending: 0 });
+    d.setMode('report');
+    expect(parked).toEqual(['parked']);
+    isl.handle.setVisibility.mockClear();
+
+    setPath('/viewer/viewer/viewer?StudyInstanceUIDs=' + A); // another mode, same document
+    d.routeLeft();
+    jest.runOnlyPendingTimers();
+    await flush();
+    // Settling: the column is still in the page (the island mounted), off the window and inert.
+    expect(isl.handle.settle).toHaveBeenCalledTimes(1);
+    expect(isl.handle.unmount).not.toHaveBeenCalled();
+    const col = column() as HTMLElement & { inert?: boolean };
+    expect(col).not.toBeNull();
+    expect(parseInt(col.style.left, 10)).toBeGreaterThanOrEqual(1920);
+    expect(col.inert).toBe(true);
+    expect(col.getAttribute('aria-hidden')).toBe('true');
+    expect((document.querySelector('[data-pacsai-reading-divider]') as HTMLElement).hidden).toBe(true);
+    expect(isl.handle.setVisibility).toHaveBeenLastCalledWith(false);
+    expect(isl.handle.toggleDictation).toHaveBeenCalledTimes(1);
+    expect(isl.handle.toggleDictation.mock.invocationCallOrder[0]).toBeLessThan(
+      isl.handle.settle.mock.invocationCallOrder[0]
+    );
+    expect(parked).toEqual(['parked', 'visible']);
+    expect(document.documentElement.style.getPropertyValue(IMAGES_WIDTH_VAR)).toBe('');
+    // A resize while it settles does not bring it back.
+    window.dispatchEvent(new Event('resize'));
+    expect(parseInt(col.style.left, 10)).toBeGreaterThanOrEqual(1920);
+
+    release();
+    await flush();
+    expect(isl.handle.unmount).toHaveBeenCalledTimes(1);
+    expect(column()).toBeNull();
+    off();
+  });
+
+  it('leaving with the microphone off, or between states, toggles nothing; a settle that never ends is cut at 10 s', async () => {
+    for (let i = 0; i < 2; i++) {
+      const isl = fakeIsland();
+      isl.handle.settle.mockImplementation(() => new Promise(() => undefined));
+      const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+      d.enter(A);
+      await flush();
+      isl.options().onDictation(
+        i === 0
+          ? { started: false, busy: false, available: true, pending: 0 }
+          : { started: true, busy: true, available: true, pending: 0 }
+      );
+      setPath('/viewer/viewer/');
+      d.routeLeft();
+      jest.runOnlyPendingTimers(); // the leave
+      await flush();
+      expect(isl.handle.toggleDictation).not.toHaveBeenCalled();
+      expect(isl.handle.unmount).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(10_000);
+      await flush();
+      expect(isl.handle.unmount).toHaveBeenCalledTimes(1);
+      expect(column()).toBeNull();
+      setPath('/viewer/viewer/radcopilot?StudyInstanceUIDs=' + A);
+    }
+  });
+
+  it("the sign-in pop-up's poll: one at a time, and it ends with the dock", async () => {
+    const popup = { closed: false };
+    const load = jest.fn(async () => ({ ok: false as const, failure: 'APP_SIGNED_OUT' as const }));
+    dock = createReadingDock({
+      win: window,
+      load,
+      isReadingPath,
+      isErrorPath,
+      openAppSignIn: () => popup as unknown as Window,
+    });
+    dock.enter(A);
+    await flush();
+    const action = document.querySelector('[data-pacsai-reading-cover-action]') as HTMLButtonElement;
+    expect(action.hidden).toBe(false);
+    action.click();
+    action.click(); // a second click: still one poll
+    expect(jest.getTimerCount()).toBe(1);
+    // The pop-up closes: the dock asks again.
+    popup.closed = true;
+    jest.advanceTimersByTime(500);
+    await flush();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+    // Signed out still: Sign in again, then leave while the pop-up is open.
+    popup.closed = false;
+    action.click();
+    expect(jest.getTimerCount()).toBe(1);
+    await dock.destroy();
+    expect(jest.getTimerCount()).toBe(0);
+    popup.closed = true;
+    jest.advanceTimersByTime(2000);
+    await flush();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(column()).toBeNull();
   });
 
   it('asks before the page unloads while a report is open, not after it is signed', async () => {
