@@ -24,7 +24,12 @@ function ViewerLayout({
   rightPanelClosed = false,
   leftPanelResizable = false,
   rightPanelResizable = false,
-}: withAppTypes): React.FunctionComponent {
+  // pacsai (Rev 11 milestone 6, approach C): a mode can narrow the area below
+  // the header (radcopilot's report column sits beside it) and hide the
+  // header's return to the study list. Unset, the layout is as upstream's.
+  contentWidth,
+  studyListReturn = true,
+}: withAppTypes<{ contentWidth?: string; studyListReturn?: boolean }>): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
   const { panelService, hangingProtocolService } = servicesManager.services;
@@ -139,10 +144,11 @@ function ViewerLayout({
         extensionManager={extensionManager}
         servicesManager={servicesManager}
         appConfig={appConfig}
+        studyListReturn={studyListReturn}
       />
       <div
         className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
-        style={{ height: 'calc(100vh - 52px)' }}
+        style={contentWidth ? { height: 'calc(100vh - 52px)', width: contentWidth } : { height: 'calc(100vh - 52px)' }}
       >
         <React.Fragment>
           {showLoadingIndicator && (
@@ -218,6 +224,8 @@ ViewerLayout.propTypes = {
   rightPanels: PropTypes.array,
   leftPanelClosed: PropTypes.bool.isRequired,
   rightPanelClosed: PropTypes.bool.isRequired,
+  contentWidth: PropTypes.string,
+  studyListReturn: PropTypes.bool,
   /** Responsible for rendering our grid of viewports; provided by consuming application */
   children: PropTypes.oneOfType([PropTypes.node, PropTypes.func]).isRequired,
   viewports: PropTypes.array,

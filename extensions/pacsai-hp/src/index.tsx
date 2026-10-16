@@ -36,6 +36,15 @@ import initAttemptObservers from './attempt/initAttemptObservers';
 import installImagePoolHold from './startup/installImagePoolHold';
 import { installParkedSuspend } from './startup/installParkedSuspend';
 import { getEmbedBridge } from './embed/browser';
+import { onParkedChange, IMAGES_WIDTH_VAR } from './readingDock/readingDock';
+import {
+  currentReadingDock,
+  ensureReadingDock,
+  readingDockEnabled,
+} from './readingDock/session';
+import { launchFromQuery, routeStudyOf } from './readingDock/islandLoader';
+import { READING_MODES } from './readingDock/dockModel';
+import { READING_MIC_UITYPE, READING_MODES_UITYPE } from './getToolbarModule';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
 import { hangingIgnoresPriors } from './allinone/browsingMode';
@@ -128,6 +137,11 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     const embedBridge = getEmbedBridge();
     if (embedBridge) {
       installParkedSuspend(embedBridge.onVisibilityChange, servicesManager.services);
+    } else if (readingDockEnabled()) {
+      // Rev 11 milestone 6, approach C: a top-level viewer with the reading
+      // dock. The dock's Report mode covers the images, and the same suspend
+      // keeps them quiet under it (readingDock.ts onParkedChange).
+      installParkedSuspend(onParkedChange, servicesManager.services);
     }
 
     // Cross-study relative scroll synchronizer used by the protocols.
@@ -297,4 +311,14 @@ export {
   OverlayTextLine,
   overlayTextLine,
   installImagePoolHold,
+  // Rev 11 milestone 6, approach C: the reading dock, for the radcopilot mode.
+  currentReadingDock,
+  ensureReadingDock,
+  readingDockEnabled,
+  routeStudyOf,
+  launchFromQuery,
+  READING_MODES,
+  IMAGES_WIDTH_VAR,
+  READING_MODES_UITYPE,
+  READING_MIC_UITYPE,
 };

@@ -17,6 +17,10 @@ module.exports = {
     // @ohif/extension-default) — not even as a mock.
     '^@ohif/core/src/(.*)$': '<rootDir>/../../platform/core/src/$1',
     '^@ohif/extension-default$': '<rootDir>/../default/src',
+    // The radcopilot mode's test (src/readingDock/radcopilotMode.test.ts) loads
+    // the mode from modes/ and mocks its two imports by these names.
+    '^@ohif/mode-longitudinal$': '<rootDir>/../../modes/longitudinal/src/index.ts',
+    '^@ohif/extension-pacsai-hp$': '<rootDir>/src/index.tsx',
     '@ohif/(.*)': '<rootDir>/../../platform/$1/src',
   },
 };

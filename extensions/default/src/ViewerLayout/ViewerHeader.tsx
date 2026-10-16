@@ -33,7 +33,8 @@ function ViewerHeader({
   extensionManager,
   servicesManager,
   appConfig,
-}: withAppTypes<{ appConfig: AppTypes.Config }>) {
+  studyListReturn = true,
+}: withAppTypes<{ appConfig: AppTypes.Config; studyListReturn?: boolean }>) {
   const navigate = useNavigate();
   const location = useLocation();
   const framed = isFramed();
@@ -138,7 +139,8 @@ function ViewerHeader({
   return (
     <Header
       menuOptions={menuOptions}
-      isReturnEnabled={!!appConfig.showStudyList && !framed}
+      // A mode can hide it too (radcopilot: the reading window is not a study list's).
+      isReturnEnabled={!!appConfig.showStudyList && !framed && studyListReturn !== false}
       showLogo={!framed}
       toolbarAlign={framed ? 'start' : 'center'}
       onClickReturnButton={onClickReturnButton}
