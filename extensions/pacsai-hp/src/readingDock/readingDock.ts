@@ -20,6 +20,12 @@
  *     recognizer stopped, the images unparked), settles it, then unmounts it.
  *     The viewer's error routes (a study not found) keep it, alone, and while
  *     a report is open the page asks before it unloads.
+ *   - Phase 2 (the worklist's reading window): the dock answers the worklist
+ *     that opened this window (readingChannel.ts). It advertises that it can
+ *     open the next case in this page; a Read is then the viewer's
+ *     in-document study switch, or, for a study on another gateway or a 13th
+ *     case, a planned reload once the report is settled (no leave prompt);
+ *     after Sign it relays `closeWindow`, so the worklist closes the window.
  *
  * The layout comes from dockModel.ts (the app's rules); the island from
  * islandLoader.ts. The header's controls (ReadingControls.tsx) read the state
@@ -56,12 +62,24 @@ import {
   type IslandLoadFailure,
   type IslandLoadResult,
 } from './islandLoader';
+import {
+  buildAdvert,
+  buildCloseWindow,
+  caseOpenedAnswer,
+  decideReadingCommand,
+  mintDocumentId,
+  readingRouteFor,
+  screenCaseCommand,
+  type OpenCaseCommand,
+} from './readingChannel';
 
 /** Above the viewer's layout and its viewport overlays, below its dialogs and menus (z-50). */
 export const DOCK_Z_INDEX = 40;
 /** The CSS width the radcopilot layout gives OHIF's images area (ViewerLayout `contentWidth`). */
 export const IMAGES_WIDTH_VAR = '--pacsai-reading-images-width';
 export const SETTLE_BEFORE_UNMOUNT_MS = 10_000;
+/** A planned reload waits this long at most for a Submit in flight (the island's own Submit wait). */
+export const SUBMIT_BEFORE_RELOAD_MS = 15_000;
 const SET_CASE_RETRY_MS = 200;
 const SUBMITTING_RETRY_MS = 1000;
 const MAX_NOTICES = 5;
@@ -96,6 +114,35 @@ export interface ReadingDockSnapshot {
   notices: DockNotice[];
   signed: boolean;
   counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number; micKeys: number };
+  /** Phase 2: the channel to the worklist that opened this window (no study UIDs). */
+  channel: {
+    documentId: string;
+    /** A worklist this page may talk to opened it. */
+    opener: boolean;
+    casesInDocument: number;
+    /** 'settling' while the report settles before a planned reload; 'go' once it loads. */
+    plannedReload: 'no' | 'settling' | 'go';
+    adverts: number;
+    answers: { switched: number; focusOnly: number; reloads: number; refused: number };
+    ignored: Record<string, number>;
+    relays: number;
+  };
+}
+
+/** Phase 2: what the dock needs to answer the worklist that opened its window. */
+export interface ReadingChannelDeps {
+  /** That worklist's window, when this page may talk to it (open, this origin); else null. */
+  opener: () => Window | null;
+  ownOrigin: string;
+  /** The gateways this document's data sources were built for (its URL's, at its start). */
+  documentGateways: () => readonly string[];
+  /** The route this document was opened on (its path), for every case it shows. */
+  openedPath: string | null;
+  /** The viewer's in-document study switch to this address. */
+  switchTo: (href: string) => void;
+  /** A planned reload: this window loads this address. */
+  loadNew: (href: string) => void;
+  mintId?: () => string;
 }
 
 export interface ReadingDockDeps {
@@ -107,6 +154,8 @@ export interface ReadingDockDeps {
   isErrorPath: (pathname: string) => boolean;
   /** The app's own sign-in pop-up (/auth/popup), when the flags say there is no app session. */
   openAppSignIn?: () => Window | null;
+  /** Phase 2: the channel to the worklist that opened this window (none: no channel). */
+  channel?: ReadingChannelDeps;
 }
 
 export interface ReadingDock {
@@ -154,6 +203,7 @@ const MODE_BY_CODE: Record<string, WorkspaceMode> = { Digit1: 'images', Digit2: 
 const COVER_LOADING = 'Opening the report…';
 const COVER_SWITCHING = 'Opening the report for this study…';
 const COVER_SUBMITTING = 'Finishing the signature on the previous case…';
+const COVER_RELOADING = 'Saving the report, then opening the next case…';
 
 const FAILURE_TEXT: Record<IslandLoadFailure, string> = {
   APP_SIGNED_OUT: 'Sign in to PACS AI to open the report here.',
@@ -198,6 +248,22 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   /** Watches the app's sign-in pop-up until it closes; ends with the dock. */
   let signInPoll: ReturnType<typeof setInterval> | null = null;
   const counts = { mounts: 0, unmounts: 0, setCases: 0, refusedImages: 0, settles: 0, micKeys: 0 };
+  // Phase 2: the channel to the worklist that opened this window.
+  const channel = deps.channel ?? null;
+  let documentId = '';
+  try {
+    documentId = (channel?.mintId ?? mintDocumentId)();
+  } catch (_) {
+    documentId = '';
+  }
+  let casesInDocument = 1;
+  let plannedReload: 'no' | 'settling' | 'go' = 'no';
+  const channelCounts = {
+    adverts: 0,
+    answers: { switched: 0, focusOnly: 0, reloads: 0, refused: 0 },
+    ignored: {} as Record<string, number>,
+    relays: 0,
+  };
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
   const listeners = new Set<() => void>();
@@ -286,6 +352,30 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     font: '13px/18px system-ui, -apple-system, "Segoe UI", sans-serif',
   });
 
+  // ---- the channel's window ------------------------------------------------------
+  function openerNow(): Window | null {
+    if (!channel) {
+      return null;
+    }
+    try {
+      return channel.opener();
+    } catch (_) {
+      return null;
+    }
+  }
+  function postToOpener(message: unknown): boolean {
+    const opener = openerNow();
+    if (!opener || !channel) {
+      return false;
+    }
+    try {
+      opener.postMessage(message, channel.ownOrigin);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ---- reading the state --------------------------------------------------------
   const widthNow = () => root.clientWidth || win.innerWidth;
   const heightNow = () => root.clientHeight || win.innerHeight;
@@ -305,6 +395,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   const coverLine = (): string | null => {
     if (phase === 'failed') {
       return FAILURE_TEXT[failure as IslandLoadFailure] ?? FAILURE_TEXT.ISLAND_LOAD_FAILED;
+    }
+    if (plannedReload !== 'no') {
+      return COVER_RELOADING;
     }
     if (!covered()) {
       return null;
@@ -336,6 +429,16 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     notices: notices.map(n => ({ ...n })),
     signed,
     counts: { ...counts },
+    channel: {
+      documentId,
+      opener: !!openerNow(),
+      casesInDocument,
+      plannedReload,
+      adverts: channelCounts.adverts,
+      answers: { ...channelCounts.answers },
+      ignored: { ...channelCounts.ignored },
+      relays: channelCounts.relays,
+    },
   });
 
   const notify = () => {
@@ -419,9 +522,20 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     apply();
   };
   const onSigned = (signal: unknown) => {
-    const s = signal as { studyInstanceUid?: unknown } | null;
-    if (s && s.studyInstanceUid === islandStudy) {
+    const s = signal as { studyInstanceUid?: unknown; sessionId?: unknown } | null;
+    // The case shown signed: by its launch when the route carries one (a case
+    // switched away from as its Submit ended can report the next study).
+    const ofShownCase = routeLaunch
+      ? s?.sessionId === routeLaunch.attempt
+      : s?.studyInstanceUid === islandStudy;
+    if (s && ofShownCase) {
       signed = true;
+    }
+    // Phase 2: the relay after Sign; the worklist closes this window for the
+    // case it shows and ignores any other.
+    const relay = buildCloseWindow(s?.sessionId);
+    if (relay && postToOpener(relay)) {
+      channelCounts.relays++;
     }
     if (submittingWait) {
       requestCase();
@@ -505,6 +619,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       failure = result.failure;
       failureDetail = result.detail ?? null;
       apply();
+      advertise();
       return;
     }
     build = result.build;
@@ -526,6 +641,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       failure = 'ISLAND_LOAD_FAILED';
       failureDetail = String((e as Error)?.message ?? e).slice(0, 120);
       apply();
+      advertise();
       return;
     }
     if (!handleSpeaksV1(h)) {
@@ -538,6 +654,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       failure = 'ISLAND_VERSION_MISMATCH';
       failureDetail = 'the handle does not name pacsai.reportIsland v1';
       apply();
+      advertise();
       return;
     }
     handle = h;
@@ -547,10 +664,189 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     expected = study ? { study, generation: null } : null;
     islandVisible = true;
     apply();
+    advertise();
     // The route moved on while the module loaded.
     if (routeStudy !== islandStudy) {
       requestCase();
     }
+  };
+
+  // ---- phase 2: the worklist's channel --------------------------------------------------
+  /** The advertisement: this document, the launch of the case it shows, and
+   *  whether it can open the next case in this page (mounted, no reload under way). */
+  function advertise(): void {
+    if (!channel || gone || !documentId) {
+      return;
+    }
+    let message: unknown;
+    try {
+      message = buildAdvert({
+        documentId,
+        activeLaunch: routeLaunch ?? null,
+        caseSwitch: phase === 'mounted' && plannedReload === 'no',
+      });
+    } catch (_) {
+      return;
+    }
+    if (postToOpener(message)) {
+      channelCounts.adverts++;
+    }
+  }
+  const bumpIgnored = (why: string) => {
+    channelCounts.ignored[why] = (channelCounts.ignored[why] ?? 0) + 1;
+  };
+  const answer = (command: OpenCaseCommand, verdict: Parameters<typeof caseOpenedAnswer>[2]) => {
+    try {
+      postToOpener(caseOpenedAnswer(command, documentId, verdict));
+    } catch (_) {
+      bumpIgnored('answer-failed');
+    }
+  };
+  const waitMs = (ms: number) => new Promise<void>(resolve => win.setTimeout(resolve, ms));
+  /**
+   * A planned reload (another gateway, a 13th case): a Submit in flight ends
+   * first, the recognizer stops, the report settles (its draft saved, at most
+   * 10 s), and only then does this window load the case's address, with no
+   * leave prompt.
+   */
+  const plannedReloadTo = async (href: string) => {
+    plannedReload = 'settling';
+    channelCounts.answers.reloads++;
+    advertise();
+    apply();
+    const h = handle;
+    if (h) {
+      const until = Date.now() + SUBMIT_BEFORE_RELOAD_MS;
+      const submitting = () => {
+        try {
+          return typeof h.isSubmitting === 'function' && h.isSubmitting() === true;
+        } catch (_) {
+          return false;
+        }
+      };
+      while (!gone && submitting() && Date.now() < until) {
+        await waitMs(250);
+      }
+      if (dictation?.started && !dictation.busy) {
+        try {
+          h.toggleDictation?.();
+        } catch (_) {
+          /* the reload stops it */
+        }
+      }
+      counts.settles++;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        await Promise.race([
+          h.settle(),
+          new Promise(resolve => {
+            timer = win.setTimeout(resolve, SETTLE_BEFORE_UNMOUNT_MS);
+          }),
+        ]);
+      } catch (_) {
+        /* the page's pagehide sends the draft with keepalive anyway */
+      } finally {
+        if (timer) {
+          win.clearTimeout(timer);
+        }
+      }
+    }
+    if (gone) {
+      return;
+    }
+    plannedReload = 'go';
+    notify();
+    channel?.loadNew(href);
+  };
+  const onMessage = (event: MessageEvent) => {
+    if (!channel || gone) {
+      return;
+    }
+    const opener = openerNow();
+    const screen = screenCaseCommand(
+      {
+        fromOpener: !!opener && event.source === opener,
+        openerOpen: !!opener && !opener.closed,
+        origin: event.origin,
+        data: event.data,
+      },
+      channel.ownOrigin
+    );
+    if (screen.kind === 'foreign') {
+      return;
+    }
+    if (screen.kind === 'ignored') {
+      bumpIgnored(screen.why);
+      notify();
+      return;
+    }
+    const command = screen.command;
+    const launch = { attempt: command.attempt, attemptT0: command.attemptT0 };
+    if (!documentId || plannedReload !== 'no') {
+      // A reload is under way: the worklist's own replace supersedes it.
+      channelCounts.answers.refused++;
+      answer(command, { verdict: 'refuse', reason: 'reload' });
+      notify();
+      return;
+    }
+    const decision = decideReadingCommand(command, {
+      phase,
+      routeStudy,
+      caseState:
+        islandCase && islandCase.study === routeStudy
+          ? (islandCase.state as 'reportable' | 'unavailable')
+          : null,
+      documentGateways: channel.documentGateways(),
+      casesInDocument,
+    });
+    if (decision.verdict === 'focus-only') {
+      if (!routeLaunch) {
+        channelCounts.answers.refused++;
+        answer(command, { verdict: 'refuse', reason: 'reload' });
+      } else {
+        channelCounts.answers.focusOnly++;
+        answer(command, { verdict: 'focus-only', activeLaunch: routeLaunch });
+        focusReport();
+      }
+      notify();
+      return;
+    }
+    if (decision.verdict === 'refuse') {
+      channelCounts.answers.refused++;
+      answer(command, { verdict: 'refuse', reason: decision.reason });
+      notify();
+      return;
+    }
+    const href = readingRouteFor({
+      href: win.location.href,
+      openedPath: channel.openedPath,
+      studyInstanceUid: command.studyInstanceUid,
+      gateways:
+        decision.verdict === 'reload' ? [command.gatewayAET as string] : channel.documentGateways(),
+      launch,
+    });
+    if (!href) {
+      channelCounts.answers.refused++;
+      answer(command, { verdict: 'refuse', reason: 'reload' });
+      notify();
+      return;
+    }
+    answer(command, { verdict: 'accept', activeLaunch: launch });
+    if (decision.verdict === 'reload') {
+      void plannedReloadTo(href);
+      return;
+    }
+    // The viewer's in-document switch: the route re-enters the mode for the
+    // case (enter() below follows it with setCase, under the cover; a Submit
+    // in flight is finished first there).
+    channelCounts.answers.switched++;
+    casesInDocument++;
+    try {
+      channel.switchTo(href);
+    } catch (_) {
+      bumpIgnored('switch-failed');
+    }
+    notify();
   };
 
   // ---- the reader's controls ----------------------------------------------------------
@@ -712,6 +1008,10 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   // While a report is open the page asks before it goes (a reload, a sign-in
   // redirect, the window closing). The island's own pagehide saves its draft.
   const onBeforeUnload = (e: BeforeUnloadEvent) => {
+    // A planned reload settled the report first (its draft saved).
+    if (plannedReload === 'go') {
+      return;
+    }
     if (phase !== 'mounted' || signed || islandCase?.state !== 'reportable') {
       return;
     }
@@ -721,6 +1021,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   win.addEventListener('resize', onResize);
   win.addEventListener('keydown', onKeyDown, true);
   win.addEventListener('beforeunload', onBeforeUnload);
+  if (channel) {
+    win.addEventListener('message', onMessage);
+  }
 
   // ---- the route ------------------------------------------------------------------------
   const enter = (studyInstanceUid: string | null, launch?: IslandLaunch) => {
@@ -744,6 +1047,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     }
     if (changed && phase === 'mounted') {
       requestCase();
+      // The worklist's channel: this document now shows the new case's launch.
+      advertise();
       return;
     }
     if (changed || wasHidden) {
@@ -784,6 +1089,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     win.removeEventListener('resize', onResize);
     win.removeEventListener('keydown', onKeyDown, true);
     win.removeEventListener('beforeunload', onBeforeUnload);
+    win.removeEventListener('message', onMessage);
     leaveScreen();
     const h = handle;
     handle = null;

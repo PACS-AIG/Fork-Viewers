@@ -7,7 +7,14 @@
  * dock on; anything else, unset included, leaves it off, and the radcopilot
  * route is then a plain viewer with no report column.
  */
-import { createReadingDock, isErrorPath, isReadingPath, type ReadingDock } from './readingDock';
+import { utils } from '@ohif/core';
+import {
+  createReadingDock,
+  isErrorPath,
+  isReadingPath,
+  type ReadingChannelDeps,
+  type ReadingDock,
+} from './readingDock';
 import { loadIsland } from './islandLoader';
 
 declare global {
@@ -35,6 +42,46 @@ const appSignInFeatures = (screen: { availWidth: number; availHeight: number }):
   const top = Math.max(0, Math.round((screen.availHeight - h) / 2));
   return `width=${w},height=${h},left=${left},top=${top},toolbar=0,location=1,menubar=0`;
 };
+
+/**
+ * Phase 2: the channel to the worklist that opened this window. The opener
+ * counts only while it is open and of this origin (a cross-origin opener
+ * throws on its location). The document's gateways and route are read when
+ * the dock is made, at the first route entry (the data sources were built for
+ * that URL's gateways). The switch is the viewer's in-document one, as the
+ * embed bridge's switchStudy makes it: the URL replaced in place, then a
+ * popstate so react-router re-enters the mode for the new study, with a fresh
+ * attempt generation.
+ */
+function readingChannelDeps(): ReadingChannelDeps {
+  const gateways = new URLSearchParams(window.location.search).getAll('gatewayAET');
+  return {
+    opener: () => {
+      const opener = window.opener as Window | null;
+      if (!opener || opener.closed) {
+        return null;
+      }
+      try {
+        return opener.location.origin === window.location.origin ? opener : null;
+      } catch (_) {
+        return null;
+      }
+    },
+    ownOrigin: window.location.origin,
+    documentGateways: () => gateways,
+    openedPath: window.location.pathname,
+    switchTo: href => {
+      window.history.replaceState(window.history.state, '', href);
+      window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
+      try {
+        utils.attempt?.requestFreshGeneration?.();
+      } catch (_) {
+        /* a trace that cannot take it still binds a different study's new generation */
+      }
+    },
+    loadNew: href => window.location.replace(href),
+  };
+}
 
 let current: ReadingDock | null = null;
 const changeListeners = new Set<() => void>();
@@ -67,6 +114,7 @@ export function ensureReadingDock(): ReadingDock {
     isErrorPath,
     openAppSignIn: () =>
       window.open(APP_SIGN_IN_PATH, APP_SIGN_IN_WINDOW, appSignInFeatures(window.screen)),
+    channel: readingChannelDeps(),
   });
   installHarnessHook();
   changeListeners.forEach(listener => listener());

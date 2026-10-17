@@ -49,6 +49,8 @@ export interface IslandHandleLike {
   unmount: () => void;
   /** Optional in v1: start or stop the report's recognizer (false: nothing to toggle). */
   toggleDictation?: () => boolean;
+  /** Optional in v1 (phase 2): a Submit is in flight (a planned reload waits for it). */
+  isSubmitting?: () => boolean;
 }
 
 export interface IslandModuleLike {
