@@ -33,6 +33,47 @@ const StudyItem = ({
   studyRole,
 }: withAppTypes) => {
   const roleDot = studyRole ? STUDY_ROLE_DOT[studyRole] : undefined;
+  // pacsai (phase 1 PR 4): in the series rail a study is one compact row (the
+  // date, then its role dot and modalities), the whole of it, image count
+  // included, on hover. The dot sits on the second line so the date keeps its
+  // full width.
+  const isRail = viewPreset === 'rail';
+  const railRow = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className="flex h-[36px] w-full min-w-0 flex-col items-start justify-center text-[12px]"
+          data-rail-study=""
+        >
+          <span className="w-full overflow-hidden truncate whitespace-nowrap text-left text-white">
+            {date}
+          </span>
+          <div className="text-muted-foreground flex w-full min-w-0 items-center gap-1 text-[11px]">
+            {roleDot && (
+              <span
+                className="inline-block h-2 w-2 flex-none rounded-full"
+                style={{ backgroundColor: roleDot.color }}
+              />
+            )}
+            <span className="overflow-hidden truncate whitespace-nowrap">{modalities}</span>
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="right">
+        <div className="max-w-[260px]">
+          <div>
+            {roleDot ? `${roleDot.title}: ` : ''}
+            {date}
+          </div>
+          {description && <div>{description}</div>}
+          <div className="text-muted-foreground text-[11px]">
+            {modalities}
+            {numInstances ? ` · ${numInstances} images` : ''}
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
   return (
     <Accordion
       type="single"
@@ -52,46 +93,50 @@ const StudyItem = ({
             'border-l-2 border-l-[#34D399]': studyRole === 'current',
           })}
         >
-          <div className="flex h-[40px] w-full flex-row overflow-hidden">
-            <div className="flex w-full flex-row items-center justify-between">
-              <div className="flex min-w-0 flex-col items-start text-[13px]">
-                <Tooltip>
-                  <TooltipContent>{date}</TooltipContent>
-                  <TooltipTrigger className="w-full">
-                    <div className="flex h-[18px] w-full max-w-[160px] items-center gap-1.5 text-left">
-                      {roleDot && (
-                        <span
-                          title={roleDot.title}
-                          className="inline-block h-2 w-2 flex-none rounded-full"
-                          style={{ backgroundColor: roleDot.color }}
-                        />
-                      )}
-                      <span className="overflow-hidden truncate whitespace-nowrap text-white">
-                        {date}
-                      </span>
-                    </div>
-                  </TooltipTrigger>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipContent>{description}</TooltipContent>
-                  <TooltipTrigger className="w-full">
-                    <div className="text-muted-foreground h-[18px] w-full overflow-hidden truncate whitespace-nowrap text-left">
-                      {description}
-                    </div>
-                  </TooltipTrigger>
-                </Tooltip>
-              </div>
-              <div className="text-muted-foreground flex flex-col items-end pl-[10px] text-[12px]">
-                <div className="max-w-[150px] overflow-hidden text-ellipsis">{modalities}</div>
-                <div>{numInstances}</div>
-              </div>
-              {StudyMenuItems && (
-                <div className="ml-2 flex items-center">
-                  <StudyMenuItems StudyInstanceUID={StudyInstanceUID} />
+          {isRail ? (
+            railRow
+          ) : (
+            <div className="flex h-[40px] w-full flex-row overflow-hidden">
+              <div className="flex w-full flex-row items-center justify-between">
+                <div className="flex min-w-0 flex-col items-start text-[13px]">
+                  <Tooltip>
+                    <TooltipContent>{date}</TooltipContent>
+                    <TooltipTrigger className="w-full">
+                      <div className="flex h-[18px] w-full max-w-[160px] items-center gap-1.5 text-left">
+                        {roleDot && (
+                          <span
+                            title={roleDot.title}
+                            className="inline-block h-2 w-2 flex-none rounded-full"
+                            style={{ backgroundColor: roleDot.color }}
+                          />
+                        )}
+                        <span className="overflow-hidden truncate whitespace-nowrap text-white">
+                          {date}
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipContent>{description}</TooltipContent>
+                    <TooltipTrigger className="w-full">
+                      <div className="text-muted-foreground h-[18px] w-full overflow-hidden truncate whitespace-nowrap text-left">
+                        {description}
+                      </div>
+                    </TooltipTrigger>
+                  </Tooltip>
                 </div>
-              )}
+                <div className="text-muted-foreground flex flex-col items-end pl-[10px] text-[12px]">
+                  <div className="max-w-[150px] overflow-hidden text-ellipsis">{modalities}</div>
+                  <div>{numInstances}</div>
+                </div>
+                {StudyMenuItems && (
+                  <div className="ml-2 flex items-center">
+                    <StudyMenuItems StudyInstanceUID={StudyInstanceUID} />
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </AccordionTrigger>
         <AccordionContent
           onClick={event => {

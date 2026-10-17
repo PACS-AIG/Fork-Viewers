@@ -29,7 +29,17 @@ function ViewerLayout({
   // header's return to the study list. Unset, the layout is as upstream's.
   contentWidth,
   studyListReturn = true,
-}: withAppTypes<{ contentWidth?: string; studyListReturn?: boolean }>): React.FunctionComponent {
+  // pacsai (phase 1 PR 4): a mode can fix the left panel's width in px
+  // (radcopilot's series rail) and hear when the reader closes or opens it.
+  // Unset, the panel is upstream's.
+  leftPanelWidth,
+  onLeftPanelClosedChange,
+}: withAppTypes<{
+  contentWidth?: string;
+  studyListReturn?: boolean;
+  leftPanelWidth?: number;
+  onLeftPanelClosedChange?: (closed: boolean) => void;
+}>): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
   const { panelService, hangingProtocolService } = servicesManager.services;
@@ -57,8 +67,13 @@ function ViewerLayout({
     leftPanelClosed,
     setLeftPanelClosed,
     rightPanelClosed,
-    setRightPanelClosed
+    setRightPanelClosed,
+    leftPanelWidth
   );
+
+  useEffect(() => {
+    onLeftPanelClosedChange?.(leftPanelClosedState);
+  }, [leftPanelClosedState, onLeftPanelClosedChange]);
 
   /**
    * Set body classes (tailwindcss) that don't allow vertical
@@ -233,6 +248,8 @@ ViewerLayout.propTypes = {
   rightPanelClosed: PropTypes.bool.isRequired,
   contentWidth: PropTypes.string,
   studyListReturn: PropTypes.bool,
+  leftPanelWidth: PropTypes.number,
+  onLeftPanelClosedChange: PropTypes.func,
   /** Responsible for rendering our grid of viewports; provided by consuming application */
   children: PropTypes.oneOfType([PropTypes.node, PropTypes.func]).isRequired,
   viewports: PropTypes.array,

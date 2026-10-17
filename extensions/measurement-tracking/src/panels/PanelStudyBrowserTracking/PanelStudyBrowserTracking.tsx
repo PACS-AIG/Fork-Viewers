@@ -13,6 +13,10 @@ import { MoreDropdownMenu, PanelStudyBrowserHeader } from '@ohif/extension-defau
 import { defaultActionIcons } from './constants';
 const { formatDate, createStudyBrowserTabs } = utils;
 
+/** pacsai (Rev 11 milestone 6, approach C, phase 1 PR 4): radcopilot's series rail,
+ *  the same browser in one narrow column; ui-next draws the 'rail' preset. */
+const RAIL_VIEW_PRESETS = [{ id: 'rail', iconName: 'ThumbnailView', selected: true }];
+
 const thumbnailNoImageModalities = [
   'SR',
   'SEG',
@@ -36,7 +40,11 @@ export default function PanelStudyBrowserTracking({
   requestDisplaySetCreationForStudy,
   dataSource,
   commandsManager,
-}: withAppTypes) {
+  presentation,
+}: withAppTypes<{ presentation?: 'rail' }>) {
+  // The rail: every study of the patient (the priors as one-row entries under the
+  // opened study), no header or settings, the narrow 'rail' preset.
+  const isRail = presentation === 'rail';
   const {
     displaySetService,
     uiDialogService,
@@ -47,7 +55,9 @@ export default function PanelStudyBrowserTracking({
     customizationService,
   } = servicesManager.services;
   const navigate = useNavigate();
-  const studyMode = customizationService.getCustomization('studyBrowser.studyMode');
+  const studyMode = isRail
+    ? 'all'
+    : customizationService.getCustomization('studyBrowser.studyMode');
 
   const { t } = useTranslation('Common');
 
@@ -74,7 +84,7 @@ export default function PanelStudyBrowserTracking({
   const [jumpToDisplaySet, setJumpToDisplaySet] = useState(null);
 
   const [viewPresets, setViewPresets] = useState(
-    customizationService.getCustomization('studyBrowser.viewPresets')
+    isRail ? RAIL_VIEW_PRESETS : customizationService.getCustomization('studyBrowser.viewPresets')
   );
 
   const [actionIcons, setActionIcons] = useState(defaultActionIcons);
@@ -506,19 +516,21 @@ export default function PanelStudyBrowserTracking({
 
   return (
     <>
-      <>
-        <PanelStudyBrowserHeader
-          viewPresets={viewPresets}
-          updateViewPresetValue={updateViewPresetValue}
-          actionIcons={actionIcons}
-          updateActionIconValue={updateActionIconValue}
-        />
-        <Separator
-          orientation="horizontal"
-          className="bg-black"
-          thickness="2px"
-        />
-      </>
+      {!isRail && (
+        <>
+          <PanelStudyBrowserHeader
+            viewPresets={viewPresets}
+            updateViewPresetValue={updateViewPresetValue}
+            actionIcons={actionIcons}
+            updateActionIconValue={updateActionIconValue}
+          />
+          <Separator
+            orientation="horizontal"
+            className="bg-black"
+            thickness="2px"
+          />
+        </>
+      )}
 
       <StudyBrowser
         tabs={tabs}
@@ -536,7 +548,7 @@ export default function PanelStudyBrowserTracking({
         onClickThumbnail={() => {}}
         onDoubleClickThumbnail={onDoubleClickThumbnailHandler}
         activeDisplaySetInstanceUIDs={activeViewportDisplaySetInstanceUIDs}
-        showSettings={actionIcons.find(icon => icon.id === 'settings').value}
+        showSettings={!isRail && actionIcons.find(icon => icon.id === 'settings').value}
         viewPresets={viewPresets}
         ThumbnailMenuItems={MoreDropdownMenu({
           commandsManager,

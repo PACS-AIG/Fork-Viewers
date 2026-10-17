@@ -49,6 +49,7 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   ...jest.requireActual('./islandLoader'),
   READING_MODES: jest.requireActual('./dockModel').READING_MODES,
   READING_MIC_KEY: jest.requireActual('./dockModel').READING_MIC_KEY,
+  railLayoutProps: jest.requireActual('./seriesRail').railLayoutProps,
   IMAGES_WIDTH_VAR: jest.requireActual('./readingDock').IMAGES_WIDTH_VAR,
   READING_MODES_UITYPE: 'pacsai.readingModes',
   READING_MIC_UITYPE: 'pacsai.readingMic',
@@ -151,11 +152,31 @@ describe('the radcopilot mode', () => {
     (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
     const on = m.routes[0].layoutTemplate({});
     expect(on.id).toBe(off.id);
-    expect(on.props).toEqual({
+    const { onLeftPanelClosedChange, ...props } = on.props;
+    expect(props).toEqual({
       ...off.props,
       contentWidth: 'var(--pacsai-reading-images-width, 100%)',
       studyListReturn: false,
+      // PR 4: the series rail, fixed at 112 px, open unless the reader closed it.
+      leftPanels: ['@ohif/extension-measurement-tracking.panelModule.seriesRail'],
+      leftPanelResizable: false,
+      leftPanelWidth: 112,
+      leftPanelClosed: false,
     });
+    expect(typeof onLeftPanelClosedChange).toBe('function');
+  });
+
+  it('the series rail stays closed for a reader who closed it, and the layout remembers a close', () => {
+    (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
+    const m = radcopilot.modeFactory({});
+    window.localStorage.removeItem('pacsai.radcopilot.seriesRailClosed');
+    const first = m.routes[0].layoutTemplate({}).props;
+    expect(first.leftPanelClosed).toBe(false);
+    first.onLeftPanelClosedChange(true);
+    expect(m.routes[0].layoutTemplate({}).props.leftPanelClosed).toBe(true);
+    first.onLeftPanelClosedChange(false);
+    expect(m.routes[0].layoutTemplate({}).props.leftPanelClosed).toBe(false);
+    window.localStorage.removeItem('pacsai.radcopilot.seriesRailClosed');
   });
 
   it("enters as longitudinal does (the mode as `this`), then adds the reading controls when on", () => {

@@ -44,6 +44,7 @@ import {
 } from './readingDock/session';
 import { launchFromQuery, routeStudyOf } from './readingDock/islandLoader';
 import { READING_MIC_KEY, READING_MODES } from './readingDock/dockModel';
+import { railLayoutProps } from './readingDock/seriesRail';
 import { READING_MIC_UITYPE, READING_MODES_UITYPE } from './getToolbarModule';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
@@ -319,6 +320,7 @@ export {
   launchFromQuery,
   READING_MODES,
   READING_MIC_KEY,
+  railLayoutProps,
   IMAGES_WIDTH_VAR,
   READING_MODES_UITYPE,
   READING_MIC_UITYPE,

@@ -18,7 +18,9 @@
  *     width, the header's reading controls, no return to the study list, and
  *     OHIF's own report (a DICOM SR) never asking anything: the tracking
  *     machine's prompts are off (measurement-tracking's trackingPrompts.ts),
- *     so there is no "track this series", no SR save and no SR hydrate prompt.
+ *     so there is no "track this series", no SR save and no SR hydrate prompt;
+ *     and the series rail on the left (the study browser as one narrow,
+ *     fixed-width column, readingDock/seriesRail.ts).
  * With READING_DOCK off it is the longitudinal viewer under another route.
  * The longitudinal mode's own files are not changed.
  */
@@ -33,6 +35,7 @@ import {
   currentReadingDock,
   ensureReadingDock,
   launchFromQuery,
+  railLayoutProps,
   readingDockEnabled,
   routeStudyOf,
 } from '@ohif/extension-pacsai-hp';
@@ -135,6 +138,9 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
               // The images' width, which the dock keeps as the reader moves the divider.
               contentWidth: `var(${IMAGES_WIDTH_VAR}, 100%)`,
               studyListReturn: false,
+              // The series rail (phase 1 PR 4): the study browser as one narrow,
+              // fixed-width column, closed again if the reader closed it.
+              ...railLayoutProps(),
             },
           };
         },

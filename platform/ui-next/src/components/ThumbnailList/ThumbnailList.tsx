@@ -12,9 +12,23 @@ const ThumbnailList = ({
   viewPreset,
   ThumbnailMenuItems,
 }) => {
+  // pacsai (phase 1 PR 4): the series rail is one narrow column of rail tiles,
+  // display sets without an image included (their tile shows the modality), in
+  // series-number order (here, not by sorting the display sets for everyone, as
+  // the stock browser's sort setting does), series without a number last.
+  const seriesOrder = ({ seriesNumber }) => {
+    const n = seriesNumber === '' || seriesNumber == null ? NaN : Number(seriesNumber);
+    return Number.isFinite(n) ? n : Infinity;
+  };
+  const railItems =
+    viewPreset === 'rail'
+      ? [...(thumbnails ?? [])].sort((a, b) => seriesOrder(a) - seriesOrder(b))
+      : [];
+
   // Filter thumbnails into list items and thumbnail items
   const listItems = thumbnails?.filter(
-    ({ componentType }) => componentType === 'thumbnailNoImage' || viewPreset === 'list'
+    ({ componentType }) =>
+      viewPreset !== 'rail' && (componentType === 'thumbnailNoImage' || viewPreset === 'list')
   );
 
   const thumbnailItems = thumbnails?.filter(
@@ -23,6 +37,34 @@ const ThumbnailList = ({
 
   return (
     <div className="flex flex-col gap-[4px] pt-[4px] pr-[2.5px] pl-[5px] pb-[4px]">
+      {/* Rail Items */}
+      {railItems.length > 0 && (
+        <div
+          id="ohif-thumbnail-list"
+          className="bg-bkg-low flex flex-col items-center gap-[4px]"
+          data-cy="series-rail-list"
+        >
+          {railItems.map(item => {
+            const { displaySetInstanceUID, componentType, numInstances, ...rest } = item;
+            const isActive = activeDisplaySetInstanceUIDs.includes(displaySetInstanceUID);
+            return (
+              <Thumbnail
+                key={displaySetInstanceUID}
+                {...rest}
+                displaySetInstanceUID={displaySetInstanceUID}
+                numInstances={numInstances || 1}
+                isActive={isActive}
+                thumbnailType={componentType}
+                viewPreset="rail"
+                onClick={onThumbnailClick.bind(null, displaySetInstanceUID)}
+                onDoubleClick={onThumbnailDoubleClick.bind(null, displaySetInstanceUID)}
+                onClickUntrack={onClickUntrack.bind(null, displaySetInstanceUID)}
+                ThumbnailMenuItems={ThumbnailMenuItems}
+              />
+            );
+          })}
+        </div>
+      )}
       {/* Thumbnail Items */}
       {thumbnailItems.length > 0 && (
         <div
