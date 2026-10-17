@@ -83,6 +83,27 @@ function readingChannelDeps(): ReadingChannelDeps {
   };
 }
 
+/**
+ * Phase 2 (PR 3): "Report without images", the app's report-only page (its
+ * /reports, alone: no viewer beside it, whatever the workspace arrangement),
+ * in the worklist's report window, with the Read's launch. The page claims
+ * at open as it always does (the same reader's claim).
+ */
+const REPORT_WINDOW = 'reportWindow';
+function reportOnlyHref(
+  studyInstanceUid: string,
+  launch?: { attempt: string; attemptT0: number }
+): string {
+  const q = new URLSearchParams({ studyInstanceUid, wsWindows: 'separate' });
+  if (launch) {
+    q.set('attempt', launch.attempt);
+    q.set('attemptT0', String(launch.attemptT0));
+  }
+  return `/reports?${q.toString()}`;
+}
+const reportWindowFeatures = (screen: { width: number; height: number }): string =>
+  `width=${Math.round(screen.width / 2)},height=${screen.height},toolbar=0,location=0,menubar=0,top=0,left=0`;
+
 let current: ReadingDock | null = null;
 const changeListeners = new Set<() => void>();
 
@@ -115,6 +136,12 @@ export function ensureReadingDock(): ReadingDock {
     openAppSignIn: () =>
       window.open(APP_SIGN_IN_PATH, APP_SIGN_IN_WINDOW, appSignInFeatures(window.screen)),
     channel: readingChannelDeps(),
+    openReportOnly: (studyInstanceUid, launch) =>
+      window.open(
+        reportOnlyHref(studyInstanceUid, launch),
+        REPORT_WINDOW,
+        reportWindowFeatures(window.screen)
+      ),
   });
   installHarnessHook();
   changeListeners.forEach(listener => listener());

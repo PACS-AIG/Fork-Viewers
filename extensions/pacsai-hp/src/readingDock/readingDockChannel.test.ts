@@ -373,3 +373,59 @@ describe('the reading dock and the worklist that opened its window', () => {
     });
   });
 });
+
+describe('the cover\'s "Report without images" (phase 2, PR 3)', () => {
+  const button = () =>
+    document.querySelector('[data-pacsai-reading-report-only]') as HTMLButtonElement | null;
+  const make = (
+    load: () => Promise<IslandLoadResult>,
+    openReportOnly = jest.fn(() => ({}) as Window)
+  ) => {
+    dock = createReadingDock({ win: window, load, isReadingPath, isErrorPath, openReportOnly });
+    return { dock, openReportOnly };
+  };
+
+  it("is offered when the report cannot be shown here, and opens the report-only page for the route's case", async () => {
+    const { dock: d, openReportOnly } = make(async () => ({
+      ok: false,
+      failure: 'ISLAND_LOAD_FAILED',
+    }));
+    d.enter(A, LAUNCH_A);
+    await flush();
+    expect(button()?.hidden).toBe(false);
+    expect(button()?.textContent).toBe('Report without images');
+    button()?.click();
+    expect(openReportOnly).toHaveBeenCalledWith(A, LAUNCH_A);
+    expect(d.getSnapshot().reportOnlyOpens).toBe(1);
+  });
+
+  it('for every failure but a missing app session (that one offers Sign in)', async () => {
+    // (an index loop: the fork's Babel cannot compile for…of in an async test)
+    const failures = ['FLAGS_UNREADABLE', 'VIEWER_HOST_OFF', 'ISLAND_VERSION_MISMATCH'] as const;
+    for (let i = 0; i < failures.length; i++) {
+      const failure = failures[i];
+      const { dock: d } = make(async () => ({ ok: false, failure }));
+      d.enter(A, LAUNCH_A);
+      await flush();
+      expect([failure, button()?.hidden]).toEqual([failure, false]);
+      await d.destroy();
+    }
+    const { dock: d } = make(async () => ({ ok: false, failure: 'APP_SIGNED_OUT' }));
+    d.enter(A, LAUNCH_A);
+    await flush();
+    expect(button()?.hidden).toBe(true);
+  });
+
+  it('is not offered while the report is there', async () => {
+    const isl = fakeIsland();
+    const { dock: d } = make(async () => ({
+      ok: true,
+      module: isl.module as never,
+      build: 'test',
+    }));
+    d.enter(A, LAUNCH_A);
+    await flush();
+    expect(d.getSnapshot().phase).toBe('mounted');
+    expect(button()?.hidden).toBe(true);
+  });
+});

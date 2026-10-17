@@ -114,6 +114,8 @@ export interface ReadingDockSnapshot {
   notices: DockNotice[];
   signed: boolean;
   counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number; micKeys: number };
+  /** Phase 2 (PR 3): "Report without images" opened from the cover. */
+  reportOnlyOpens: number;
   /** Phase 2: the channel to the worklist that opened this window (no study UIDs). */
   channel: {
     documentId: string;
@@ -156,6 +158,8 @@ export interface ReadingDockDeps {
   openAppSignIn?: () => Window | null;
   /** Phase 2: the channel to the worklist that opened this window (none: no channel). */
   channel?: ReadingChannelDeps;
+  /** Phase 2 (PR 3): "Report without images": the app's report-only page for this case. */
+  openReportOnly?: (studyInstanceUid: string, launch?: IslandLaunch) => Window | null;
 }
 
 export interface ReadingDock {
@@ -258,6 +262,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   }
   let casesInDocument = 1;
   let plannedReload: 'no' | 'settling' | 'go' = 'no';
+  let reportOnlyOpens = 0;
   const channelCounts = {
     adverts: 0,
     answers: { switched: 0, focusOnly: 0, reloads: 0, refused: 0 },
@@ -316,7 +321,22 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     cursor: 'pointer',
     font: 'inherit',
   });
-  cover.append(coverText, coverAction);
+  // Phase 2 (PR 3): when the report cannot be shown here, the report-only page.
+  const coverReportOnly = doc.createElement('button');
+  coverReportOnly.type = 'button';
+  coverReportOnly.setAttribute('data-pacsai-reading-report-only', '');
+  coverReportOnly.hidden = true;
+  coverReportOnly.textContent = 'Report without images';
+  Object.assign(coverReportOnly.style, {
+    padding: '6px 14px',
+    borderRadius: '6px',
+    border: '1px solid #8AB4F8',
+    background: 'transparent',
+    color: '#8AB4F8',
+    cursor: 'pointer',
+    font: 'inherit',
+  });
+  cover.append(coverText, coverAction, coverReportOnly);
   column.append(islandElement, cover);
 
   const divider = doc.createElement('div');
@@ -429,6 +449,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     notices: notices.map(n => ({ ...n })),
     signed,
     counts: { ...counts },
+    reportOnlyOpens,
     channel: {
       documentId,
       opener: !!openerNow(),
@@ -496,6 +517,14 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     coverText.textContent = line ?? '';
     coverAction.hidden = !(phase === 'failed' && failure === 'APP_SIGNED_OUT' && deps.openAppSignIn);
     coverAction.textContent = 'Sign in';
+    // Any other reason the report cannot be shown here: it can still be
+    // written on its own page (with no session, sign in first).
+    coverReportOnly.hidden = !(
+      phase === 'failed' &&
+      failure !== 'APP_SIGNED_OUT' &&
+      !!routeStudy &&
+      !!deps.openReportOnly
+    );
 
     if (handle && islandVisible !== view.column.shown) {
       islandVisible = view.column.shown;
@@ -963,6 +992,15 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         void retryLoad();
       }
     }, 500);
+  });
+  coverReportOnly.addEventListener('click', () => {
+    if (!routeStudy || !deps.openReportOnly) {
+      return;
+    }
+    if (deps.openReportOnly(routeStudy, routeLaunch)) {
+      reportOnlyOpens++;
+      notify();
+    }
   });
   const retryLoad = async () => {
     column.remove();
