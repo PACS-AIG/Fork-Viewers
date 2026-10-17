@@ -41,6 +41,7 @@ import {
   currentReadingDock,
   ensureReadingDock,
   readingDockEnabled,
+  setReadingViewerUser,
 } from './readingDock/session';
 import { launchFromQuery, routeStudyOf } from './readingDock/islandLoader';
 import { READING_MIC_KEY, READING_MODES } from './readingDock/dockModel';
@@ -315,6 +316,7 @@ export {
   // Rev 11 milestone 6, approach C: the reading dock, for the radcopilot mode.
   currentReadingDock,
   ensureReadingDock,
+  setReadingViewerUser,
   readingDockEnabled,
   routeStudyOf,
   launchFromQuery,

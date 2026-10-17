@@ -38,6 +38,7 @@ import {
   railLayoutProps,
   readingDockEnabled,
   routeStudyOf,
+  setReadingViewerUser,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 
@@ -69,9 +70,15 @@ const readingButtons = [
 ];
 
 /** The route's study for the dock, outside React's render (the dock writes the DOM). */
-function enterReadingRoute(): void {
+function enterReadingRoute(servicesManager?: unknown): void {
   if (!readingDockEnabled()) {
     return;
+  }
+  // Phase 2 (PR 4): the viewer's own sign-in, for the report's identity gate.
+  const auth = (servicesManager as { services?: Record<string, unknown> } | undefined)?.services
+    ?.userAuthenticationService as { getUser?: () => unknown } | undefined;
+  if (auth && typeof auth.getUser === 'function') {
+    setReadingViewerUser(() => auth.getUser?.());
   }
   const search = window.location.search;
   const study = routeStudyOf(search);
@@ -97,7 +104,7 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
      */
     onModeInit: function (args: Record<string, unknown>) {
       base.onModeInit?.call(this, args);
-      enterReadingRoute();
+      enterReadingRoute(args.servicesManager);
     },
     onModeEnter: function (args: withAppTypes<{ studyInstanceUIDs?: string[] }>) {
       base.onModeEnter.call(this, args);
@@ -114,7 +121,7 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
           readingButtons.map(b => b.id)
         );
       }
-      enterReadingRoute();
+      enterReadingRoute(args.servicesManager);
     },
     onModeExit: function (args: withAppTypes) {
       // A case switch, an error route or leaving the mode: the dock decides

@@ -26,6 +26,11 @@
  *     in-document study switch, or, for a study on another gateway or a 13th
  *     case, a planned reload once the report is settled (no leave prompt);
  *     after Sign it relays `closeWindow`, so the worklist closes the window.
+ *   - Phase 2 (PR 4): the dock tells the island what the viewer shows (the
+ *     route's study and the viewer's own signed-in user) at the mount, after
+ *     each route entry and when the window comes back to the front; the
+ *     island holds its microphone and Sign while either disagrees with its
+ *     case (its identity gate).
  *
  * The layout comes from dockModel.ts (the app's rules); the island from
  * islandLoader.ts. The header's controls (ReadingControls.tsx) read the state
@@ -116,6 +121,8 @@ export interface ReadingDockSnapshot {
   counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number; micKeys: number };
   /** Phase 2 (PR 3): "Report without images" opened from the cover. */
   reportOnlyOpens: number;
+  /** Phase 2 (PR 4): what the island was last told the viewer shows (a study ref, whether a user is known). */
+  identity: { studyRef: string; user: boolean; told: number } | null;
   /** Phase 2: the channel to the worklist that opened this window (no study UIDs). */
   channel: {
     documentId: string;
@@ -160,6 +167,8 @@ export interface ReadingDockDeps {
   channel?: ReadingChannelDeps;
   /** Phase 2 (PR 3): "Report without images": the app's report-only page for this case. */
   openReportOnly?: (studyInstanceUid: string, launch?: IslandLaunch) => Window | null;
+  /** Phase 2 (PR 4): the viewer's own signed-in user (its OpenID subject), or null. */
+  viewerUser?: () => string | null;
 }
 
 export interface ReadingDock {
@@ -263,6 +272,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let casesInDocument = 1;
   let plannedReload: 'no' | 'settling' | 'go' = 'no';
   let reportOnlyOpens = 0;
+  // Phase 2 (PR 4): what the island was last told the viewer shows.
+  let toldIdentity: { study: string | null; user: string | null } | null = null;
+  let identityTold = 0;
   const channelCounts = {
     adverts: 0,
     answers: { switched: 0, focusOnly: 0, reloads: 0, refused: 0 },
@@ -450,6 +462,13 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     signed,
     counts: { ...counts },
     reportOnlyOpens,
+    identity: toldIdentity
+      ? {
+          studyRef: studyRefFor(toldIdentity.study),
+          user: toldIdentity.user !== null,
+          told: identityTold,
+        }
+      : null,
     channel: {
       documentId,
       opener: !!openerNow(),
@@ -698,7 +717,37 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     if (routeStudy !== islandStudy) {
       requestCase();
     }
+    tellIdentity();
   };
+
+  // ---- phase 2 (PR 4): what the viewer shows, for the island's identity gate -------------
+  function viewerUserNow(): string | null {
+    try {
+      const user = deps.viewerUser?.() ?? null;
+      return typeof user === 'string' && user.length > 0 && user.length <= 128 ? user : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  /** Told after the island took the route's case, so a switch it makes is never a disagreement. */
+  function tellIdentity(): void {
+    if (!handle || gone || typeof handle.setViewerIdentity !== 'function') {
+      return;
+    }
+    const next = { study: routeStudy, user: viewerUserNow() };
+    if (toldIdentity && toldIdentity.study === next.study && toldIdentity.user === next.user) {
+      return;
+    }
+    try {
+      if (handle.setViewerIdentity({ studyInstanceUid: next.study, userSub: next.user })) {
+        toldIdentity = next;
+        identityTold++;
+        notify();
+      }
+    } catch (_) {
+      /* the island keeps the last identity it took */
+    }
+  }
 
   // ---- phase 2: the worklist's channel --------------------------------------------------
   /** The advertisement: this document, the launch of the case it shows, and
@@ -1059,6 +1108,16 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   win.addEventListener('resize', onResize);
   win.addEventListener('keydown', onKeyDown, true);
   win.addEventListener('beforeunload', onBeforeUnload);
+  // PR 4: a sign-in in another window (the viewer's sign-in handoff) changes
+  // the viewer's user without a route entry; the window coming back to the
+  // front tells the island again.
+  const onFront = () => {
+    if (!doc.hidden) {
+      tellIdentity();
+    }
+  };
+  win.addEventListener('focus', onFront);
+  doc.addEventListener('visibilitychange', onFront);
   if (channel) {
     win.addEventListener('message', onMessage);
   }
@@ -1085,6 +1144,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     }
     if (changed && phase === 'mounted') {
       requestCase();
+      // PR 4: once the island took the case (or refused it while a Submit
+      // ends: then its gate holds the old case's microphone and Sign).
+      tellIdentity();
       // The worklist's channel: this document now shows the new case's launch.
       advertise();
       return;
@@ -1127,6 +1189,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     win.removeEventListener('resize', onResize);
     win.removeEventListener('keydown', onKeyDown, true);
     win.removeEventListener('beforeunload', onBeforeUnload);
+    win.removeEventListener('focus', onFront);
+    doc.removeEventListener('visibilitychange', onFront);
     win.removeEventListener('message', onMessage);
     leaveScreen();
     const h = handle;

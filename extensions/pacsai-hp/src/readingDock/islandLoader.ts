@@ -51,6 +51,11 @@ export interface IslandHandleLike {
   toggleDictation?: () => boolean;
   /** Optional in v1 (phase 2): a Submit is in flight (a planned reload waits for it). */
   isSubmitting?: () => boolean;
+  /** Optional in v1 (phase 2, PR 4): what the viewer shows, for the island's identity gate. */
+  setViewerIdentity?: (identity: {
+    studyInstanceUid: string | null;
+    userSub: string | null;
+  }) => boolean;
 }
 
 export interface IslandModuleLike {

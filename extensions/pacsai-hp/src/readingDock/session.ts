@@ -104,6 +104,26 @@ function reportOnlyHref(
 const reportWindowFeatures = (screen: { width: number; height: number }): string =>
   `width=${Math.round(screen.width / 2)},height=${screen.height},toolbar=0,location=0,menubar=0,top=0,left=0`;
 
+/**
+ * Phase 2 (PR 4): the viewer's own signed-in user, its OpenID subject, for
+ * the report's identity gate (the app's reader is a subject of the same
+ * Keycloak realm). The mode hands in OHIF's user authentication service at
+ * its route entries; null before then, or before a sign-in.
+ */
+let viewerUserSource: (() => unknown) | null = null;
+export function setReadingViewerUser(source: (() => unknown) | null): void {
+  viewerUserSource = typeof source === 'function' ? source : null;
+}
+function viewerUserSub(): string | null {
+  try {
+    const user = viewerUserSource?.() as { profile?: { sub?: unknown } } | null | undefined;
+    const sub = user?.profile?.sub;
+    return typeof sub === 'string' && sub.length > 0 ? sub : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 let current: ReadingDock | null = null;
 const changeListeners = new Set<() => void>();
 
@@ -136,6 +156,7 @@ export function ensureReadingDock(): ReadingDock {
     openAppSignIn: () =>
       window.open(APP_SIGN_IN_PATH, APP_SIGN_IN_WINDOW, appSignInFeatures(window.screen)),
     channel: readingChannelDeps(),
+    viewerUser: viewerUserSub,
     openReportOnly: (studyInstanceUid, launch) =>
       window.open(
         reportOnlyHref(studyInstanceUid, launch),
