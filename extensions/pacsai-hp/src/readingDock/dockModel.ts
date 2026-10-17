@@ -33,6 +33,19 @@ export const READING_MODES: ReadonlyArray<{ value: WorkspaceMode; label: string;
   { value: 'report', label: 'Report', keys: ['alt+3'] },
 ];
 
+/** The microphone key (WeiWei, 17 Oct: F4, PowerScribe's dictation on/off).
+ *  The dock owns it on the whole page, in every mode; radcopilot's hotkeys
+ *  list it for OHIF's shortcut sheet. */
+export const READING_MIC_KEY = { label: 'Microphone on/off', keys: ['f4'], code: 'F4' } as const;
+
+/** Is this keydown the microphone key? Plain F4 only: Alt+F4 and Ctrl+F4 belong
+ *  to the system and the browser. A held key repeats its keydown; the caller
+ *  toggles on the first one only. */
+export const isMicKey = (
+  e: Pick<KeyboardEvent, 'code' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>
+): boolean =>
+  e.code === READING_MIC_KEY.code && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+
 export interface DockInput {
   /** The mode the reader chose. */
   requested: WorkspaceMode;

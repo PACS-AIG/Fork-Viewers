@@ -136,17 +136,21 @@ const getCommandsModule = ({
     },
   };
 
-  // Rev 11 milestone 6, approach C: the reading dock's command (radcopilot's
-  // Alt+1/2/3); a no-op where the document has no dock.
+  // Rev 11 milestone 6, approach C: the reading dock's commands (radcopilot's
+  // Alt+1/2/3 and F4); no-ops where the document has no dock. With a dock, F4
+  // never reaches the viewer's hotkeys: the dock takes it first, on the whole page.
   const readingActions = {
     setReadingMode: ({ mode }: { mode?: string } = {}) =>
       mode === 'images' || mode === 'both' || mode === 'report'
         ? (currentReadingDock()?.setMode(mode) ?? false)
         : false,
+    toggleReadingMic: ({ evt }: { evt?: { repeat?: boolean } } = {}) =>
+      evt?.repeat ? false : (currentReadingDock()?.toggleDictation() ?? false),
   };
 
   const definitions = {
     setReadingMode: readingActions.setReadingMode,
+    toggleReadingMic: readingActions.toggleReadingMic,
     loadRelevantPriors: actions.loadRelevantPriors,
     selectPrior: actions.selectPrior,
     focusSessionStudy: actions.focusSessionStudy,

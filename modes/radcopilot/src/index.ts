@@ -26,6 +26,7 @@ import longitudinal from '@ohif/mode-longitudinal';
 import { TRACKING_PROMPTS_CUSTOMIZATION } from '@ohif/extension-measurement-tracking';
 import {
   IMAGES_WIDTH_VAR,
+  READING_MIC_KEY,
   READING_MIC_UITYPE,
   READING_MODES,
   READING_MODES_UITYPE,
@@ -41,13 +42,23 @@ import { id } from './id';
 export const RADCOPILOT_HOTKEYS_NAME = 'radcopilot-hotkey-definitions';
 export const RADCOPILOT_ROUTE = 'radcopilot';
 
-const readingHotkeys = READING_MODES.map(m => ({
-  commandName: 'setReadingMode',
-  commandOptions: { mode: m.value },
-  label: `Reading layout: ${m.label}`,
-  keys: m.keys,
-  isEditable: true,
-}));
+const readingHotkeys = [
+  ...READING_MODES.map(m => ({
+    commandName: 'setReadingMode',
+    commandOptions: { mode: m.value },
+    label: `Reading layout: ${m.label}`,
+    keys: m.keys,
+    isEditable: true,
+  })),
+  // F4 (WeiWei, 17 Oct): listed for OHIF's shortcut sheet. The dock owns the key
+  // on the whole page (readingDock.ts), so it is not offered for remapping here.
+  {
+    commandName: 'toggleReadingMic',
+    label: READING_MIC_KEY.label,
+    keys: [...READING_MIC_KEY.keys],
+    isEditable: false,
+  },
+];
 
 const readingButtons = [
   { id: 'ReadingModes', uiType: READING_MODES_UITYPE, props: {} },

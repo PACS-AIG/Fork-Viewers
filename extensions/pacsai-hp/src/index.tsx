@@ -43,7 +43,7 @@ import {
   readingDockEnabled,
 } from './readingDock/session';
 import { launchFromQuery, routeStudyOf } from './readingDock/islandLoader';
-import { READING_MODES } from './readingDock/dockModel';
+import { READING_MIC_KEY, READING_MODES } from './readingDock/dockModel';
 import { READING_MIC_UITYPE, READING_MODES_UITYPE } from './getToolbarModule';
 import { getSpineRegion } from './priors/metadata';
 import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
@@ -318,6 +318,7 @@ export {
   routeStudyOf,
   launchFromQuery,
   READING_MODES,
+  READING_MIC_KEY,
   IMAGES_WIDTH_VAR,
   READING_MODES_UITYPE,
   READING_MIC_UITYPE,

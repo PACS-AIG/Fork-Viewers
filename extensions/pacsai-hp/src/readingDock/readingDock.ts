@@ -13,6 +13,9 @@
  *     the report has told its microphone state, so a hidden report never
  *     dictates unseen with no indicator. The images under the report in Report
  *     mode are parked (installParkedSuspend listens through `onParkedChange`).
+ *   - F4 is the microphone key (WeiWei, 17 Oct): on the whole page and in
+ *     every mode it toggles the report's recognizer, as the header's
+ *     microphone toggle does; a held F4 toggles once.
  *   - Leaving the mode takes the report off the screen at once (its
  *     recognizer stopped, the images unparked), settles it, then unmounts it.
  *     The viewer's error routes (a study not found) keep it, alone, and while
@@ -40,6 +43,7 @@ import {
   afterShown,
   dockView,
   isDictationState,
+  isMicKey,
   noticeText,
   type DictationState,
   type DockView,
@@ -91,7 +95,7 @@ export interface ReadingDockSnapshot {
   /** Shown while the report is hidden; cleared once the reader sees the report. */
   notices: DockNotice[];
   signed: boolean;
-  counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number };
+  counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number; micKeys: number };
 }
 
 export interface ReadingDockDeps {
@@ -193,7 +197,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** Watches the app's sign-in pop-up until it closes; ends with the dock. */
   let signInPoll: ReturnType<typeof setInterval> | null = null;
-  const counts = { mounts: 0, unmounts: 0, setCases: 0, refusedImages: 0, settles: 0 };
+  const counts = { mounts: 0, unmounts: 0, setCases: 0, refusedImages: 0, settles: 0, micKeys: 0 };
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
   const listeners = new Set<() => void>();
@@ -682,6 +686,18 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       !!(target as Element).closest?.('[data-pacs-island-portal-host]') ||
       !!(target.parentElement?.closest?.('[data-pacs-island-portal-host]')));
   const onKeyDown = (e: KeyboardEvent) => {
+    // The microphone key (F4) on the whole page and in every mode, as the
+    // header's microphone toggle; a held key toggles once.
+    if (isMicKey(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) {
+        counts.micKeys++;
+        toggleDictation();
+        notify();
+      }
+      return;
+    }
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !inReport(e.target)) {
       return;
     }

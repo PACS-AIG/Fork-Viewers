@@ -48,6 +48,7 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   ...jest.requireActual('./session'),
   ...jest.requireActual('./islandLoader'),
   READING_MODES: jest.requireActual('./dockModel').READING_MODES,
+  READING_MIC_KEY: jest.requireActual('./dockModel').READING_MIC_KEY,
   IMAGES_WIDTH_VAR: jest.requireActual('./readingDock').IMAGES_WIDTH_VAR,
   READING_MODES_UITYPE: 'pacsai.readingModes',
   READING_MIC_UITYPE: 'pacsai.readingMic',
@@ -121,6 +122,26 @@ describe('the radcopilot mode', () => {
         .filter((h: { commandName: string }) => h.commandName === 'setReadingMode')
         .map((h: { keys: string[]; commandOptions: { mode: string } }) => `${h.keys[0]}=${h.commandOptions.mode}`)
     ).toEqual(['alt+1=images', 'alt+2=both', 'alt+3=report']);
+  });
+
+  it('lists F4, the microphone key, for the shortcut sheet, not for remapping (the dock owns it)', () => {
+    const m = radcopilot.modeFactory({});
+    const mic = m.hotkeys.hotkeys.filter(
+      (h: { commandName: string }) => h.commandName === 'toggleReadingMic'
+    );
+    expect(mic).toEqual([
+      {
+        commandName: 'toggleReadingMic',
+        label: 'Microphone on/off',
+        keys: ['f4'],
+        isEditable: false,
+      },
+    ]);
+    const others = m.hotkeys.hotkeys.filter(
+      (h: { commandName: string; keys: string[] }) =>
+        h.commandName !== 'toggleReadingMic' && h.keys.includes('f4')
+    );
+    expect(others).toEqual([]);
   });
 
   it("with READING_DOCK on, narrows the images area and hides the study-list return; off, longitudinal's layout", () => {

@@ -1,4 +1,4 @@
-import { IMAGES_GONE_LINE_PX, VIEWER_HEADER_PX, afterShown, dockView, micLine, noticeText, type DockInput } from './dockModel';
+import { IMAGES_GONE_LINE_PX, READING_MIC_KEY, VIEWER_HEADER_PX, afterShown, dockView, isMicKey, micLine, noticeText, type DockInput } from './dockModel';
 
 const base: DockInput = {
   requested: 'both',
@@ -94,5 +94,29 @@ describe('the header lines', () => {
     }
     expect(noticeText('SOMETHING_NEW')).toBe('Report: needs your attention');
     expect(noticeText('toString')).toBe('Report: needs your attention');
+  });
+});
+
+describe('the microphone key', () => {
+  const key = (o: Partial<KeyboardEvent> = {}) =>
+    ({
+      code: 'F4',
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      ...o,
+    }) as KeyboardEvent;
+  it("is F4 (PowerScribe's dictation on/off), labelled for the shortcut sheet", () => {
+    expect(READING_MIC_KEY).toEqual({ label: 'Microphone on/off', keys: ['f4'], code: 'F4' });
+  });
+  it("only a plain F4: Alt+F4 and Ctrl+F4 stay the system's and the browser's, Shift and Meta too", () => {
+    expect(isMicKey(key())).toBe(true);
+    expect(isMicKey(key({ altKey: true }))).toBe(false);
+    expect(isMicKey(key({ ctrlKey: true }))).toBe(false);
+    expect(isMicKey(key({ metaKey: true }))).toBe(false);
+    expect(isMicKey(key({ shiftKey: true }))).toBe(false);
+    expect(isMicKey(key({ code: 'F3' }))).toBe(false);
+    expect(isMicKey(key({ code: 'Digit4' }))).toBe(false);
   });
 });

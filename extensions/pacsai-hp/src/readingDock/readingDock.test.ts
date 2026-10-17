@@ -383,6 +383,58 @@ describe('the reading dock', () => {
     outside.remove();
   });
 
+  it("F4 toggles the report's microphone on the whole page, once per press; other F4 chords pass", async () => {
+    const isl = fakeIsland();
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    await flush();
+    isl.options().onDictation({ started: true, busy: false, available: true, pending: 0 });
+    const press = (target: EventTarget, o: KeyboardEventInit = {}) => {
+      const e = new KeyboardEvent('keydown', {
+        code: 'F4',
+        key: 'F4',
+        bubbles: true,
+        cancelable: true,
+        ...o,
+      });
+      target.dispatchEvent(e);
+      return e;
+    };
+    // From inside the report.
+    const inside = document.createElement('input');
+    document.querySelector('[data-pacsai-reading-island]')?.appendChild(inside);
+    const e1 = press(inside);
+    expect(e1.defaultPrevented).toBe(true);
+    expect(isl.handle.toggleDictation).toHaveBeenCalledTimes(1);
+    // From the images (outside the report), and in Images mode too.
+    d.setMode('images');
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+    const e2 = press(outside);
+    expect(e2.defaultPrevented).toBe(true);
+    expect(isl.handle.toggleDictation).toHaveBeenCalledTimes(2);
+    // Held: the repeats are taken, and toggle nothing.
+    const r = press(outside, { repeat: true });
+    expect(r.defaultPrevented).toBe(true);
+    press(outside, { repeat: true });
+    expect(isl.handle.toggleDictation).toHaveBeenCalledTimes(2);
+    expect(d.getSnapshot().counts.micKeys).toBe(2);
+    // Alt/Ctrl/Shift/Meta+F4 are not the microphone key.
+    for (const mod of ['altKey', 'ctrlKey', 'shiftKey', 'metaKey']) {
+      const e = press(outside, { [mod]: true });
+      expect(e.defaultPrevented).toBe(false);
+    }
+    expect(isl.handle.toggleDictation).toHaveBeenCalledTimes(2);
+    // Gone with the dock.
+    await d.destroy();
+    const callsAtLeave = isl.handle.toggleDictation.mock.calls.length;
+    const e3 = press(outside);
+    expect(e3.defaultPrevented).toBe(false);
+    expect(isl.handle.toggleDictation).toHaveBeenCalledTimes(callsAtLeave);
+    inside.remove();
+    outside.remove();
+  });
+
   it('says why there is no report when the island cannot be had, and never mounts one', async () => {
     const d = makeDock(async () => ({ ok: false, failure: 'VIEWER_HOST_OFF' }));
     d.enter(A);
