@@ -86,6 +86,11 @@ function enterReadingRoute(servicesManager?: unknown): void {
   queueMicrotask(() => ensureReadingDock().enter(study, launch));
 }
 
+// 18 Oct: the dock's items for the viewer's gear menu (stable functions, so the
+// header subscribes once): the report's settings and its quiet_workspace switch.
+const readingMenuOptions = () => currentReadingDock()?.menuOptions() ?? [];
+const readingMenuSubscribe = (listener: () => void) => currentReadingDock()?.subscribe(listener) ?? (() => {});
+
 function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string, unknown> }) {
   const base = longitudinal.modeFactory({ modeConfiguration });
   const baseRoute = base.routes[0];
@@ -148,6 +153,10 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
               // The series rail (phase 1 PR 4): the study browser as one narrow,
               // fixed-width column, closed again if the reader closed it.
               ...railLayoutProps(),
+              // 18 Oct: the report's settings and its quiet_workspace switch in
+              // the viewer's gear menu (the report's own header row folds away).
+              headerMenuOptions: readingMenuOptions,
+              headerMenuSubscribe: readingMenuSubscribe,
             },
           };
         },

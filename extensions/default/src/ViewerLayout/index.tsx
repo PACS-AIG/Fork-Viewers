@@ -34,11 +34,17 @@ function ViewerLayout({
   // Unset, the panel is upstream's.
   leftPanelWidth,
   onLeftPanelClosedChange,
+  // pacsai (18 Oct): a mode's own items for the header's gear menu
+  // (radcopilot's report settings and layout switch). Unset, the menu is as before.
+  headerMenuOptions,
+  headerMenuSubscribe,
 }: withAppTypes<{
   contentWidth?: string;
   studyListReturn?: boolean;
   leftPanelWidth?: number;
   onLeftPanelClosedChange?: (closed: boolean) => void;
+  headerMenuOptions?: () => Array<{ title: string; icon: string; onClick: () => void }>;
+  headerMenuSubscribe?: (listener: () => void) => () => void;
 }>): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
@@ -160,6 +166,8 @@ function ViewerLayout({
         servicesManager={servicesManager}
         appConfig={appConfig}
         studyListReturn={studyListReturn}
+        headerMenuOptions={headerMenuOptions}
+        headerMenuSubscribe={headerMenuSubscribe}
       />
       <div
         className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
@@ -250,6 +258,8 @@ ViewerLayout.propTypes = {
   studyListReturn: PropTypes.bool,
   leftPanelWidth: PropTypes.number,
   onLeftPanelClosedChange: PropTypes.func,
+  headerMenuOptions: PropTypes.func,
+  headerMenuSubscribe: PropTypes.func,
   /** Responsible for rendering our grid of viewports; provided by consuming application */
   children: PropTypes.oneOfType([PropTypes.node, PropTypes.func]).isRequired,
   viewports: PropTypes.array,

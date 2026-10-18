@@ -152,7 +152,7 @@ describe('the radcopilot mode', () => {
     (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
     const on = m.routes[0].layoutTemplate({});
     expect(on.id).toBe(off.id);
-    const { onLeftPanelClosedChange, ...props } = on.props;
+    const { onLeftPanelClosedChange, headerMenuOptions, headerMenuSubscribe, ...props } = on.props;
     expect(props).toEqual({
       ...off.props,
       contentWidth: 'var(--pacsai-reading-images-width, 100%)',
@@ -164,6 +164,12 @@ describe('the radcopilot mode', () => {
       leftPanelClosed: false,
     });
     expect(typeof onLeftPanelClosedChange).toBe('function');
+    // 18 Oct: the dock's items for the viewer's gear menu, and their subscription
+    // (stable functions; no dock here, so no items and a no-op unsubscribe).
+    expect(headerMenuOptions()).toEqual([]);
+    expect(typeof headerMenuSubscribe(() => {})).toBe('function');
+    expect(m.routes[0].layoutTemplate({}).props.headerMenuOptions).toBe(headerMenuOptions);
+    expect(off.props.headerMenuOptions).toBeUndefined();
   });
 
   it('the series rail stays closed for a reader who closed it, and the layout remembers a close', () => {

@@ -171,6 +171,13 @@ export interface ReadingDockDeps {
   viewerUser?: () => string | null;
 }
 
+/** 18 Oct 2026: an item the dock offers the viewer's gear menu (radcopilot passes them to OHIF's header). */
+export interface ReadingMenuOption {
+  title: string;
+  icon: string;
+  onClick: () => void;
+}
+
 export interface ReadingDock {
   /** A route entry for this study (onModeInit and onModeEnter call it; idempotent). */
   enter: (studyInstanceUid: string | null, launch?: IslandLaunch) => void;
@@ -183,6 +190,9 @@ export interface ReadingDock {
   toggleDictation: () => boolean;
   /** The caret back to the report (after a viewer control). */
   focusReport: () => boolean;
+  /** The viewer's gear menu: the report's settings and its quiet_workspace
+   *  switch, once the report is up and only as far as the island has them. */
+  menuOptions: () => ReadingMenuOption[];
   subscribe: (listener: () => void) => () => void;
   getSnapshot: () => ReadingDockSnapshot;
   isGone: () => boolean;
@@ -975,6 +985,55 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     }
   };
 
+  // ---- the viewer's gear menu (18 Oct) ----------------------------------------------
+  // The report's own header row is folded away under quiet_workspace (D10), and
+  // its settings open from the viewer's gear. v1's handle grew these within
+  // version 1, so an older island offers neither, and nothing is listed.
+  const menuOptions = (): ReadingMenuOption[] => {
+    const h = handle;
+    if (gone || phase !== 'mounted' || !h) {
+      return [];
+    }
+    const out: ReadingMenuOption[] = [];
+    if (typeof h.openReportSettings === 'function') {
+      out.push({
+        title: 'Report settings',
+        icon: 'settings',
+        onClick: () => {
+          // The report's popups hide with it: from Images, the report comes back first.
+          if (snapshot.mode === 'images') {
+            setMode('both');
+          }
+          try {
+            h.openReportSettings?.();
+          } catch (_) {
+            /* the report goes on */
+          }
+        },
+      });
+    }
+    if (typeof h.quietWorkspace === 'function' && typeof h.setQuietWorkspace === 'function') {
+      let on = false;
+      try {
+        on = h.quietWorkspace() === true;
+      } catch (_) {
+        on = false;
+      }
+      out.push({
+        title: on ? 'Quiet report layout: on' : 'Quiet report layout: off',
+        icon: 'settings',
+        onClick: () => {
+          try {
+            h.setQuietWorkspace?.(!on);
+          } catch (_) {
+            /* the report goes on */
+          }
+        },
+      });
+    }
+    return out;
+  };
+
   // ---- the divider --------------------------------------------------------------------
   let dragging: number | null = null;
   divider.addEventListener('pointerdown', (e: PointerEvent) => {
@@ -1272,6 +1331,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     setReportRatio,
     toggleDictation,
     focusReport,
+    menuOptions,
     subscribe: listener => {
       listeners.add(listener);
       return () => listeners.delete(listener);

@@ -77,6 +77,68 @@ afterEach(async () => {
 const column = () => document.querySelector('[data-pacsai-reading-column]') as HTMLElement | null;
 const cover = () => document.querySelector('[data-pacsai-reading-cover]') as HTMLElement;
 
+describe("the reading dock's gear menu items (18 Oct)", () => {
+  function islandWithMenu() {
+    const isl = fakeIsland();
+    let quiet = false;
+    Object.assign(isl.handle, {
+      openReportSettings: jest.fn(() => true),
+      quietWorkspace: jest.fn(() => quiet),
+      setQuietWorkspace: jest.fn((on: boolean) => {
+        quiet = on;
+        return true;
+      }),
+    });
+    return isl;
+  }
+
+  it('lists nothing before the report is up, then its settings and the quiet_workspace switch', async () => {
+    const isl = islandWithMenu();
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    expect(d.menuOptions()).toEqual([]);
+    d.enter(A);
+    await flush();
+    expect(d.menuOptions().map(o => o.title)).toEqual(['Report settings', 'Quiet report layout: off']);
+    d.menuOptions()[0].onClick();
+    expect((isl.handle as unknown as { openReportSettings: jest.Mock }).openReportSettings).toHaveBeenCalledTimes(1);
+    d.menuOptions()[1].onClick();
+    expect((isl.handle as unknown as { setQuietWorkspace: jest.Mock }).setQuietWorkspace).toHaveBeenCalledWith(true);
+    expect(d.menuOptions()[1].title).toBe('Quiet report layout: on');
+    d.menuOptions()[1].onClick();
+    expect((isl.handle as unknown as { setQuietWorkspace: jest.Mock }).setQuietWorkspace).toHaveBeenLastCalledWith(false);
+  });
+
+  it('Report settings from Images brings the report back first (its popups hide with it)', async () => {
+    const isl = islandWithMenu();
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    await flush();
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    isl.options().onDictation({ started: true, busy: false, available: true, pending: 0 });
+    expect(d.setMode('images')).toBe(true);
+    expect(d.getSnapshot().mode).toBe('images');
+    d.menuOptions()[0].onClick();
+    expect(d.getSnapshot().mode).toBe('both');
+    expect((isl.handle as unknown as { openReportSettings: jest.Mock }).openReportSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists nothing for an island without them (a v1 build from before), and nothing once the dock is gone', async () => {
+    const isl = fakeIsland();
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    await flush();
+    expect(d.menuOptions()).toEqual([]);
+    const withMenu = islandWithMenu();
+    await d.destroy();
+    const d2 = makeDock(async () => ({ ok: true, module: withMenu.module as never, build: 'test' }));
+    d2.enter(A);
+    await flush();
+    expect(d2.menuOptions()).toHaveLength(2);
+    await d2.destroy();
+    expect(d2.menuOptions()).toEqual([]);
+  });
+});
+
 describe('the reading dock', () => {
   it('mounts the island once, on the route entry, in a column outside the React root', async () => {
     const isl = fakeIsland();

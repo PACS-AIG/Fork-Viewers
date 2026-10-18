@@ -56,6 +56,11 @@ export interface IslandHandleLike {
     studyInstanceUid: string | null;
     userSub: string | null;
   }) => boolean;
+  /** Optional in v1 (18 Oct): the report's settings, for the viewer's gear menu. */
+  openReportSettings?: () => boolean;
+  /** Optional in v1 (18 Oct): the reader's quiet_workspace switch (D10). */
+  quietWorkspace?: () => boolean;
+  setQuietWorkspace?: (on: boolean) => boolean;
 }
 
 export interface IslandModuleLike {
