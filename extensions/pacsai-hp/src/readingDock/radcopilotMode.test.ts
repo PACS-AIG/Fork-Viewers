@@ -152,7 +152,13 @@ describe('the radcopilot mode', () => {
     (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
     const on = m.routes[0].layoutTemplate({});
     expect(on.id).toBe(off.id);
-    const { onLeftPanelClosedChange, headerMenuOptions, headerMenuSubscribe, ...props } = on.props;
+    const {
+      onLeftPanelClosedChange,
+      headerMenuOptions,
+      headerMenuSubscribe,
+      headerWhiteLabeling,
+      ...props
+    } = on.props;
     expect(props).toEqual({
       ...off.props,
       contentWidth: 'var(--pacsai-reading-images-width, 100%)',
@@ -170,6 +176,20 @@ describe('the radcopilot mode', () => {
     expect(typeof headerMenuSubscribe(() => {})).toBe('function');
     expect(m.routes[0].layoutTemplate({}).props.headerMenuOptions).toBe(headerMenuOptions);
     expect(off.props.headerMenuOptions).toBeUndefined();
+    // 19 Oct: the header's mark is RadCopilot™ (the report's name), not the config's.
+    const h = (type: string, props: Record<string, unknown> | null, ...children: unknown[]) => ({
+      type,
+      props,
+      children,
+    });
+    type Node = { type: string; props: Record<string, unknown> | null; children: unknown[] };
+    const text = (n: unknown): string =>
+      typeof n === 'string' ? n : (n as Node).children.map(text).join('');
+    const mark = headerWhiteLabeling.createLogoComponentFn({ createElement: h }) as Node;
+    expect(mark.props?.['aria-label']).toBe('RadCopilot');
+    expect(text(mark)).toBe('RADCOPILOTTM');
+    expect((mark.children[2] as Node).type).toBe('sup');
+    expect(off.props.headerWhiteLabeling).toBeUndefined();
   });
 
   it('the series rail stays closed for a reader who closed it, and the layout remembers a close', () => {
