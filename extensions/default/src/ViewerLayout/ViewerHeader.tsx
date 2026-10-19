@@ -1,4 +1,4 @@
-import React, { useReducer } from 'react';
+import React, { useEffect, useReducer } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -33,7 +33,15 @@ function ViewerHeader({
   extensionManager,
   servicesManager,
   appConfig,
-}: withAppTypes<{ appConfig: AppTypes.Config }>) {
+  studyListReturn = true,
+  headerMenuOptions,
+  headerMenuSubscribe,
+}: withAppTypes<{
+  appConfig: AppTypes.Config;
+  studyListReturn?: boolean;
+  headerMenuOptions?: () => Array<{ title: string; icon: string; onClick: () => void }>;
+  headerMenuSubscribe?: (listener: () => void) => () => void;
+}>) {
   const navigate = useNavigate();
   const location = useLocation();
   const framed = isFramed();
@@ -64,6 +72,8 @@ function ViewerHeader({
   const commitHash = process.env.COMMIT_HASH;
   // Re-render after a theme toggle so the menu label flips day <-> night.
   const [, rerenderHeader] = useReducer((x: number) => x + 1, 0);
+  // pacsai (18 Oct): a mode's menu items can change (the report came up).
+  useEffect(() => headerMenuSubscribe?.(() => rerenderHeader()), [headerMenuSubscribe]);
 
   const menuOptions = [
     {
@@ -123,6 +133,19 @@ function ViewerHeader({
     },
   ];
 
+  // pacsai (18 Oct): a mode's own items (radcopilot: the report's settings and
+  // its layout switch), before Logout; read at each render, and the menu is
+  // rendered again after a click and whenever the mode says they changed.
+  for (const option of headerMenuOptions?.() ?? []) {
+    menuOptions.push({
+      ...option,
+      onClick: () => {
+        option.onClick();
+        rerenderHeader();
+      },
+    });
+  }
+
   // Framed, the user is the report window's (pacsai.embed/1 §6): a logout here
   // would revoke the app's token and end the reader's session in the app.
   if (appConfig.oidc && !framed) {
@@ -138,7 +161,8 @@ function ViewerHeader({
   return (
     <Header
       menuOptions={menuOptions}
-      isReturnEnabled={!!appConfig.showStudyList && !framed}
+      // A mode can hide it too (radcopilot: the reading window is not a study list's).
+      isReturnEnabled={!!appConfig.showStudyList && !framed && studyListReturn !== false}
       showLogo={!framed}
       toolbarAlign={framed ? 'start' : 'center'}
       onClickReturnButton={onClickReturnButton}

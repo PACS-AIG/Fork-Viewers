@@ -1,0 +1,32 @@
+{
+  "name": "@ohif/mode-radcopilot",
+  "version": "3.10.0-beta.84",
+  "description": "PACS AI reading mode: the longitudinal viewer with the app's report editor beside the images (Rev 11 milestone 6, approach C)",
+  "author": "PACS-AI",
+  "license": "MIT",
+  "repository": "OHIF/Viewers",
+  "private": true,
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "engines": {
+    "node": ">=14",
+    "npm": ">=6",
+    "yarn": ">=1.16.0"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "ohif-mode"
+  ],
+  "peerDependencies": {
+    "@ohif/core": "3.10.0-beta.84",
+    "@ohif/extension-measurement-tracking": "3.10.0-beta.84",
+    "@ohif/extension-pacsai-hp": "3.10.0-beta.84",
+    "@ohif/mode-longitudinal": "3.10.0-beta.84"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.20.13"
+  }
+}

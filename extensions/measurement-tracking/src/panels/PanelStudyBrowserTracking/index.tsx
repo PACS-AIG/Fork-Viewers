@@ -25,7 +25,8 @@ function WrappedPanelStudyBrowserTracking({
   commandsManager,
   extensionManager,
   servicesManager,
-}: withAppTypes) {
+  presentation,
+}: withAppTypes<{ presentation?: 'rail' }>) {
   const dataSource = extensionManager.getActiveDataSource()[0];
 
   const getStudiesForPatientByMRN = _getStudyForPatientUtility(extensionManager);
@@ -47,6 +48,7 @@ function WrappedPanelStudyBrowserTracking({
       getImageSrc={_getImageSrcFromImageId}
       getStudiesForPatientByMRN={_getStudiesForPatientByMRN}
       requestDisplaySetCreationForStudy={_requestDisplaySetCreationForStudy}
+      presentation={presentation}
     />
   );
 }
@@ -77,6 +79,7 @@ WrappedPanelStudyBrowserTracking.propTypes = {
   commandsManager: PropTypes.object.isRequired,
   extensionManager: PropTypes.object.isRequired,
   servicesManager: PropTypes.object.isRequired,
+  presentation: PropTypes.oneOf(['rail']),
 };
 
 export default WrappedPanelStudyBrowserTracking;

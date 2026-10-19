@@ -4,6 +4,7 @@ import { useViewportGrid } from '@ohif/ui-next';
 import { Button, Icons } from '@ohif/ui-next';
 import { PanelMeasurement, StudySummaryFromMetadata } from '@ohif/extension-cornerstone';
 import { useTrackedMeasurements } from '../getContextModule';
+import { trackingPromptsOff } from '../contexts/TrackedMeasurementsContext/trackingPrompts';
 
 const { filterAnd, filterPlanarMeasurement, filterMeasurementsBySeriesUID } =
   utils.MeasurementFilters;
@@ -37,6 +38,10 @@ function PanelMeasurementTableTracking({
           if (disableEditing || disabled) {
             return null;
           }
+          // pacsai (Rev 11 M6 approach C, phase 1 PR 2): no SR save where the
+          // active mode has the tracking prompts off (read here, at render:
+          // the mode sets it after this panel may have mounted).
+          const saveOffered = !trackingPromptsOff(customizationService);
 
           return (
             <div className="bg-background flex h-9 w-full items-center rounded pr-0.5">
@@ -54,20 +59,22 @@ function PanelMeasurementTableTracking({
                   <Icons.Download className="h-5 w-5" />
                   <span className="pl-1">CSV</span>
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="pl-0.5"
-                  onClick={() => {
-                    sendTrackedMeasurementsEvent('SAVE_REPORT', {
-                      viewportId: viewportGrid.activeViewportId,
-                      isBackupSave: true,
-                    });
-                  }}
-                >
-                  <Icons.Add />
-                  Create SR
-                </Button>
+                {saveOffered && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="pl-0.5"
+                    onClick={() => {
+                      sendTrackedMeasurementsEvent('SAVE_REPORT', {
+                        viewportId: viewportGrid.activeViewportId,
+                        isBackupSave: true,
+                      });
+                    }}
+                  >
+                    <Icons.Add />
+                    Create SR
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"

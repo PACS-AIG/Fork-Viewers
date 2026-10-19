@@ -24,7 +24,28 @@ function ViewerLayout({
   rightPanelClosed = false,
   leftPanelResizable = false,
   rightPanelResizable = false,
-}: withAppTypes): React.FunctionComponent {
+  // pacsai (Rev 11 milestone 6, approach C): a mode can narrow the area below
+  // the header (radcopilot's report column sits beside it) and hide the
+  // header's return to the study list. Unset, the layout is as upstream's.
+  contentWidth,
+  studyListReturn = true,
+  // pacsai (phase 1 PR 4): a mode can fix the left panel's width in px
+  // (radcopilot's series rail) and hear when the reader closes or opens it.
+  // Unset, the panel is upstream's.
+  leftPanelWidth,
+  onLeftPanelClosedChange,
+  // pacsai (18 Oct): a mode's own items for the header's gear menu
+  // (radcopilot's report settings and layout switch). Unset, the menu is as before.
+  headerMenuOptions,
+  headerMenuSubscribe,
+}: withAppTypes<{
+  contentWidth?: string;
+  studyListReturn?: boolean;
+  leftPanelWidth?: number;
+  onLeftPanelClosedChange?: (closed: boolean) => void;
+  headerMenuOptions?: () => Array<{ title: string; icon: string; onClick: () => void }>;
+  headerMenuSubscribe?: (listener: () => void) => () => void;
+}>): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
   const { panelService, hangingProtocolService } = servicesManager.services;
@@ -52,8 +73,13 @@ function ViewerLayout({
     leftPanelClosed,
     setLeftPanelClosed,
     rightPanelClosed,
-    setRightPanelClosed
+    setRightPanelClosed,
+    leftPanelWidth
   );
+
+  useEffect(() => {
+    onLeftPanelClosedChange?.(leftPanelClosedState);
+  }, [leftPanelClosedState, onLeftPanelClosedChange]);
 
   /**
    * Set body classes (tailwindcss) that don't allow vertical
@@ -139,10 +165,20 @@ function ViewerLayout({
         extensionManager={extensionManager}
         servicesManager={servicesManager}
         appConfig={appConfig}
+        studyListReturn={studyListReturn}
+        headerMenuOptions={headerMenuOptions}
+        headerMenuSubscribe={headerMenuSubscribe}
       />
       <div
         className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
-        style={{ height: 'calc(100vh - 52px)' }}
+        // pacsai: narrowed, the area also keeps its overlays (the loading
+        // indicator is z-50) in a stacking context of its own, so they stay
+        // under the report column beside or over it; dialogs portal to <body>.
+        style={
+          contentWidth
+            ? { height: 'calc(100vh - 52px)', width: contentWidth, isolation: 'isolate' }
+            : { height: 'calc(100vh - 52px)' }
+        }
       >
         <React.Fragment>
           {showLoadingIndicator && (
@@ -218,6 +254,12 @@ ViewerLayout.propTypes = {
   rightPanels: PropTypes.array,
   leftPanelClosed: PropTypes.bool.isRequired,
   rightPanelClosed: PropTypes.bool.isRequired,
+  contentWidth: PropTypes.string,
+  studyListReturn: PropTypes.bool,
+  leftPanelWidth: PropTypes.number,
+  onLeftPanelClosedChange: PropTypes.func,
+  headerMenuOptions: PropTypes.func,
+  headerMenuSubscribe: PropTypes.func,
   /** Responsible for rendering our grid of viewports; provided by consuming application */
   children: PropTypes.oneOfType([PropTypes.node, PropTypes.func]).isRequired,
   viewports: PropTypes.array,

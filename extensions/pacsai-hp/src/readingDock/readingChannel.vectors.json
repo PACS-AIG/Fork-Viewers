@@ -1,0 +1,1052 @@
+{
+  "comment": "Golden vectors for the channel between the worklist and its reading window (Rev 11 milestone 6, approach C, phase 2): workspaceOpenCase (worklist to the viewer), workspaceCaseOpened and workspaceState (the viewer to the worklist), and the closeWindow relay after Sign. The SAME bytes live in the app (src/app/lib/readingChannel.vectors.json) and the viewer fork (extensions/pacsai-hp/src/readingDock/readingChannel.vectors.json); each side pins their sha256 (READING_CHANNEL_VECTORS_SHA256) and its tests fail on any difference. Generated from the app's rules (workspaceCaseChannel.ts). Change both copies and both constants together.",
+  "channel": "pacsai.workspace",
+  "version": 1,
+  "constants": {
+    "openCase": "workspaceOpenCase",
+    "caseOpened": "workspaceCaseOpened",
+    "workspaceState": "workspaceState",
+    "closeWindow": "closeWindow",
+    "fallbackMs": 2000,
+    "answerMs": 1000
+  },
+  "commands": [
+    {
+      "name": "the worklist's command, with the study's gateway",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": true,
+      "value": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      }
+    },
+    {
+      "name": "without a gateway (milestone 6's report window shape)",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000
+      },
+      "ok": true,
+      "value": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000
+      }
+    },
+    {
+      "name": "key order does not matter",
+      "raw": {
+        "gatewayAET": "GATEWAY_AET_118",
+        "attemptT0": 1759300005000,
+        "attempt": "att-bbbb2222",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "requestId": "req-11111111",
+        "action": "workspaceOpenCase"
+      },
+      "ok": true,
+      "value": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      }
+    },
+    {
+      "name": "a gateway with dots and dashes",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "ARC.GW-2_x"
+      },
+      "ok": true,
+      "value": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "ARC.GW-2_x"
+      }
+    },
+    {
+      "name": "not an object",
+      "raw": null,
+      "ok": false,
+      "reason": "action"
+    },
+    {
+      "name": "a string",
+      "raw": "workspaceOpenCase",
+      "ok": false,
+      "reason": "action"
+    },
+    {
+      "name": "an array",
+      "raw": [],
+      "ok": false,
+      "reason": "action"
+    },
+    {
+      "name": "no action",
+      "raw": {},
+      "ok": false,
+      "reason": "action"
+    },
+    {
+      "name": "the action in another case",
+      "raw": {
+        "action": "workspaceopencase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000
+      },
+      "ok": false,
+      "reason": "action"
+    },
+    {
+      "name": "another action",
+      "raw": {
+        "action": "workspaceState",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000
+      },
+      "ok": false,
+      "reason": "action"
+    },
+    {
+      "name": "a short request id",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "short",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a request id with an underscore",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "has_underscore",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a study UID with letters",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.abc",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a study UID over 64 characters",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.222222222222222222222222222222222222222222222222222222222222222",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "an empty attempt",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "an attempt with a space",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att 1",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "attemptT0 zero",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 0,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "attemptT0 as text",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": "1759300005000",
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "attemptT0 not an integer",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1.5,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "an empty gateway",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": ""
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a gateway with a space",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GW 1"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a gateway over 64 characters",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a gateway that is a missing value turned into text",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "undefined"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a gateway \"null\"",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "null"
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a gateway that is not a string",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": 118
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "an extra key",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118",
+        "extra": true
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "the launch nested",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "launch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        }
+      },
+      "ok": false,
+      "reason": "payload"
+    },
+    {
+      "name": "a missing attempt",
+      "raw": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      },
+      "ok": false,
+      "reason": "payload"
+    }
+  ],
+  "screen": [
+    {
+      "name": "from the opener, this origin, a valid command",
+      "event": {
+        "fromOpener": true,
+        "openerOpen": true,
+        "origin": "https://app.example.org",
+        "data": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        }
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "command",
+      "command": {
+        "action": "workspaceOpenCase",
+        "requestId": "req-11111111",
+        "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+        "attempt": "att-bbbb2222",
+        "attemptT0": 1759300005000,
+        "gatewayAET": "GATEWAY_AET_118"
+      }
+    },
+    {
+      "name": "not from the opener",
+      "event": {
+        "fromOpener": false,
+        "openerOpen": true,
+        "origin": "https://app.example.org",
+        "data": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        }
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "ignored",
+      "why": "source"
+    },
+    {
+      "name": "the opener has closed",
+      "event": {
+        "fromOpener": true,
+        "openerOpen": false,
+        "origin": "https://app.example.org",
+        "data": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        }
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "ignored",
+      "why": "source"
+    },
+    {
+      "name": "another origin",
+      "event": {
+        "fromOpener": true,
+        "openerOpen": true,
+        "origin": "https://other.example.org",
+        "data": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        }
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "ignored",
+      "why": "origin"
+    },
+    {
+      "name": "from the opener: an invalid command",
+      "event": {
+        "fromOpener": true,
+        "openerOpen": true,
+        "origin": "https://app.example.org",
+        "data": {
+          "action": "workspaceOpenCase",
+          "requestId": "x",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        }
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "ignored",
+      "why": "payload"
+    },
+    {
+      "name": "from the opener: another action",
+      "event": {
+        "fromOpener": true,
+        "openerOpen": true,
+        "origin": "https://app.example.org",
+        "data": {
+          "action": "workspaceState"
+        }
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "ignored",
+      "why": "action"
+    },
+    {
+      "name": "not from the opener, not a command (a sign-in frame's traffic)",
+      "event": {
+        "fromOpener": false,
+        "openerOpen": true,
+        "origin": "https://app.example.org",
+        "data": {
+          "type": "oidc"
+        }
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "foreign"
+    },
+    {
+      "name": "another origin, not a command",
+      "event": {
+        "fromOpener": true,
+        "openerOpen": true,
+        "origin": "https://other.example.org",
+        "data": "hello"
+      },
+      "ownOrigin": "https://app.example.org",
+      "kind": "foreign"
+    }
+  ],
+  "answers": [
+    {
+      "name": "accepted: the case switches",
+      "build": {
+        "command": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        },
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "verdict": {
+          "verdict": "accept",
+          "activeLaunch": {
+            "attempt": "att-bbbb2222",
+            "attemptT0": 1759300005000
+          }
+        }
+      },
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": true,
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        }
+      },
+      "parsed": {
+        "ok": true,
+        "value": {
+          "action": "workspaceCaseOpened",
+          "requestId": "req-11111111",
+          "documentId": "0123456789abcdef0123456789abcdef",
+          "accepted": true,
+          "activeLaunch": {
+            "attempt": "att-bbbb2222",
+            "attemptT0": 1759300005000
+          }
+        }
+      }
+    },
+    {
+      "name": "accepted: the case already shown (focus only)",
+      "build": {
+        "command": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        },
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "verdict": {
+          "verdict": "focus-only",
+          "activeLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          }
+        }
+      },
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": true,
+        "sameCase": true,
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        }
+      },
+      "parsed": {
+        "ok": true,
+        "value": {
+          "action": "workspaceCaseOpened",
+          "requestId": "req-11111111",
+          "documentId": "0123456789abcdef0123456789abcdef",
+          "accepted": true,
+          "sameCase": true,
+          "activeLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          }
+        }
+      }
+    },
+    {
+      "name": "refused: a fresh document is needed",
+      "build": {
+        "command": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        },
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "verdict": {
+          "verdict": "refuse",
+          "reason": "reload"
+        }
+      },
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": false,
+        "reason": "reload"
+      },
+      "parsed": {
+        "ok": true,
+        "value": {
+          "action": "workspaceCaseOpened",
+          "requestId": "req-11111111",
+          "documentId": "0123456789abcdef0123456789abcdef",
+          "accepted": false,
+          "reason": "reload"
+        }
+      }
+    },
+    {
+      "name": "refused: switching is off",
+      "build": {
+        "command": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        },
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "verdict": {
+          "verdict": "refuse",
+          "reason": "disabled"
+        }
+      },
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": false,
+        "reason": "disabled"
+      },
+      "parsed": {
+        "ok": true,
+        "value": {
+          "action": "workspaceCaseOpened",
+          "requestId": "req-11111111",
+          "documentId": "0123456789abcdef0123456789abcdef",
+          "accepted": false,
+          "reason": "disabled"
+        }
+      }
+    },
+    {
+      "name": "refused: a Submit is in flight",
+      "build": {
+        "command": {
+          "action": "workspaceOpenCase",
+          "requestId": "req-11111111",
+          "studyInstanceUid": "1.2.826.0.1.3680043.10.2002",
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000,
+          "gatewayAET": "GATEWAY_AET_118"
+        },
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "verdict": {
+          "verdict": "refuse",
+          "reason": "submitting"
+        }
+      },
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": false,
+        "reason": "submitting"
+      },
+      "parsed": {
+        "ok": true,
+        "value": {
+          "action": "workspaceCaseOpened",
+          "requestId": "req-11111111",
+          "documentId": "0123456789abcdef0123456789abcdef",
+          "accepted": false,
+          "reason": "submitting"
+        }
+      }
+    }
+  ],
+  "badAnswers": [
+    {
+      "name": "not an answer",
+      "raw": {
+        "action": "workspaceState"
+      },
+      "reason": "action"
+    },
+    {
+      "name": "a bad request id",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "x",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": true,
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        }
+      },
+      "reason": "payload"
+    },
+    {
+      "name": "a bad document id",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "doc_1",
+        "accepted": true,
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        }
+      },
+      "reason": "payload"
+    },
+    {
+      "name": "accepted with a reason",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": true,
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        },
+        "reason": "reload"
+      },
+      "reason": "payload"
+    },
+    {
+      "name": "accepted without its launch",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": true
+      },
+      "reason": "payload"
+    },
+    {
+      "name": "sameCase not a boolean",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": true,
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        },
+        "sameCase": "yes"
+      },
+      "reason": "payload"
+    },
+    {
+      "name": "refused with an unknown reason",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": false,
+        "reason": "busy"
+      },
+      "reason": "payload"
+    },
+    {
+      "name": "refused with a launch",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": false,
+        "reason": "reload",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        }
+      },
+      "reason": "payload"
+    },
+    {
+      "name": "accepted not a boolean",
+      "raw": {
+        "action": "workspaceCaseOpened",
+        "requestId": "req-11111111",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "accepted": "true",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300005000
+        }
+      },
+      "reason": "payload"
+    }
+  ],
+  "adverts": [
+    {
+      "name": "the reading window can switch in its page",
+      "raw": {
+        "action": "workspaceState",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        },
+        "caseSwitch": 1
+      },
+      "read": {
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        },
+        "caseSwitch": true
+      }
+    },
+    {
+      "name": "it cannot switch (the report did not load): no caseSwitch",
+      "raw": {
+        "action": "workspaceState",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        }
+      },
+      "read": {
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        },
+        "caseSwitch": false
+      }
+    },
+    {
+      "name": "caseSwitch true is not 1",
+      "raw": {
+        "action": "workspaceState",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        },
+        "caseSwitch": true
+      },
+      "read": {
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        },
+        "caseSwitch": false
+      }
+    },
+    {
+      "name": "no launch: never a switch",
+      "raw": {
+        "action": "workspaceState",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "caseSwitch": 1
+      },
+      "read": {
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": null,
+        "caseSwitch": false
+      }
+    },
+    {
+      "name": "a bad document id: nothing",
+      "raw": {
+        "action": "workspaceState",
+        "documentId": "doc_1",
+        "activeLaunch": {
+          "attempt": "att-aaaa1111",
+          "attemptT0": 1759300000000
+        },
+        "caseSwitch": 1
+      },
+      "read": {
+        "documentId": null,
+        "activeLaunch": null,
+        "caseSwitch": false
+      }
+    },
+    {
+      "name": "a bad launch",
+      "raw": {
+        "action": "workspaceState",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att 1",
+          "attemptT0": 1
+        },
+        "caseSwitch": 1
+      },
+      "read": {
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": null,
+        "caseSwitch": false
+      }
+    }
+  ],
+  "closeWindow": [
+    {
+      "name": "the signed case's session",
+      "raw": {
+        "action": "closeWindow",
+        "sessionId": "att-aaaa1111"
+      },
+      "verdicts": [
+        {
+          "windowLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          },
+          "fromHeld": true,
+          "openerIsWorklist": true,
+          "allowed": true,
+          "why": "session"
+        },
+        {
+          "windowLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          },
+          "fromHeld": false,
+          "openerIsWorklist": true,
+          "allowed": false,
+          "why": "source"
+        },
+        {
+          "windowLaunch": null,
+          "fromHeld": true,
+          "openerIsWorklist": true,
+          "allowed": true,
+          "why": "no-launch"
+        }
+      ]
+    },
+    {
+      "name": "another case's session (the window moved on)",
+      "raw": {
+        "action": "closeWindow",
+        "sessionId": "att-old00000"
+      },
+      "verdicts": [
+        {
+          "windowLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          },
+          "fromHeld": true,
+          "openerIsWorklist": true,
+          "allowed": false,
+          "why": "stale-session"
+        },
+        {
+          "windowLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          },
+          "fromHeld": false,
+          "openerIsWorklist": true,
+          "allowed": false,
+          "why": "source"
+        },
+        {
+          "windowLaunch": null,
+          "fromHeld": true,
+          "openerIsWorklist": true,
+          "allowed": true,
+          "why": "no-launch"
+        }
+      ]
+    },
+    {
+      "name": "no session",
+      "raw": {
+        "action": "closeWindow",
+        "sessionId": null
+      },
+      "verdicts": [
+        {
+          "windowLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          },
+          "fromHeld": true,
+          "openerIsWorklist": true,
+          "allowed": false,
+          "why": "stale-session"
+        },
+        {
+          "windowLaunch": {
+            "attempt": "att-aaaa1111",
+            "attemptT0": 1759300000000
+          },
+          "fromHeld": false,
+          "openerIsWorklist": true,
+          "allowed": false,
+          "why": "source"
+        },
+        {
+          "windowLaunch": null,
+          "fromHeld": true,
+          "openerIsWorklist": true,
+          "allowed": true,
+          "why": "no-launch"
+        }
+      ]
+    }
+  ]
+}

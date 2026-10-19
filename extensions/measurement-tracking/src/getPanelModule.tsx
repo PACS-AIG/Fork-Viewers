@@ -25,6 +25,23 @@ function getPanelModule({ commandsManager, extensionManager, servicesManager }):
       ),
     },
     {
+      // pacsai (Rev 11 milestone 6, approach C, phase 1 PR 4): radcopilot's series
+      // rail, the same study browser drawn as one narrow column.
+      name: 'seriesRail',
+      iconName: 'tab-studies',
+      iconLabel: 'Series',
+      label: 'Series',
+      component: props => (
+        <PanelStudyBrowserTracking
+          {...props}
+          presentation="rail"
+          commandsManager={commandsManager}
+          extensionManager={extensionManager}
+          servicesManager={servicesManager}
+        />
+      ),
+    },
+    {
       name: 'trackedMeasurements',
       iconName: 'tab-linear',
       iconLabel: 'Measure',
