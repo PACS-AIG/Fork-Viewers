@@ -36,11 +36,13 @@ function ViewerHeader({
   studyListReturn = true,
   headerMenuOptions,
   headerMenuSubscribe,
+  headerWhiteLabeling,
 }: withAppTypes<{
   appConfig: AppTypes.Config;
   studyListReturn?: boolean;
   headerMenuOptions?: () => Array<{ title: string; icon: string; onClick: () => void }>;
   headerMenuSubscribe?: (listener: () => void) => () => void;
+  headerWhiteLabeling?: AppTypes.Config['whiteLabeling'];
 }>) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -166,7 +168,8 @@ function ViewerHeader({
       showLogo={!framed}
       toolbarAlign={framed ? 'start' : 'center'}
       onClickReturnButton={onClickReturnButton}
-      WhiteLabeling={appConfig.whiteLabeling}
+      // A mode's own mark first (radcopilot: RadCopilot™), else the config's.
+      WhiteLabeling={headerWhiteLabeling ?? appConfig.whiteLabeling}
       Secondary={
         <Toolbar
           servicesManager={servicesManager}

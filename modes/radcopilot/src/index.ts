@@ -20,7 +20,8 @@
  *     machine's prompts are off (measurement-tracking's trackingPrompts.ts),
  *     so there is no "track this series", no SR save and no SR hydrate prompt;
  *     and the series rail on the left (the study browser as one narrow,
- *     fixed-width column, readingDock/seriesRail.ts).
+ *     fixed-width column, readingDock/seriesRail.ts); and the header's mark is
+ *     the report's product, RadCopilot™, in place of the config's PACS AI.
  * With READING_DOCK off it is the longitudinal viewer under another route.
  * The longitudinal mode's own files are not changed.
  */
@@ -89,7 +90,63 @@ function enterReadingRoute(servicesManager?: unknown): void {
 // 18 Oct: the dock's items for the viewer's gear menu (stable functions, so the
 // header subscribes once): the report's settings and its quiet_workspace switch.
 const readingMenuOptions = () => currentReadingDock()?.menuOptions() ?? [];
-const readingMenuSubscribe = (listener: () => void) => currentReadingDock()?.subscribe(listener) ?? (() => {});
+const readingMenuSubscribe = (listener: () => void) =>
+  currentReadingDock()?.subscribe(listener) ?? (() => {});
+
+type CreateElement = (
+  type: string,
+  props: Record<string, unknown> | null,
+  ...children: unknown[]
+) => unknown;
+
+/**
+ * 19 Oct (WeiWei): the reading window's mark is the report's product name, in
+ * place of the config's PACS AI, now that the report's own header row (where
+ * the name sat) folds away. The name as the report writes it (RADCOPILOT and a
+ * superscript TM), in the style of the viewer's own mark (the deploy repo's
+ * config.js whiteLabeling: 16 px, 0.08em, the light part then the cyan one).
+ * Built with the header's React, as config.js's is.
+ */
+const WORDMARK_PART = { fontSize: '16px', letterSpacing: '0.08em' };
+const RADCOPILOT_WHITE_LABELING = {
+  createLogoComponentFn: ({ createElement }: { createElement: CreateElement }) =>
+    createElement(
+      'div',
+      {
+        style: {
+          display: 'flex',
+          alignItems: 'baseline',
+          whiteSpace: 'nowrap',
+          userSelect: 'none',
+        },
+        'aria-label': 'RadCopilot',
+        'data-cy': 'radcopilot-wordmark',
+      },
+      createElement(
+        'span',
+        { style: { ...WORDMARK_PART, color: '#EAF6FF', fontWeight: 600 } },
+        'RAD'
+      ),
+      createElement(
+        'span',
+        { style: { ...WORDMARK_PART, color: '#31D7FF', fontWeight: 700 } },
+        'COPILOT'
+      ),
+      createElement(
+        'sup',
+        {
+          style: {
+            color: '#EAF6FF',
+            fontSize: '9px',
+            fontWeight: 600,
+            marginLeft: '2px',
+            opacity: 0.7,
+          },
+        },
+        'TM'
+      )
+    ),
+};
 
 function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string, unknown> }) {
   const base = longitudinal.modeFactory({ modeConfiguration });
@@ -157,6 +214,8 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
               // the viewer's gear menu (the report's own header row folds away).
               headerMenuOptions: readingMenuOptions,
               headerMenuSubscribe: readingMenuSubscribe,
+              // 19 Oct: the header's mark is RadCopilot™.
+              headerWhiteLabeling: RADCOPILOT_WHITE_LABELING,
             },
           };
         },

@@ -38,6 +38,9 @@ function ViewerLayout({
   // (radcopilot's report settings and layout switch). Unset, the menu is as before.
   headerMenuOptions,
   headerMenuSubscribe,
+  // pacsai (19 Oct): a mode's own mark for the header's top left (radcopilot's
+  // RadCopilot™). Unset, the app config's white labeling, as before.
+  headerWhiteLabeling,
 }: withAppTypes<{
   contentWidth?: string;
   studyListReturn?: boolean;
@@ -45,6 +48,7 @@ function ViewerLayout({
   onLeftPanelClosedChange?: (closed: boolean) => void;
   headerMenuOptions?: () => Array<{ title: string; icon: string; onClick: () => void }>;
   headerMenuSubscribe?: (listener: () => void) => () => void;
+  headerWhiteLabeling?: AppTypes.Config['whiteLabeling'];
 }>): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
@@ -168,6 +172,7 @@ function ViewerLayout({
         studyListReturn={studyListReturn}
         headerMenuOptions={headerMenuOptions}
         headerMenuSubscribe={headerMenuSubscribe}
+        headerWhiteLabeling={headerWhiteLabeling}
       />
       <div
         className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
@@ -260,6 +265,7 @@ ViewerLayout.propTypes = {
   onLeftPanelClosedChange: PropTypes.func,
   headerMenuOptions: PropTypes.func,
   headerMenuSubscribe: PropTypes.func,
+  headerWhiteLabeling: PropTypes.shape({ createLogoComponentFn: PropTypes.func }),
   /** Responsible for rendering our grid of viewports; provided by consuming application */
   children: PropTypes.oneOfType([PropTypes.node, PropTypes.func]).isRequired,
   viewports: PropTypes.array,
