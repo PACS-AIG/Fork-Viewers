@@ -139,6 +139,106 @@ describe("the reading dock's gear menu items (18 Oct)", () => {
   });
 });
 
+describe("the reading dock's Logout with the app's sign-in (21 Oct)", () => {
+  const loaded = (isl: ReturnType<typeof fakeIsland>) => async () =>
+    ({ ok: true, module: isl.module as never, build: 'test' }) as IslandLoadResult;
+  function appDock(isl: ReturnType<typeof fakeIsland>, extra: Record<string, unknown> = {}) {
+    const log: string[] = [];
+    const signOutOfApp = jest.fn(async () => {
+      log.push('signOut');
+      return true;
+    });
+    const leaveAfterSignOut = jest.fn((signedOut: boolean) => log.push(`leave:${signedOut}`));
+    isl.handle.settle.mockImplementation(async () => {
+      log.push('settle');
+      return { studyInstanceUid: A, generation: isl.gen(), state: 'reportable', draft: 'saved' };
+    });
+    dock = createReadingDock({
+      win: window,
+      load: loaded(isl),
+      isReadingPath,
+      isErrorPath,
+      viewerUserIsApp: () => true,
+      signOutOfApp,
+      leaveAfterSignOut,
+      ...extra,
+    });
+    return { d: dock, log, signOutOfApp, leaveAfterSignOut };
+  }
+
+  it("is not taken when the viewer's user is its own, or without the app's sign-out: OHIF's /logout as before", async () => {
+    const isl = fakeIsland();
+    const plain = makeDock(loaded(isl));
+    expect(plain.logout()).toBe(false);
+    await plain.destroy();
+    const own = appDock(fakeIsland(), { viewerUserIsApp: () => false });
+    expect(own.d.logout()).toBe(false);
+    expect(own.signOutOfApp).not.toHaveBeenCalled();
+    await own.d.destroy();
+    const noSignOut = appDock(fakeIsland(), { signOutOfApp: undefined });
+    expect(noSignOut.d.logout()).toBe(false);
+  });
+
+  it('settles the report first (its draft saved while the session takes it), then signs out of the app, then leaves', async () => {
+    const isl = fakeIsland();
+    const { d, log, leaveAfterSignOut } = appDock(isl);
+    d.enter(A);
+    await flush();
+    expect(d.logout()).toBe(true);
+    await flush();
+    expect(log).toEqual(['settle', 'signOut', 'leave:true']);
+    expect(leaveAfterSignOut).toHaveBeenCalledWith(true);
+  });
+
+  it('a second Logout while one runs adds nothing', async () => {
+    const isl = fakeIsland();
+    const { d, signOutOfApp } = appDock(isl);
+    d.enter(A);
+    await flush();
+    expect(d.logout()).toBe(true);
+    expect(d.logout()).toBe(true);
+    await flush();
+    expect(signOutOfApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("a sign-out that did not answer leaves for the app's own sign-out page", async () => {
+    const isl = fakeIsland();
+    const { d, leaveAfterSignOut } = appDock(isl, { signOutOfApp: jest.fn(async () => false) });
+    d.enter(A);
+    await flush();
+    d.logout();
+    await flush();
+    expect(leaveAfterSignOut).toHaveBeenCalledWith(false);
+  });
+
+  it('a report that does not settle within the bound does not hold the sign-out; no report at all signs out at once', async () => {
+    const isl = fakeIsland();
+    const { d, log, signOutOfApp } = appDock(isl);
+    d.enter(A);
+    await flush();
+    isl.handle.settle.mockImplementation(() => new Promise(() => {}));
+    d.logout();
+    await flush();
+    expect(signOutOfApp).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(10_000);
+    await flush();
+    expect(log).toEqual(['signOut', 'leave:true']);
+    // The leave's own settle answers again, so the dock can go.
+    isl.handle.settle.mockImplementation(async () => ({
+      studyInstanceUid: A,
+      generation: isl.gen(),
+      state: 'reportable',
+      draft: 'saved',
+    }));
+    await d.destroy();
+
+    const none = appDock(fakeIsland());
+    expect(none.d.logout()).toBe(true);
+    await flush();
+    expect(none.log).toEqual(['signOut', 'leave:true']);
+  });
+});
+
 describe('the reading dock', () => {
   it('mounts the island once, on the route entry, in a column outside the React root', async () => {
     const isl = fakeIsland();

@@ -37,12 +37,14 @@ function ViewerHeader({
   headerMenuOptions,
   headerMenuSubscribe,
   headerWhiteLabeling,
+  headerLogout,
 }: withAppTypes<{
   appConfig: AppTypes.Config;
   studyListReturn?: boolean;
   headerMenuOptions?: () => Array<{ title: string; icon: string; onClick: () => void }>;
   headerMenuSubscribe?: (listener: () => void) => () => void;
   headerWhiteLabeling?: AppTypes.Config['whiteLabeling'];
+  headerLogout?: () => boolean;
 }>) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -155,6 +157,11 @@ function ViewerHeader({
       title: t('Header:Logout'),
       icon: 'power-off',
       onClick: async () => {
+        // A mode's own Logout first (radcopilot: the app's sign-out when the
+        // viewer holds the app's sign-in); not taken, OHIF's, as before.
+        if (headerLogout?.()) {
+          return;
+        }
         navigate(`/logout?redirect_uri=${encodeURIComponent(window.location.href)}`);
       },
     });

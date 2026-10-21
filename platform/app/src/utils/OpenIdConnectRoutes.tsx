@@ -8,6 +8,8 @@ import SignoutCallbackComponent from '../routes/SignoutCallbackComponent';
 import { getOidcUserManager } from './oidcUserManager';
 import { unauthenticatedAction } from './embedAuth';
 import { setShellUserSink } from './shellAuth';
+import { isShellUser } from './preInitSignIn';
+import { appSignInActive, appSignInEnded } from './appSignIn';
 
 function _isAbsoluteUrl(url) {
   return url.includes('http://') || url.includes('https://');
@@ -52,8 +54,16 @@ function reportAuthRequiredIfFramed(): boolean {
 
 function LogoutComponent(props) {
   const { userManager } = props;
-  localStorage.setItem('signoutEvent', 'true');
   const location = useLocation();
+  // The reading window signed in with the app's sign-in (./appSignIn): the
+  // viewer's own sign-out would revoke the app's token. Its Logout is the
+  // reading dock's (the app's sign-out); reached here another way, the app's
+  // own sign-out page asks instead.
+  if (appSignInActive()) {
+    window.location.assign('/api/auth/signout');
+    return null;
+  }
+  localStorage.setItem('signoutEvent', 'true');
   const query = new URLSearchParams(location.search);
   userManager.signoutRedirect({
     post_logout_redirect_uri: query.get('redirect_uri'),
@@ -108,6 +118,11 @@ function OpenIdConnectRoutes({ oidc, routerBasename, userAuthenticationService }
     if (!user) {
       return;
     }
+    // The reading window's app sign-in (./appSignIn), its session ended: no
+    // token goes out until the reader signs in again.
+    if (appSignInEnded() && isShellUser(user)) {
+      return;
+    }
 
     return {
       Authorization: `Bearer ${user.access_token}`,
@@ -134,7 +149,8 @@ function OpenIdConnectRoutes({ oidc, routerBasename, userAuthenticationService }
     const storageEventListener = event => {
       // Framed, the user may be the report window's (the sign-in handoff):
       // its sign-out is the app's, and a /logout here would revoke its token.
-      if (isFramed()) {
+      // The same in the reading window signed in with the app's sign-in.
+      if (isFramed() || appSignInActive()) {
         return;
       }
       const signOutEvent = localStorage.getItem('signoutEvent');

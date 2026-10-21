@@ -169,6 +169,18 @@ export interface ReadingDockDeps {
   openReportOnly?: (studyInstanceUid: string, launch?: IslandLaunch) => Window | null;
   /** Phase 2 (PR 4): the viewer's own signed-in user (its OpenID subject), or null. */
   viewerUser?: () => string | null;
+  /**
+   * 21 Oct: whether the viewer's user is the app's (the reading window signed in
+   * with the app's sign-in; the platform's utils/appSignIn), not its own.
+   */
+  viewerUserIsApp?: () => boolean;
+  /** 21 Oct: the app's sign-out (./appSignOut); true once it answered. */
+  signOutOfApp?: () => Promise<boolean>;
+  /**
+   * 21 Oct: after Logout. Signed out: the window closes, else the app's sign-in
+   * page; not signed out (no answer): the app's own sign-out page, which asks.
+   */
+  leaveAfterSignOut?: (signedOut: boolean) => void;
 }
 
 /** 18 Oct 2026: an item the dock offers the viewer's gear menu (radcopilot passes them to OHIF's header). */
@@ -193,6 +205,13 @@ export interface ReadingDock {
   /** The viewer's gear menu: the report's settings and its quiet_workspace
    *  switch, once the report is up and only as far as the island has them. */
   menuOptions: () => ReadingMenuOption[];
+  /**
+   * 21 Oct: the viewer's Logout, taken (true) when the viewer holds the app's
+   * sign-in: the report settles (its draft saved while the session still takes
+   * it), the app signs out (which ends the Keycloak session too), and the window
+   * leaves. False when the viewer's user is its own: OHIF's /logout, as before.
+   */
+  logout: () => boolean;
   subscribe: (listener: () => void) => () => void;
   getSnapshot: () => ReadingDockSnapshot;
   isGone: () => boolean;
@@ -1323,6 +1342,49 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     }, 0);
   };
 
+  // ---- 21 Oct: Logout with the app's sign-in -----------------------------------------
+  let loggingOut = false;
+  const logout = (): boolean => {
+    if (!deps.signOutOfApp || !deps.viewerUserIsApp?.()) {
+      return false;
+    }
+    if (loggingOut) {
+      return true;
+    }
+    loggingOut = true;
+    void (async () => {
+      // The report first, under the settle's own bound: a draft saved after the
+      // sign-out would be refused.
+      const h = handle;
+      if (h) {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          await Promise.race([
+            h.settle(),
+            new Promise(resolve => {
+              timer = win.setTimeout(resolve, SETTLE_BEFORE_UNMOUNT_MS);
+            }),
+          ]);
+        } catch (_) {
+          /* the unmount sends the draft with keepalive anyway */
+        } finally {
+          if (timer) {
+            win.clearTimeout(timer);
+          }
+        }
+      }
+      let signedOut = false;
+      try {
+        signedOut = (await deps.signOutOfApp?.()) === true;
+      } catch (_) {
+        signedOut = false;
+      }
+      loggingOut = false;
+      deps.leaveAfterSignOut?.(signedOut);
+    })();
+    return true;
+  };
+
   snapshot = buildSnapshot();
   return {
     enter,
@@ -1332,6 +1394,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     toggleDictation,
     focusReport,
     menuOptions,
+    logout,
     subscribe: listener => {
       listeners.add(listener);
       return () => listeners.delete(listener);

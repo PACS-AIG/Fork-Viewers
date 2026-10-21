@@ -41,6 +41,9 @@ function ViewerLayout({
   // pacsai (19 Oct): a mode's own mark for the header's top left (radcopilot's
   // RadCopilot™). Unset, the app config's white labeling, as before.
   headerWhiteLabeling,
+  // pacsai (21 Oct): a mode's own Logout (radcopilot: the app's sign-out when
+  // the viewer holds the app's sign-in); returns false to leave it to OHIF's.
+  headerLogout,
 }: withAppTypes<{
   contentWidth?: string;
   studyListReturn?: boolean;
@@ -49,6 +52,7 @@ function ViewerLayout({
   headerMenuOptions?: () => Array<{ title: string; icon: string; onClick: () => void }>;
   headerMenuSubscribe?: (listener: () => void) => () => void;
   headerWhiteLabeling?: AppTypes.Config['whiteLabeling'];
+  headerLogout?: () => boolean;
 }>): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
@@ -173,6 +177,7 @@ function ViewerLayout({
         headerMenuOptions={headerMenuOptions}
         headerMenuSubscribe={headerMenuSubscribe}
         headerWhiteLabeling={headerWhiteLabeling}
+        headerLogout={headerLogout}
       />
       <div
         className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"
@@ -266,6 +271,7 @@ ViewerLayout.propTypes = {
   headerMenuOptions: PropTypes.func,
   headerMenuSubscribe: PropTypes.func,
   headerWhiteLabeling: PropTypes.shape({ createLogoComponentFn: PropTypes.func }),
+  headerLogout: PropTypes.func,
   /** Responsible for rendering our grid of viewports; provided by consuming application */
   children: PropTypes.oneOfType([PropTypes.node, PropTypes.func]).isRequired,
   viewports: PropTypes.array,

@@ -92,6 +92,8 @@ function enterReadingRoute(servicesManager?: unknown): void {
 const readingMenuOptions = () => currentReadingDock()?.menuOptions() ?? [];
 const readingMenuSubscribe = (listener: () => void) =>
   currentReadingDock()?.subscribe(listener) ?? (() => {});
+// 21 Oct: the gear's Logout, the dock's when the viewer holds the app's sign-in.
+const readingLogout = () => currentReadingDock()?.logout() ?? false;
 
 type CreateElement = (
   type: string,
@@ -216,6 +218,8 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
               headerMenuSubscribe: readingMenuSubscribe,
               // 19 Oct: the header's mark is RadCopilot™.
               headerWhiteLabeling: RADCOPILOT_WHITE_LABELING,
+              // 21 Oct: Logout signs out of the app when the viewer holds its sign-in.
+              headerLogout: readingLogout,
             },
           };
         },
