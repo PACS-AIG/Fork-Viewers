@@ -22,6 +22,14 @@ import { preInitSignIn, isUsableShellToken } from './utils/preInitSignIn';
 import { writeAuthRequiredNotice } from './utils/embedAuth';
 import { storeShellUser } from './utils/shellAuth';
 import {
+  installAppSignInHook,
+  isReadingWindow,
+  noteAppRenewal,
+  readAppToken,
+  setAppSignInState,
+  watchAppSignIn,
+} from './utils/appSignIn';
+import {
   installEmbedBridge,
   getEmbedBridge,
   isFramed,
@@ -62,9 +70,20 @@ try {
  * bridge, the report window's own access token is waited for first and stored
  * as this document's user; each later one (the app refreshes it) replaces the
  * stored user and the live one.
+ *
+ * The reading window (milestone 6, approach C, 21 Oct 2026; ./utils/appSignIn):
+ * top level on the app's origin, it is signed in with the app's sign-in when the
+ * app says so (its switch and its session), and Keycloak is not asked; the
+ * app's later tokens replace the user while the window is open.
  */
 const routerBasename = String(viewerPublicUrl || '/').replace(/\/$/, '') || '/';
 const embedBridge = getEmbedBridge();
+const readingWindow = isReadingWindow({
+  pathname: window.location.pathname,
+  readingDock: window.PACSAI_READING_DOCK,
+  framed: isFramed(),
+});
+const readApp = () => readAppToken((input, init) => window.fetch(input, init));
 const storeShellToken = token =>
   storeShellUser(getOidcUserManager(window.PACSAI_OIDC, routerBasename), token);
 /** The token the boot stored, until the later-token listener has skipped its replay. */
@@ -88,11 +107,15 @@ const preInit = preInitSignIn({
     getEmbedBridge()?.authRequired(code);
   },
   shellToken: embedBridge ? () => embedBridge.whenShellAuth() : undefined,
-  storeShellUser: embedBridge
-    ? token =>
-        storeShellToken(token).then(() => {
-          bootShellToken = token;
-        })
+  storeShellUser:
+    embedBridge || readingWindow
+      ? token =>
+          storeShellToken(token).then(() => {
+            bootShellToken = token;
+          })
+      : undefined,
+  appToken: readingWindow
+    ? () => readApp().then(r => (r.kind === 'token' ? r.token : null))
     : undefined,
 }).catch(err => {
   console.warn('[pacsai] pre-init sign-in skipped:', err);
@@ -127,6 +150,32 @@ preInit.then(outcome => {
       window.location.reload();
     });
     return;
+  }
+  if (outcome.action === 'continue' && outcome.via === 'app' && bootShellToken) {
+    // The reading window, signed in with the app's sign-in: the viewer's own
+    // renewal would ask Keycloak, so it stops; the app's newer tokens replace
+    // the user, and the end of the app session holds the token back until the
+    // reader signs in again (the report's own sign-in line).
+    setAppSignInState({ active: true, ended: false });
+    installAppSignInHook(window);
+    try {
+      getOidcUserManager(window.PACSAI_OIDC, routerBasename)?.stopSilentRenew?.();
+    } catch (_) {
+      /* no client to stop: nothing renews */
+    }
+    watchAppSignIn({
+      current: bootShellToken,
+      read: readApp,
+      store: token => storeShellToken(token).then(noteAppRenewal),
+      onEnded: () => {
+        setAppSignInState({ ended: true });
+        console.warn(
+          '[pacsai] the app session has ended: no token is sent until the reader signs in again'
+        );
+      },
+      onBack: () => setAppSignInState({ ended: false }),
+      win: window,
+    });
   }
   if (outcome.action === 'continue' && embedBridge) {
     // Told the held token at once (the boot's own is stored already), then

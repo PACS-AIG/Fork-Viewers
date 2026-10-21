@@ -24,6 +24,12 @@
  * the frame is signed in whenever the app is. None in time, or one about to
  * expire: the steps below, as before.
  *
+ * The reading window (Rev 11 milestone 6, approach C, 21 Oct 2026; ./appSignIn):
+ * top level on the app's origin, it asks the app for its sign-in first (the
+ * app's switch and next-auth's session) and, given a token, is signed in with
+ * it; Keycloak is not asked. No token (the switch off, no app session, no
+ * answer in time): the steps below, as before.
+ *
  * Everything is injected so the decision is testable without a browser.
  */
 import type { OidcClientSettings, UserManagerLike } from './oidcUserManager';
@@ -31,7 +37,7 @@ import { unauthenticatedAction, type FramedAuthCode } from './embedAuth';
 
 export type PreInitOutcome =
   | { action: 'skip'; reason: 'no-oidc' | 'code-flow' | 'auth-route' | 'no-client' }
-  | { action: 'continue'; via: 'storage' | 'silent' | 'shell' }
+  | { action: 'continue'; via: 'storage' | 'silent' | 'shell' | 'app' }
   | { action: 'continue'; via: 'none'; reason: string }
   | { action: 'redirect' }
   | { action: 'auth-required'; code: FramedAuthCode };
@@ -61,6 +67,12 @@ export interface PreInitDeps {
   shellToken?: () => Promise<ShellToken | null>;
   /** Store the shell's token as this document's user (./shellAuth). */
   storeShellUser?: (token: ShellToken) => Promise<void>;
+  /**
+   * The reading window, top level (./appSignIn): the app session's access token,
+   * or null for none (the switch off, no session, no answer in time). Asked only
+   * together with storeShellUser, which stores it as the shell's would be.
+   */
+  appToken?: () => Promise<ShellToken | null>;
   now?: () => number;
   setTimeout?: (fn: () => void, ms: number) => unknown;
   clearTimeout?: (handle: unknown) => void;
@@ -148,6 +160,7 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
     onAuthRequired,
     shellToken,
     storeShellUser,
+    appToken,
     now = () => Date.now(),
     setTimeout: schedule = (fn, ms) => globalThis.setTimeout(fn, ms),
     clearTimeout: cancel = handle => globalThis.clearTimeout(handle as number),
@@ -177,6 +190,14 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
     if (await takeShellToken(shellToken, storeShellUser, now)) {
       onAuthReady?.();
       return { action: 'continue', via: 'shell' };
+    }
+  }
+
+  // 0b. The reading window, top level: the app's own sign-in, first.
+  if (!framed && appToken && storeShellUser) {
+    if (await takeShellToken(appToken, storeShellUser, now)) {
+      onAuthReady?.();
+      return { action: 'continue', via: 'app' };
     }
   }
 
@@ -245,7 +266,7 @@ export async function preInitSignIn(deps: PreInitDeps): Promise<PreInitOutcome> 
   }
 }
 
-/** The shell's token stored as this document's user; false for none, one about to expire, or a throw. */
+/** The shell's (or the app's) token stored as this document's user; false for none, one about to expire, or a throw. */
 async function takeShellToken(
   ask: () => Promise<ShellToken | null>,
   store: (token: ShellToken) => Promise<void>,

@@ -16,6 +16,7 @@ import {
   type ReadingDock,
 } from './readingDock';
 import { loadIsland } from './islandLoader';
+import { signOutOfApp } from './appSignOut';
 
 declare global {
   interface Window {
@@ -35,6 +36,15 @@ export function readingDockEnabled(win: Window = window): boolean {
 // same-origin page that signs in through Keycloak and closes itself.
 const APP_SIGN_IN_PATH = '/auth/popup';
 const APP_SIGN_IN_WINDOW = 'pacsaiAppSignIn';
+/** 21 Oct: the app's own sign-in page, and its own sign-out page (which asks). */
+const APP_SIGN_IN_PAGE = '/auth/signin';
+const APP_SIGN_OUT_PAGE = '/api/auth/signout';
+/**
+ * The mark on a user the viewer was handed (the platform's preInitSignIn
+ * SHELL_USER_MARK; the reading window's app sign-in uses it too). Repeated
+ * here: the platform imports this package, not the other way round.
+ */
+const APP_USER_MARK = 'pacsai_shell_auth';
 const appSignInFeatures = (screen: { availWidth: number; availHeight: number }): string => {
   const w = Math.min(520, Math.max(320, screen.availWidth - 40));
   const h = Math.min(680, Math.max(400, screen.availHeight - 40));
@@ -114,6 +124,15 @@ let viewerUserSource: (() => unknown) | null = null;
 export function setReadingViewerUser(source: (() => unknown) | null): void {
   viewerUserSource = typeof source === 'function' ? source : null;
 }
+/** 21 Oct: the viewer's user was handed by the app (the platform's appSignIn marks it). */
+function viewerUserIsApp(): boolean {
+  try {
+    const user = viewerUserSource?.() as { profile?: Record<string, unknown> } | null | undefined;
+    return user?.profile?.[APP_USER_MARK] === true;
+  } catch (_) {
+    return false;
+  }
+}
 function viewerUserSub(): string | null {
   try {
     const user = viewerUserSource?.() as { profile?: { sub?: unknown } } | null | undefined;
@@ -157,6 +176,32 @@ export function ensureReadingDock(): ReadingDock {
       window.open(APP_SIGN_IN_PATH, APP_SIGN_IN_WINDOW, appSignInFeatures(window.screen)),
     channel: readingChannelDeps(),
     viewerUser: viewerUserSub,
+    viewerUserIsApp,
+    signOutOfApp: () =>
+      signOutOfApp({
+        fetchFn: (url, init) => window.fetch(url, init as RequestInit),
+        storage: (() => {
+          try {
+            return window.localStorage;
+          } catch (_) {
+            return null;
+          }
+        })(),
+      }),
+    leaveAfterSignOut: signedOut => {
+      if (!signedOut) {
+        window.location.assign(APP_SIGN_OUT_PAGE);
+        return;
+      }
+      // A window the worklist opened closes; one opened another way cannot, and
+      // goes to the app's sign-in page instead.
+      window.close();
+      window.setTimeout(() => {
+        if (!window.closed) {
+          window.location.assign(APP_SIGN_IN_PAGE);
+        }
+      }, 300);
+    },
     openReportOnly: (studyInstanceUid, launch) =>
       window.open(
         reportOnlyHref(studyInstanceUid, launch),

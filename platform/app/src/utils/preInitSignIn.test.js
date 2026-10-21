@@ -490,3 +490,133 @@ describe('preInitSignIn framed, with the report window\'s token', () => {
     expect(isUsableShellToken({ accessToken: TOKEN }, NOW)).toBe(false);
   });
 });
+
+describe("preInitSignIn, the reading window with the app's sign-in (21 Oct)", () => {
+  /** A JWT-shaped fake, never a real token. */
+  const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmYWtlIn0.ZmFrZS1zaWc';
+  const NOW = 1791234000000;
+  const token = (secondsLeft = 300) => ({
+    accessToken: TOKEN,
+    expiresAt: NOW / 1000 + secondsLeft,
+  });
+
+  /** deps on the reading route plus the app's token (`app`: a token, null, or { reject }) and the store. */
+  function appDeps({ app = token(), store = 'ok', ...extra } = {}) {
+    const d = deps(extra);
+    const storedTokens = [];
+    d.storedTokens = storedTokens;
+    d.deps = {
+      ...d.deps,
+      location: { pathname: '/viewer/radcopilot', search: '?StudyInstanceUIDs=1' },
+      now: () => NOW,
+      appToken: () => {
+        d.fm.calls.push('appToken');
+        if (app && typeof app === 'object' && 'reject' in app) return Promise.reject(app.reject);
+        return Promise.resolve(app);
+      },
+      storeShellUser: async t => {
+        d.fm.calls.push('storeShellUser');
+        if (store === 'throw') throw new Error('storage full');
+        storedTokens.push(t);
+      },
+    };
+    return d;
+  }
+
+  it("stores the app's token and continues via the app: no stored user, no silent sign-in, no redirect", async () => {
+    const d = appDeps({
+      manager: { stored: { expired: false, access_token: 'own' }, silent: { expired: false } },
+    });
+    expect(await preInitSignIn(d.deps)).toEqual({ action: 'continue', via: 'app' });
+    expect(d.fm.calls).toEqual(['appToken', 'storeShellUser']);
+    expect(d.storedTokens).toEqual([token()]);
+    expect(d.ready.count).toBe(1);
+    expect(d.stored.size).toBe(0);
+  });
+
+  it('takes the steps as before without a token: a stored user, a silent sign-in, else the redirect', async () => {
+    const storedUser = appDeps({
+      app: null,
+      manager: { stored: { expired: false, access_token: 'own' } },
+    });
+    expect(await preInitSignIn(storedUser.deps)).toEqual({ action: 'continue', via: 'storage' });
+    expect(storedUser.fm.calls).toEqual(['appToken', 'getUser']);
+
+    const silent = appDeps({
+      app: null,
+      manager: { silent: { expired: false, access_token: 'own' } },
+    });
+    expect(await preInitSignIn(silent.deps)).toEqual({ action: 'continue', via: 'silent' });
+    expect(silent.fm.calls).toEqual(['appToken', 'getUser', 'signinSilent']);
+
+    const none = appDeps({ app: null, manager: { silent: 'reject' } });
+    expect(await preInitSignIn(none.deps)).toEqual({ action: 'redirect' });
+    expect(none.fm.calls).toEqual(['appToken', 'getUser', 'signinSilent', 'signinRedirect']);
+    expect(JSON.parse(none.stored.get('ohif-redirect-to'))).toEqual({
+      pathname: '/radcopilot',
+      search: '?StudyInstanceUIDs=1',
+    });
+    expect([storedUser, silent, none].every(c => c.storedTokens.length === 0)).toBe(true);
+  });
+
+  it('discards a stored app user when this document was not handed one (the switch off, the app signed out), and signs itself in', async () => {
+    const appUser = {
+      access_token: TOKEN,
+      expired: false,
+      profile: { sub: 'x', [SHELL_USER_MARK]: true },
+    };
+    const d = appDeps({
+      app: null,
+      manager: { stored: appUser, silent: { expired: false, access_token: 'own' } },
+    });
+    expect(await preInitSignIn(d.deps)).toEqual({ action: 'continue', via: 'silent' });
+    expect(d.fm.calls).toEqual(['appToken', 'getUser', 'removeUser', 'signinSilent']);
+  });
+
+  it('does not boot on an app token with 30 s or less left, nor when asking for it or storing it throws', async () => {
+    const lefts = [30, 1, 0, -60];
+    for (let i = 0; i < lefts.length; i++) {
+      const d = appDeps({ app: token(lefts[i]), manager: { stored: { expired: false } } });
+      expect(await preInitSignIn(d.deps)).toEqual({ action: 'continue', via: 'storage' });
+      expect(d.fm.calls).toEqual(['appToken', 'getUser']);
+      expect(d.storedTokens).toEqual([]);
+    }
+    const justEnough = appDeps({ app: token(31) });
+    expect(await preInitSignIn(justEnough.deps)).toEqual({ action: 'continue', via: 'app' });
+
+    const asking = appDeps({
+      app: { reject: new Error('network') },
+      manager: { stored: { expired: false } },
+    });
+    expect(await preInitSignIn(asking.deps)).toEqual({ action: 'continue', via: 'storage' });
+    expect(asking.fm.calls).toEqual(['appToken', 'getUser']);
+
+    const storing = appDeps({ store: 'throw', manager: { stored: { expired: false } } });
+    expect(await preInitSignIn(storing.deps)).toEqual({ action: 'continue', via: 'storage' });
+    expect(storing.fm.calls).toEqual(['appToken', 'storeShellUser', 'getUser']);
+  });
+
+  it('is never asked framed (the report window hands its own), without a store, or on a skipped document', async () => {
+    const framed = appDeps({ manager: { stored: { expired: false } } });
+    expect(await preInitSignIn({ ...framed.deps, framed: true, onAuthRequired: () => {} })).toEqual(
+      { action: 'continue', via: 'storage' }
+    );
+    expect(framed.fm.calls).not.toContain('appToken');
+
+    const noStore = appDeps({ manager: { stored: { expired: false } } });
+    expect(await preInitSignIn({ ...noStore.deps, storeShellUser: undefined })).toEqual({
+      action: 'continue',
+      via: 'storage',
+    });
+    expect(noStore.fm.calls).not.toContain('appToken');
+
+    const authRoute = appDeps();
+    expect(
+      await preInitSignIn({
+        ...authRoute.deps,
+        location: { pathname: '/viewer/callback', search: '' },
+      })
+    ).toEqual({ action: 'skip', reason: 'auth-route' });
+    expect(authRoute.fm.calls).toEqual([]);
+  });
+});

@@ -157,6 +157,7 @@ describe('the radcopilot mode', () => {
       headerMenuOptions,
       headerMenuSubscribe,
       headerWhiteLabeling,
+      headerLogout,
       ...props
     } = on.props;
     expect(props).toEqual({
@@ -190,6 +191,11 @@ describe('the radcopilot mode', () => {
     expect(text(mark)).toBe('RADCOPILOTTM');
     expect((mark.children[2] as Node).type).toBe('sup');
     expect(off.props.headerWhiteLabeling).toBeUndefined();
+    // 21 Oct: the gear's Logout is the dock's (the app's sign-out when the viewer
+    // holds the app's sign-in): a stable function; no dock here, so OHIF's own.
+    expect(headerLogout()).toBe(false);
+    expect(m.routes[0].layoutTemplate({}).props.headerLogout).toBe(headerLogout);
+    expect(off.props.headerLogout).toBeUndefined();
   });
 
   it('the series rail stays closed for a reader who closed it, and the layout remembers a close', () => {
