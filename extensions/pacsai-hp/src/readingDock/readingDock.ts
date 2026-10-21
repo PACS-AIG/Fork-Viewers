@@ -111,6 +111,10 @@ export interface ReadingDockSnapshot {
   requested: WorkspaceMode;
   mode: WorkspaceMode;
   fits: boolean;
+  /** 22 Oct: the window cannot hold Images + Report (the narrow ladder's one
+   *  pane, whatever was asked; 200 % zoom among them). The header's
+   *  microphone keeps its toggle and notices then, its line in the toggle's title. */
+  narrow: boolean;
   imagesHeld: boolean;
   reportPercent: number;
   viewerShown: boolean;
@@ -483,6 +487,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     requested,
     mode: view?.mode ?? requested,
     fits: view?.layout.fits ?? true,
+    narrow: view ? view.layout.splitImagesPx === null : false,
     imagesHeld: view?.imagesHeld ?? false,
     reportPercent: reportPercent(reportRatio),
     viewerShown,

@@ -40,6 +40,16 @@ const SEGMENT: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
+/** Off screen but still read: the microphone's line in a narrow window stays in its live region. */
+const VISUALLY_HIDDEN: React.CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+};
+
 export function ReadingModeControl(): React.ReactElement | null {
   const { dock, snap } = useReadingDock();
   if (!dock || !snap) {
@@ -123,6 +133,7 @@ export function ReadingMicLine(): React.ReactElement | null {
   }
   const d = snap.dictation;
   const started = !!d?.started;
+  const line = micLine(d);
   return (
     <div
       data-cy="pacsai-reading-mic"
@@ -135,6 +146,8 @@ export function ReadingMicLine(): React.ReactElement | null {
         data-reading-mic={started ? 'on' : 'off'}
         aria-pressed={started}
         aria-label={started ? 'Stop dictation into the report' : 'Start dictation into the report'}
+        // The line, in a narrow window (see below).
+        title={snap.narrow ? line : undefined}
         disabled={!d || !d.available || d.busy}
         onMouseDown={e => e.preventDefault()}
         onClick={() => dock.toggleDictation()}
@@ -151,8 +164,19 @@ export function ReadingMicLine(): React.ReactElement | null {
       >
         <MicGlyph on={started} />
       </button>
-      <span data-reading-mic-line="" style={{ fontSize: 13, whiteSpace: 'nowrap', color: 'rgb(var(--pacs-text))' }}>
-        {micLine(d)}
+      {/* 22 Oct: a window too narrow for Both (200 % zoom among them) keeps the
+          toggle and the notices; the line moves to the toggle's title, still
+          read out here, and its width goes to the image tools, which at 200 %
+          had none left once the microphone joined the header's row. */}
+      <span
+        data-reading-mic-line=""
+        style={
+          snap.narrow
+            ? VISUALLY_HIDDEN
+            : { fontSize: 13, whiteSpace: 'nowrap', color: 'rgb(var(--pacs-text))' }
+        }
+      >
+        {line}
       </span>
       {snap.notices.map(n => (
         <span

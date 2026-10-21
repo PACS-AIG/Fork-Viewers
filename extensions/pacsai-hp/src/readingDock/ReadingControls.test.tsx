@@ -148,3 +148,47 @@ describe('the reading controls as one toolbar item', () => {
     expect(partsOf(row)).toEqual(['pacsai-reading-modes']);
   });
 });
+
+// 22 Oct: a window too narrow for Both (200 % zoom among them): the microphone's
+// line gives its width to the image tools, which had none left at 200 %.
+describe('the microphone in a window too narrow for Both', () => {
+  const inImages = async (pending: number) => {
+    render(<ReadingControls />);
+    await act(async () => {
+      ensureReadingDock().enter('1.2.3');
+      await settle();
+    });
+    await act(async () => {
+      mockOptions.onDictation({ started: true, busy: false, available: true, pending });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Images' }));
+  };
+
+  it("keeps the toggle and the notices; the line is read out but off screen, and in the toggle's title", async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 960 });
+    await inImages(1);
+    expect(currentReadingDock()?.getSnapshot()).toMatchObject({ mode: 'images', narrow: true });
+    const line = screen.getByText('Dictating into the report · 1 to confirm');
+    expect(line.style.position).toBe('absolute');
+    expect(line.style.width).toBe('1px');
+    expect(line.closest('[role="status"]')).not.toBeNull();
+    const toggle = screen.getByRole('button', { name: 'Stop dictation into the report' });
+    expect(toggle.getAttribute('title')).toBe('Dictating into the report · 1 to confirm');
+
+    await act(async () => {
+      mockOptions.onNotice({ level: 'error', code: 'DRAFT_NOT_SAVED' });
+    });
+    expect(screen.getByText('Report: the draft is not saved').style.position).toBe('');
+  });
+
+  it('at 1920 the line shows beside the toggle, which has no title, as before', async () => {
+    await inImages(0);
+    expect(currentReadingDock()?.getSnapshot()).toMatchObject({ mode: 'images', narrow: false });
+    const line = screen.getByText('Dictating into the report');
+    expect(line.style.position).toBe('');
+    expect(line.style.fontSize).toBe('13px');
+    expect(
+      screen.getByRole('button', { name: 'Stop dictation into the report' }).getAttribute('title')
+    ).toBeNull();
+  });
+});
