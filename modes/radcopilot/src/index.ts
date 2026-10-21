@@ -31,7 +31,6 @@ import { TRACKING_PROMPTS_CUSTOMIZATION } from '@ohif/extension-measurement-trac
 import {
   IMAGES_WIDTH_VAR,
   READING_MIC_KEY,
-  READING_MIC_UITYPE,
   READING_MODES,
   READING_MODES_UITYPE,
   currentReadingDock,
@@ -66,10 +65,9 @@ const readingHotkeys = [
   },
 ];
 
-const readingButtons = [
-  { id: 'ReadingModes', uiType: READING_MODES_UITYPE, props: {} },
-  { id: 'ReadingMic', uiType: READING_MIC_UITYPE, props: {} },
-];
+// One item (22 Oct): the layout's buttons and, in Images, the report's
+// microphone beside them; as two, the microphone stacked under the buttons.
+const readingButtons = [{ id: 'ReadingModes', uiType: READING_MODES_UITYPE, props: {} }];
 
 /** The route's study for the dock, outside React's render (the dock writes the DOM). */
 function enterReadingRoute(servicesManager?: unknown): void {

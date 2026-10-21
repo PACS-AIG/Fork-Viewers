@@ -52,7 +52,6 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   railLayoutProps: jest.requireActual('./seriesRail').railLayoutProps,
   IMAGES_WIDTH_VAR: jest.requireActual('./readingDock').IMAGES_WIDTH_VAR,
   READING_MODES_UITYPE: 'pacsai.readingModes',
-  READING_MIC_UITYPE: 'pacsai.readingMic',
 }));
 
 import longitudinal from '@ohif/mode-longitudinal';
@@ -225,7 +224,9 @@ describe('the radcopilot mode', () => {
     (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = 'on';
     const on = services();
     m.onModeEnter.call(m, { servicesManager: on.servicesManager });
-    expect(on.sections.secondary).toEqual(['ReadingModes', 'ReadingMic']);
+    // 22 Oct: one item, so the report's microphone keeps to the buttons' row.
+    expect(on.sections.secondary).toEqual(['ReadingModes']);
+    expect(on.buttons).toEqual([{ id: 'ReadingModes', uiType: 'pacsai.readingModes', props: {} }]);
   });
 
   it("with READING_DOCK on, turns OHIF's own report prompts off for this mode only (a mode customization)", () => {

@@ -1,7 +1,8 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { ReadingMicLine, ReadingModeControl } from './ReadingControls';
+import { ReadingControls, ReadingMicLine, ReadingModeControl } from './ReadingControls';
 import { currentReadingDock, ensureReadingDock } from './session';
+import getToolbarModule, { READING_MODES_UITYPE } from '../getToolbarModule';
 
 // The island, as the app serves it: the session imports it by URL at run time.
 const mockHandle = {
@@ -98,5 +99,52 @@ describe('the reading controls in the header', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Report' }));
     expect(mockHandle.setVisibility).toHaveBeenLastCalledWith(true);
     expect(screen.queryByText('Report: the draft is not saved')).toBeNull();
+  });
+});
+
+// 22 Oct: the section's one item. OHIF's Toolbar draws each item of a section in
+// a block of its own, so as two items the microphone stacked under the buttons.
+describe('the reading controls as one toolbar item', () => {
+  const rowOf = (container: HTMLElement) =>
+    container.querySelector('[data-cy="pacsai-reading-controls"]') as HTMLElement;
+  const partsOf = (row: HTMLElement) => [...row.children].map(c => c.getAttribute('data-cy'));
+
+  it("is what the reading dock's toolbar uiType draws, with no microphone item of its own", () => {
+    const entries = getToolbarModule({
+      commandsManager: {},
+      servicesManager: { services: {} },
+    } as never) as Array<{ name: string; defaultComponent?: unknown }>;
+    expect(entries.find(e => e.name === READING_MODES_UITYPE)?.defaultComponent).toBe(
+      ReadingControls
+    );
+    expect(entries.map(e => e.name)).not.toContain('pacsai.readingMic');
+  });
+
+  it('renders nothing where the document has no dock', () => {
+    const { container } = render(<ReadingControls />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  it("in Images, puts the report's microphone in the buttons' row, after them", async () => {
+    const { container } = render(<ReadingControls />);
+    await act(async () => {
+      ensureReadingDock().enter('1.2.3');
+      await settle();
+    });
+    await act(async () => {
+      mockOptions.onDictation({ started: true, busy: false, available: true, pending: 0 });
+    });
+    const row = rowOf(container);
+    expect(row.style.display).toBe('flex');
+    expect(partsOf(row)).toEqual(['pacsai-reading-modes']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Images' }));
+    expect(partsOf(row)).toEqual(['pacsai-reading-modes', 'pacsai-reading-mic']);
+    expect(
+      screen.getByText('Dictating into the report').closest('[data-cy="pacsai-reading-controls"]')
+    ).toBe(row);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    expect(partsOf(row)).toEqual(['pacsai-reading-modes']);
   });
 });

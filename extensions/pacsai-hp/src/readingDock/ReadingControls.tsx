@@ -173,3 +173,26 @@ export function ReadingMicLine(): React.ReactElement | null {
     </div>
   );
 }
+
+/**
+ * 22 Oct: the controls as the section's one item, in one row: the layout's
+ * buttons, then, while the report is hidden, its microphone beside them.
+ * OHIF's Toolbar draws each item of a section in a block of its own, so as
+ * two items the microphone stacked under the buttons, below the header's row
+ * and over the top of the images.
+ */
+export function ReadingControls(): React.ReactElement | null {
+  const { dock, snap } = useReadingDock();
+  if (!dock || !snap) {
+    return null;
+  }
+  return (
+    <div
+      data-cy="pacsai-reading-controls"
+      style={{ display: 'flex', alignItems: 'center', height: 32 }}
+    >
+      <ReadingModeControl />
+      <ReadingMicLine />
+    </div>
+  );
+}
