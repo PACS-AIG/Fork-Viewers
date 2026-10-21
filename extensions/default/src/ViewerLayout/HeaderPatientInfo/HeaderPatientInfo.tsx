@@ -77,7 +77,8 @@ function HeaderPatientInfo({
   servicesManager,
   appConfig,
   compact = false,
-}: withAppTypes<{ compact?: boolean }>) {
+  shrinks = false,
+}: withAppTypes<{ compact?: boolean; shrinks?: boolean }>) {
   const { displaySetService, hangingProtocolService, panelService } = servicesManager.services;
   const [, forceRender] = useReducer((x: number) => x + 1, 0);
 
@@ -111,7 +112,9 @@ function HeaderPatientInfo({
     );
   }
 
-  const line1 = [info.name, info.ageSex, info.accession].filter(Boolean).join(dot);
+  const line1 =
+    [info.name, info.ageSex, info.accession].filter(Boolean).join(dot) ||
+    'Patient details unavailable';
   const line2 = [info.description, info.date, info.imageCount].filter(Boolean).join(dot);
 
   return (
@@ -121,15 +124,19 @@ function HeaderPatientInfo({
       // Compact in a framed viewer: the report window's header already names
       // the patient, and its pane is narrower.
       className={`hover:bg-primary-dark flex ${compact ? 'max-w-[220px]' : 'max-w-[380px]'} cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5`}
+      // pacsai (22 Oct): `shrinks` lets the chip give way below that cap when
+      // the header's row is too narrow for it (the reading window at 200 %
+      // zoom), so its title carries both lines whole.
+      style={shrinks ? { minWidth: 0 } : undefined}
       onClick={openStudyInfo}
-      title="Open Study Info"
+      title={
+        shrinks ? [line1, line2, 'Open Study Info'].filter(Boolean).join('\n') : 'Open Study Info'
+      }
       data-cy="header-study-chip"
     >
       <Icons.Patient className="text-primary-active shrink-0" />
       <div className="flex min-w-0 flex-col justify-center">
-        <div className="truncate text-[13px] font-bold leading-[17px] text-white">
-          {line1 || 'Patient details unavailable'}
-        </div>
+        <div className="truncate text-[13px] font-bold leading-[17px] text-white">{line1}</div>
         {line2 ? (
           <div className="text-aqua-pale truncate text-[11px] leading-[15px]">{line2}</div>
         ) : null}

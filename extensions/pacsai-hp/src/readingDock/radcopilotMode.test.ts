@@ -169,7 +169,10 @@ describe('the radcopilot mode', () => {
       leftPanelResizable: false,
       leftPanelWidth: 112,
       leftPanelClosed: false,
+      // 22 Oct: the header's patient line gives way in a row too narrow for it (200 % zoom).
+      headerPatientInfoShrinks: true,
     });
+    expect(off.props.headerPatientInfoShrinks).toBeUndefined();
     expect(typeof onLeftPanelClosedChange).toBe('function');
     // 18 Oct: the dock's items for the viewer's gear menu, and their subscription
     // (stable functions; no dock here, so no items and a no-op unsubscribe).

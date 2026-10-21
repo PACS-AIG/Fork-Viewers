@@ -44,6 +44,10 @@ function ViewerLayout({
   // pacsai (21 Oct): a mode's own Logout (radcopilot: the app's sign-out when
   // the viewer holds the app's sign-in); returns false to leave it to OHIF's.
   headerLogout,
+  // pacsai (22 Oct): a mode can let the header's patient line give way in a
+  // row too narrow for it (radcopilot at 200 % zoom, where its mark, reading
+  // controls and patient line overran the 960 px). Unset, as before.
+  headerPatientInfoShrinks,
 }: withAppTypes<{
   contentWidth?: string;
   studyListReturn?: boolean;
@@ -53,6 +57,7 @@ function ViewerLayout({
   headerMenuSubscribe?: (listener: () => void) => () => void;
   headerWhiteLabeling?: AppTypes.Config['whiteLabeling'];
   headerLogout?: () => boolean;
+  headerPatientInfoShrinks?: boolean;
 }>): React.FunctionComponent {
   const [appConfig] = useAppConfig();
 
@@ -178,6 +183,7 @@ function ViewerLayout({
         headerMenuSubscribe={headerMenuSubscribe}
         headerWhiteLabeling={headerWhiteLabeling}
         headerLogout={headerLogout}
+        headerPatientInfoShrinks={headerPatientInfoShrinks}
       />
       <div
         className="bg-bkg-low relative flex w-full flex-row flex-nowrap items-stretch overflow-hidden"

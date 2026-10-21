@@ -21,7 +21,8 @@
  *     so there is no "track this series", no SR save and no SR hydrate prompt;
  *     and the series rail on the left (the study browser as one narrow,
  *     fixed-width column, readingDock/seriesRail.ts); and the header's mark is
- *     the report's product, RadCopilot™, in place of the config's PACS AI.
+ *     the report's product, RadCopilot™, in place of the config's PACS AI,
+ *     and its patient line gives way where the row is too narrow for it.
  * With READING_DOCK off it is the longitudinal viewer under another route.
  * The longitudinal mode's own files are not changed.
  */
@@ -220,6 +221,11 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
               headerWhiteLabeling: RADCOPILOT_WHITE_LABELING,
               // 21 Oct: Logout signs out of the app when the viewer holds its sign-in.
               headerLogout: readingLogout,
+              // 22 Oct: at 200 % zoom (960 CSS px) the mark, the reading controls
+              // and the patient line were wider than the row, and the page
+              // scrolled sideways (1 to 3 px, more as the line's image count
+              // grew); the line gives way (cut, its whole text in its title).
+              headerPatientInfoShrinks: true,
             },
           };
         },

@@ -27,6 +27,8 @@ interface HeaderProps {
   showLogo?: boolean;
   /** 'start' puts the tools at the left edge (an embedded viewer, which has no logo there). */
   toolbarAlign?: 'center' | 'start';
+  /** True lets the patient info give way (shrink, its lines cut) when the row is too narrow, rather than push the row past the window. */
+  patientInfoShrinks?: boolean;
   isSticky?: boolean;
   WhiteLabeling?: {
     createLogoComponentFn?: (React: any, props: any) => ReactNode;
@@ -42,6 +44,7 @@ function Header({
   onClickReturnButton,
   showLogo = true,
   toolbarAlign = 'center',
+  patientInfoShrinks = false,
   isSticky = false,
   WhiteLabeling,
   PatientInfo,
@@ -111,7 +114,13 @@ function Header({
             {children}
           </div>
         </div>
-        <div className="flex shrink-0 select-none items-center">
+        <div
+          className={classNames(
+            'flex',
+            patientInfoShrinks ? 'min-w-0' : 'shrink-0',
+            'select-none items-center'
+          )}
+        >
           {PatientInfo}
           <div className="border-primary-dark mx-1.5 h-[25px] border-r"></div>
           <div className="flex-shrink-0">
