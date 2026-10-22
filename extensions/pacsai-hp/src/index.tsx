@@ -48,7 +48,7 @@ import { READING_MIC_KEY, READING_MODES } from './readingDock/dockModel';
 import { railLayoutProps } from './readingDock/seriesRail';
 import { READING_MODES_UITYPE } from './getToolbarModule';
 import { getSpineRegion } from './priors/metadata';
-import { ALL_IN_ONE_MARKER } from './allinone/buildAllInOneDisplaySet';
+import { ALL_IN_ONE_MARKER, isNonImageDisplaySet } from './allinone/buildAllInOneDisplaySet';
 import { hangingIgnoresPriors } from './allinone/browsingMode';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
@@ -82,6 +82,13 @@ export const BVALUE_ATTRIBUTE = 'pacsaiBValue';
 
 /** Custom HP attribute id: marks the synthetic all-in-one composite stack. */
 export const ALL_IN_ONE_ATTRIBUTE = 'pacsaiAllInOne';
+
+/**
+ * Custom HP attribute id: 'image' for an image series, 'nonimage' for a non-image
+ * object or derived overlay (SR, SEG, KO, …). Every image selector of the compare
+ * protocols requires 'image', so a text report never hangs in an image pane.
+ */
+export const IMAGE_ATTRIBUTE = 'pacsaiImage';
 
 /**
  * 'dynamic' when the displaySet is a time-resolved (4D) volume — a raw perfusion /
@@ -215,6 +222,16 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
       ALL_IN_ONE_ATTRIBUTE,
       'All-in-one composite marker (allinone/series)',
       (displaySet: any) => (displaySet?.isAllInOne ? ALL_IN_ONE_MARKER : 'series')
+    );
+
+    // Image series or not (22 Oct): an X-ray compare tiled a Basic Text SR beside
+    // the chest views, and its viewport threw on a long text value sent as a bulk
+    // data reference, taking the whole viewer down. Image selectors require 'image'.
+    hangingProtocolService?.addCustomAttribute?.(
+      IMAGE_ATTRIBUTE,
+      'Image series (image/nonimage)',
+      (displaySet: Parameters<typeof isNonImageDisplaySet>[0]) =>
+        isNonImageDisplaySet(displaySet) ? 'nonimage' : 'image'
     );
 
     // Comparison role (current/prior/sibling) AS SEEN BY THE MATCHER. Current is

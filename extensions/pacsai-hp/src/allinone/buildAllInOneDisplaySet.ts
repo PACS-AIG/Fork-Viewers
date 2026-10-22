@@ -43,6 +43,24 @@ const NON_IMAGE_MODALITIES = new Set([
   'REG', 'FID', 'PLAN', 'DOC', 'AU', 'PMAP',
 ]);
 
+/**
+ * Not an image series: a non-image object (SR, SEG, PR, KO, RT, …) or a derived
+ * overlay (SEG / RTSTRUCT / parametric map). Also the hanging protocols'
+ * `pacsaiImage` attribute (index.tsx), which every image selector requires
+ * (22 Oct: a Basic Text SR was tiled beside two chest views).
+ */
+export function isNonImageDisplaySet(
+  ds:
+    | { isDerivedDisplaySet?: boolean; isOverlayDisplaySet?: boolean; Modality?: unknown }
+    | null
+    | undefined
+): boolean {
+  if (ds?.isDerivedDisplaySet || ds?.isOverlayDisplaySet) {
+    return true;
+  }
+  return NON_IMAGE_MODALITIES.has(String(ds?.Modality ?? '').toUpperCase());
+}
+
 // Non-diagnostic series dropped by SeriesDescription: scouts/topograms/localizers,
 // CTA bolus-tracking / monitoring, scanner patient-protocol / dose-report sheets.
 const NON_DIAGNOSTIC_RE =
@@ -62,8 +80,7 @@ function isEligible(ds: any): boolean {
   if (!ds || ds.isAllInOne || ds.unsupported) {
     return false;
   }
-  // SEG / RTSTRUCT / parametric-map overlays.
-  if (ds.isDerivedDisplaySet || ds.isOverlayDisplaySet) {
+  if (isNonImageDisplaySet(ds)) {
     return false;
   }
   const images = ds.images ?? ds.instances ?? [];
@@ -71,7 +88,7 @@ function isEligible(ds: any): boolean {
     return false;
   }
   const mod = String(ds.Modality ?? '').toUpperCase();
-  if (mod === 'US' || NON_IMAGE_MODALITIES.has(mod)) {
+  if (mod === 'US') {
     return false;
   }
   if (NON_DIAGNOSTIC_RE.test(String(ds.SeriesDescription ?? ''))) {

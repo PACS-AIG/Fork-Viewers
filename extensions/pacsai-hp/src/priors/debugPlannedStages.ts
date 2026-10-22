@@ -1,7 +1,7 @@
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
 import getImageColor from '../utils/getImageColor';
-import { ALL_IN_ONE_MARKER } from '../allinone/buildAllInOneDisplaySet';
+import { ALL_IN_ONE_MARKER, isNonImageDisplaySet } from '../allinone/buildAllInOneDisplaySet';
 import { getStudyRole } from './roleRegistry';
 import { getSpineRegion } from './metadata';
 import { hangingIgnoresPriors } from '../allinone/browsingMode';
@@ -70,6 +70,10 @@ function attrValue(d: AnyDS, attr: string, activeStudyUID: string | undefined, s
       // 4D-source stages (SelectorDef.dynamic) require pacsaiDynamic==='dynamic';
       // mirrors the index.tsx callback (same misleading-replay class as above).
       return d?.isDynamicVolume ? 'dynamic' : 'static';
+    case 'pacsaiImage':
+      // Every image selector requires pacsaiImage==='image'; mirrors the index.tsx
+      // callback (same misleading-replay class as above).
+      return isNonImageDisplaySet(d) ? 'nonimage' : 'image';
     default:
       return d?.[attr];
   }

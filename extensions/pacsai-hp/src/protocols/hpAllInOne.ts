@@ -70,6 +70,8 @@ export const hpAllInOne: Types.HangingProtocol.Protocol = {
       studyMatchingRules: [],
       seriesMatchingRules: [
         { attribute: 'pacsaiRole', required: true, constraint: { equals: { value: 'current' } } },
+        // Soft: an image series first, but a study of only a report still shows it.
+        { attribute: 'pacsaiImage', weight: 10, constraint: { equals: { value: 'image' } } },
       ],
     },
   },
