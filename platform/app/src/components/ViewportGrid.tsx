@@ -2,8 +2,9 @@ import React, { useEffect, useCallback, useRef } from 'react';
 import { useResizeDetector } from 'react-resize-detector';
 import { Types, MeasurementService } from '@ohif/core';
 import { ViewportGrid, ViewportPane } from '@ohif/ui';
-import { useViewportGrid } from '@ohif/ui-next';
+import { ErrorBoundary, useViewportGrid } from '@ohif/ui-next';
 import EmptyViewport from './EmptyViewport';
+import { ViewportErrorFallback, ViewportGridErrorFallback } from './ViewportErrorFallback';
 import classNames from 'classnames';
 import { useAppConfig } from '@state';
 
@@ -315,19 +316,33 @@ function ViewerViewportGrid(props: withAppTypes) {
                 !isActive && (appConfig?.activateViewportBeforeInteraction ?? true),
             })}
           >
-            <ViewportComponent
-              displaySets={displaySets}
-              viewportLabel={viewports.size > 1 ? viewportLabel : ''}
-              viewportId={viewportId}
-              dataSource={dataSource}
-              viewportOptions={viewportOptions}
-              displaySetOptions={displaySetOptions}
-              needsRerendering={displaySetsNeedsRerendering}
-              isHangingProtocolLayout={isHangingProtocolLayout}
-              onElementEnabled={() => {
-                viewportGridService.setViewportIsReady(viewportId, true);
-              }}
-            />
+            {/* pacsai: a viewport that throws while rendering shows a card in
+                its own pane; the other viewports, the header and the panels
+                keep working (it reached the route's boundary, which replaced
+                the whole viewer: 22 Oct, a text SR on an X-ray). A new series
+                in the pane renders afresh. Marked ready, the failed viewport
+                no longer holds back the grid's VIEWPORTS_READY (prefetching,
+                the toolbar's state, scroll sync). */}
+            <ErrorBoundary
+              context={`Viewport ${viewportId}`}
+              fallbackComponent={ViewportErrorFallback}
+              resetKeys={[displaySetInstanceUIDsToUse.join(',')]}
+              onError={() => viewportGridService.setViewportIsReady(viewportId, true)}
+            >
+              <ViewportComponent
+                displaySets={displaySets}
+                viewportLabel={viewports.size > 1 ? viewportLabel : ''}
+                viewportId={viewportId}
+                dataSource={dataSource}
+                viewportOptions={viewportOptions}
+                displaySetOptions={displaySetOptions}
+                needsRerendering={displaySetsNeedsRerendering}
+                isHangingProtocolLayout={isHangingProtocolLayout}
+                onElementEnabled={() => {
+                  viewportGridService.setViewportIsReady(viewportId, true);
+                }}
+              />
+            </ErrorBoundary>
           </div>
         </ViewportPane>
       );
@@ -389,4 +404,22 @@ function _getViewportComponent(displaySets, viewportComponents, uiNotificationSe
   return EmptyViewport;
 }
 
-export default ViewerViewportGrid;
+/**
+ * pacsai: the grid in a boundary of its own. A viewport's render error stops
+ * at its pane's boundary; what gets past one (the grid's own render, or a
+ * viewport throwing as a layout change removes its pane: React skips a
+ * boundary that is itself being removed) stops here, so the header and the
+ * panels stay, and Try again renders the grid afresh.
+ */
+function ViewerViewportGridInBoundary(props: withAppTypes) {
+  return (
+    <ErrorBoundary
+      context="Viewport grid"
+      fallbackComponent={ViewportGridErrorFallback}
+    >
+      <ViewerViewportGrid {...props} />
+    </ErrorBoundary>
+  );
+}
+
+export default ViewerViewportGridInBoundary;

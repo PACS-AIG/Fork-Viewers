@@ -343,7 +343,10 @@ export function ViewportGridProvider({ children, service }: ViewportGridProvider
         const viewports = new Map(state.viewports);
         const viewport = viewports.get(viewportId);
         if (!viewport) {
-          return;
+          // pacsai: a late ready from a viewport a layout change has removed
+          // (an element enabled late, a failed pane's card) left the state
+          // undefined, and every reader of the grid threw.
+          return state;
         }
 
         viewports.set(viewportId, {

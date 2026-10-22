@@ -82,6 +82,8 @@ import {
   TooltipContent,
   StudySummary,
   ErrorBoundary,
+  RenderErrorCard,
+  errorSummary,
   Header,
   ViewportActionButton,
   PatientInfo,
@@ -113,6 +115,8 @@ import * as utils from './utils';
 
 export {
   ErrorBoundary,
+  RenderErrorCard,
+  errorSummary,
   // components
   Button,
   Dialog,

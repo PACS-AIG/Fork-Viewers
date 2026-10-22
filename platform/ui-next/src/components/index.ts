@@ -79,7 +79,7 @@ import { MeasurementTable } from './MeasurementTable';
 import { SegmentationTable, useSegmentationTableContext } from './SegmentationTable';
 import { Toaster, toast } from './Sonner';
 import { StudySummary } from './StudySummary';
-import { ErrorBoundary } from './Errorboundary';
+import { ErrorBoundary, RenderErrorCard, errorSummary } from './Errorboundary';
 import { Header } from './Header';
 import { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from './Card';
 import {
@@ -105,6 +105,8 @@ import {
 export {
   Numeric,
   ErrorBoundary,
+  RenderErrorCard,
+  errorSummary,
   Button,
   buttonVariants,
   ThemeWrapper,
