@@ -3,16 +3,27 @@
  * an event handler or a timer, a rejected promise nobody handled):
  * platform/app/src/utils/errorReporting.ts, installed once by App. Each is
  * marked handled, logged and toasted, a repeat or a burst toasted once; the
- * page is left as it is. And the texts a toast and a Details toggle show.
+ * page is left as it is. And the texts a toast and a Details toggle show
+ * (ui-next's Errorboundary/errorText.ts).
  */
+// ui-next's index loads every component (one of them past babel's regenerator
+// transform); the reporter takes only errorSummary from it.
+jest.mock('@ohif/ui-next', () =>
+  jest.requireActual('../../../../platform/ui-next/src/components/Errorboundary/errorText')
+);
+
+// eslint-disable-next-line import/first
 import {
   ANY_ERROR_QUIET_MS,
   ERROR_TOAST_MS,
   SAME_ERROR_QUIET_MS,
-  describeError,
-  errorSummary,
   installUncaughtErrorReporting,
 } from '../../../../platform/app/src/utils/errorReporting';
+// eslint-disable-next-line import/first
+import {
+  describeError,
+  errorSummary,
+} from '../../../../platform/ui-next/src/components/Errorboundary/errorText';
 
 const rejectionOf = (reason: unknown) =>
   Object.assign(new Event('unhandledrejection', { cancelable: true }), { reason });

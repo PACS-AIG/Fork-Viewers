@@ -3,6 +3,15 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Icons } from '../Icons';
 import { TooltipTrigger, TooltipContent, Tooltip } from '../Tooltip';
 import { Separator } from '../Separator';
+import { ErrorBoundary, RenderErrorCard } from '../Errorboundary';
+
+const PanelErrorFallback = (props: { error: unknown; resetErrorBoundary: () => void }) => (
+  <RenderErrorCard
+    {...props}
+    scope="panel"
+    title="This panel could not be displayed"
+  />
+);
 
 /**
  * SidePanel component properties.
@@ -465,7 +474,21 @@ const SidePanel = ({
           {getOpenStateComponent()}
           {tabs.map((tab, tabIndex) => {
             if (tabIndex === activeTabIndex) {
-              return <tab.content key={tabIndex} />;
+              // pacsai: a panel that throws while rendering shows a card in
+              // its own body; its tabs, the other side panel and the viewer
+              // keep working (it reached the route's boundary, which replaced
+              // the whole viewer). Another tab, or this one again, renders
+              // afresh.
+              return (
+                <ErrorBoundary
+                  key={tabIndex}
+                  context={`Panel ${tab.name}`}
+                  fallbackComponent={PanelErrorFallback}
+                  resetKeys={[tab.content]}
+                >
+                  <tab.content />
+                </ErrorBoundary>
+              );
             }
             return null;
           })}

@@ -51,6 +51,9 @@ jest.mock('@ohif/ui-next', () => ({
   ErrorBoundary: jest.requireActual(
     '../../../../platform/ui-next/src/components/Errorboundary/ErrorBoundary'
   ).ErrorBoundary,
+  RenderErrorCard: jest.requireActual(
+    '../../../../platform/ui-next/src/components/Errorboundary/RenderErrorCard'
+  ).RenderErrorCard,
   useViewportGrid: () => [mockGrid, mockGridApi],
 }));
 // The pane's drop target and the grid's layout: plain boxes here.
