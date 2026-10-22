@@ -8,6 +8,7 @@ import { I18nextProvider } from 'react-i18next';
 import { BrowserRouter } from 'react-router-dom';
 
 import Compose from './routes/Mode/Compose';
+import { installUncaughtErrorReporting } from './utils/errorReporting';
 import {
   ExtensionManager,
   CommandsManager,
@@ -103,6 +104,17 @@ function App({
 
     run();
   }, []);
+
+  // pacsai: an error no error boundary can catch (thrown from an event
+  // handler or a timer, an unhandled rejection), from anywhere on the page:
+  // logged and toasted once, and the viewer left as it is (utils/errorReporting).
+  useEffect(() => {
+    if (!init) {
+      return;
+    }
+    const { uiNotificationService } = init.servicesManager.services;
+    return installUncaughtErrorReporting({ notify: toast => uiNotificationService.show(toast) });
+  }, [init]);
 
   if (!init) {
     return null;

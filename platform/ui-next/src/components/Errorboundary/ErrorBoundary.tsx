@@ -33,6 +33,8 @@ interface ErrorBoundaryProps {
   children: React.ReactNode;
   fallbackRoute?: string | null;
   isPage?: boolean;
+  /** pacsai: the children render again when one of these changes (react-error-boundary's resetKeys). */
+  resetKeys?: unknown[];
 }
 
 const DefaultFallback = ({
@@ -42,7 +44,8 @@ const DefaultFallback = ({
 }: DefaultFallbackProps) => {
   const { t } = useTranslation('ErrorBoundary');
   const [showDetails, setShowDetails] = useState(false);
-  const title = `${t('Something went wrong')}${!isProduction && ` ${t('in')} ${context}`}.`;
+  // pacsai: `${!isProduction && …}` wrote "false" into the production title.
+  const title = `${t('Something went wrong')}${isProduction ? '' : ` ${t('in')} ${context}`}.`;
   const subtitle = t('Sorry, something went wrong there. Try again.');
 
   const copyErrorDetails = () => {
@@ -62,14 +65,14 @@ Stack: ${error.stack}
         label: t('Show Details'),
         onClick: () => setShowDetails(true),
       },
-      duration: 0,
+      // pacsai: it stays. Sonner reads 0 as its default (4 s), which left a
+      // blank page with nothing saying why.
+      duration: Infinity,
     });
   }, [error]);
 
-  if (isProduction) {
-    return null;
-  }
-
+  // pacsai: the dialog renders in production too, closed until the toast's
+  // Show Details opens it (null there left that action doing nothing).
   return (
     <>
       <Dialog
@@ -124,48 +127,18 @@ const ErrorBoundary = ({
   children,
   fallbackRoute = null,
   isPage,
+  resetKeys,
 }: ErrorBoundaryProps) => {
-  const [error, setError] = useState<ErrorBoundaryError | null>(null);
-
-  const onResetHandler = () => {
-    setError(null);
-    onReset();
-  };
-
-  // Add error event listener to window
-  useEffect(() => {
-    let errorTimeout: NodeJS.Timeout;
-
-    const handleError = (event: ErrorEvent) => {
-      event.preventDefault();
-      clearTimeout(errorTimeout);
-      errorTimeout = setTimeout(() => {
-        setError(event.error);
-        onErrorHandler(event.error, null);
-      }, 100);
-    };
-
-    const handleRejection = (event: PromiseRejectionEvent) => {
-      event.preventDefault();
-      clearTimeout(errorTimeout);
-      errorTimeout = setTimeout(() => {
-        setError(event.reason);
-        onErrorHandler(event.reason, null);
-      }, 100);
-    };
-
-    window.addEventListener('error', handleError);
-    window.addEventListener('unhandledrejection', handleRejection);
-
-    return () => {
-      clearTimeout(errorTimeout);
-      window.removeEventListener('error', handleError);
-      window.removeEventListener('unhandledrejection', handleRejection);
-    };
-  }, []);
-
-  const onErrorHandler = (error: ErrorBoundaryError, componentStack: string) => {
-    console.debug(`${context} Error Boundary`, error, componentStack, context);
+  // pacsai: a boundary catches what its own children throw while rendering,
+  // nothing else. Each instance used to listen for the window's `error` and
+  // `unhandledrejection` too, and take any of them, from anywhere on the page,
+  // as its own (silenced in the console, logged at debug level only). One
+  // reporter for the whole page logs and toasts those now
+  // (platform/app/src/utils/errorReporting.ts), so a boundary per viewport
+  // does not raise one toast per viewport for a single stray rejection.
+  const onErrorHandler = (error: ErrorBoundaryError, info?: { componentStack?: string }) => {
+    const componentStack = info?.componentStack ?? '';
+    console.error(`${context} Error Boundary`, error, componentStack);
     onError(error, componentStack, context);
   };
 
@@ -178,19 +151,11 @@ const ErrorBoundary = ({
           resetErrorBoundary={props.resetErrorBoundary}
         />
       )}
-      onReset={onResetHandler}
+      onReset={onReset}
       onError={onErrorHandler}
+      resetKeys={resetKeys}
     >
-      <>
-        {children}
-        {error && (
-          <FallbackComponent
-            error={error}
-            context={context}
-            resetErrorBoundary={() => setError(null)}
-          />
-        )}
-      </>
+      {children}
     </ReactErrorBoundary>
   );
 };
