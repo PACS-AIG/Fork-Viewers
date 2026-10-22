@@ -360,6 +360,13 @@ function notAllInOneRule(): Rule {
   return { attribute: 'pacsaiAllInOne', required: true, constraint: { equals: { value: 'series' } } };
 }
 
+// Keeps non-image series (an SR's text, a SEG, a KO) out of an image pane: the
+// `pacsaiImage` attribute is 'image' only for an image series. Without it an X-ray
+// compare, which has no required plane, tiled a Basic Text SR as a third view.
+function imageRule(): Rule {
+  return { attribute: 'pacsaiImage', required: true, constraint: { equals: { value: 'image' } } };
+}
+
 export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.Protocol {
   const {
     id,
@@ -404,6 +411,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   ): Rule[] => {
     const rules: Rule[] = [
       notAllInOneRule(),
+      imageRule(),
       {
         attribute: regionAttribute,
         required: true,
@@ -439,6 +447,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     // excluded by the SCOUT_WORDS description rule below instead of by frame count.
     const rules: Rule[] = [
       notAllInOneRule(),
+      imageRule(),
       { attribute: 'numImageFrames', constraint: { greaterThan: { value: seriesFloor } } },
     ];
     if (excludeScouts) {
@@ -529,6 +538,8 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
     seriesMatchingRules: [
       roleRule('current'),
       notAllInOneRule(),
+      // Soft: an image series first, but a study of only a report still shows it.
+      { attribute: 'pacsaiImage', weight: 10, constraint: { equals: { value: 'image' } } },
       { attribute: 'numImageFrames', weight: 5, constraint: { greaterThan: { value: seriesFloor } } },
       { attribute: 'SeriesDescription', weight: 5, constraint: { doesNotContainI: SCOUT_WORDS } },
       // Soft (not required): prefer a grayscale series over a derived color one as the
@@ -569,6 +580,7 @@ export function buildCompareProtocol(cfg: CompareConfig): Types.HangingProtocol.
   ): Rule[] => {
     const rules: Rule[] = [
       notAllInOneRule(),
+      imageRule(),
       { attribute: regionAttribute, required: true, constraint: { containsI: ['-session'] } },
       { attribute: 'pacsaiPlane', required: true, constraint: { equals: { value: plane } } },
     ];

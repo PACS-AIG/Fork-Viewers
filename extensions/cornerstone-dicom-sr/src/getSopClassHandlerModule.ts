@@ -150,6 +150,14 @@ async function _load(
       } else if (Array.isArray(obj[prop])) {
         await Promise.all(obj[prop].map(item => retrieveBulkData(item, obj, prop)));
       } else if (prop === 'BulkDataURI') {
+        // pacsai (22 Oct): a long report text (TextValue, UT) comes as bulk data
+        // too. It is text, not graphic data: a Float32Array of its bytes threw
+        // when their count was not a multiple of 4 (a 1178-byte text), and the
+        // route's error boundary took the viewer down. It stays a reference;
+        // OHIFCornerstoneSRContentItem fetches and decodes it.
+        if (key === 'TextValue') {
+          continue;
+        }
         const value = await dataSource.retrieve.bulkDataURI({
           BulkDataURI: obj[prop],
           StudyInstanceUID: srDisplaySet.instance.StudyInstanceUID,

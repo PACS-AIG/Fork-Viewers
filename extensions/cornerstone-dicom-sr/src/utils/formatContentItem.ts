@@ -9,7 +9,9 @@ import { utils } from '@ohif/core';
  *
  */
 const contentItemFormatters = {
-  TEXT: contentItem => contentItem.TextValue,
+  // pacsai: a bulk data reference is not text (OHIFCornerstoneSRContentItem fetches it).
+  TEXT: contentItem =>
+    typeof contentItem.TextValue === 'string' ? contentItem.TextValue : undefined,
   CODE: contentItem => contentItem.ConceptCodeSequence?.[0]?.CodeMeaning,
   UIDREF: contentItem => contentItem.UID,
   NUM: contentItem => {
