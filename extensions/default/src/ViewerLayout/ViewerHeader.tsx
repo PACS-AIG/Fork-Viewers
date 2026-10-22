@@ -38,6 +38,7 @@ function ViewerHeader({
   headerMenuSubscribe,
   headerWhiteLabeling,
   headerLogout,
+  headerPatientInfoShrinks,
 }: withAppTypes<{
   appConfig: AppTypes.Config;
   studyListReturn?: boolean;
@@ -45,6 +46,7 @@ function ViewerHeader({
   headerMenuSubscribe?: (listener: () => void) => () => void;
   headerWhiteLabeling?: AppTypes.Config['whiteLabeling'];
   headerLogout?: () => boolean;
+  headerPatientInfoShrinks?: boolean;
 }>) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -177,6 +179,9 @@ function ViewerHeader({
       onClickReturnButton={onClickReturnButton}
       // A mode's own mark first (radcopilot: RadCopilot™), else the config's.
       WhiteLabeling={headerWhiteLabeling ?? appConfig.whiteLabeling}
+      // A mode can let the patient line give way in a row too narrow for it
+      // (radcopilot: the reading window at 200 % zoom).
+      patientInfoShrinks={headerPatientInfoShrinks}
       Secondary={
         <Toolbar
           servicesManager={servicesManager}
@@ -189,6 +194,7 @@ function ViewerHeader({
             servicesManager={servicesManager}
             appConfig={appConfig}
             compact={framed}
+            shrinks={headerPatientInfoShrinks}
           />
         )
       }

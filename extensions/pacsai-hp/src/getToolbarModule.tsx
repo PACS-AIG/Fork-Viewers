@@ -1,7 +1,7 @@
 import SessionStudyDropdown from './toolbar/SessionStudyDropdown';
 import BrowsingModeDropdown from './toolbar/BrowsingModeDropdown';
 import activeViewportHasCT from './utils/activeViewportHasCT';
-import { ReadingMicLine, ReadingModeControl } from './readingDock/ReadingControls';
+import { ReadingControls } from './readingDock/ReadingControls';
 
 /** Toolbar uiType id for the same-session study switcher. */
 export const SESSION_SWITCHER_UITYPE = 'pacsai.sessionSwitcher';
@@ -9,11 +9,11 @@ export const SESSION_SWITCHER_UITYPE = 'pacsai.sessionSwitcher';
 /** Toolbar uiType id for the all-in-one browsing-mode selector. */
 export const BROWSING_MODE_UITYPE = 'pacsai.browsingMode';
 
-/** Rev 11 M6 approach C: the reading dock's Images / Both / Report control (radcopilot). */
+/**
+ * Rev 11 M6 approach C: the reading dock's Images / Both / Report control and,
+ * while the report is hidden, its microphone and notices beside it (radcopilot).
+ */
 export const READING_MODES_UITYPE = 'pacsai.readingModes';
-
-/** Rev 11 M6 approach C: the hidden report's microphone and notices (radcopilot). */
-export const READING_MIC_UITYPE = 'pacsai.readingMic';
 
 /**
  * Registers the `pacsai.sessionSwitcher` toolbar uiType — a dropdown listing the
@@ -36,14 +36,11 @@ export default function getToolbarModule({ commandsManager, servicesManager }: w
         SessionStudyDropdown({ ...props, commandsManager, servicesManager }),
     },
     {
-      // The reading dock's controls (readingDock/): nothing renders where the
-      // document has no dock (READING_DOCK off, or another mode).
+      // The reading dock's controls (readingDock/), one item so they keep to one
+      // row: nothing renders where the document has no dock (READING_DOCK off,
+      // or another mode).
       name: READING_MODES_UITYPE,
-      defaultComponent: ReadingModeControl,
-    },
-    {
-      name: READING_MIC_UITYPE,
-      defaultComponent: ReadingMicLine,
+      defaultComponent: ReadingControls,
     },
     {
       // All-in-one browsing-mode selector (append / all-in-one only / manual).
