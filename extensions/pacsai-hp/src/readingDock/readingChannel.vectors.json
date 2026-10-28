@@ -1,5 +1,5 @@
 {
-  "comment": "Golden vectors for the channel between the worklist and its reading window (Rev 11 milestone 6, approach C, phase 2): workspaceOpenCase (worklist to the viewer), workspaceCaseOpened and workspaceState (the viewer to the worklist), and the closeWindow relay after Sign. The SAME bytes live in the app (src/app/lib/readingChannel.vectors.json) and the viewer fork (extensions/pacsai-hp/src/readingDock/readingChannel.vectors.json); each side pins their sha256 (READING_CHANNEL_VECTORS_SHA256) and its tests fail on any difference. Generated from the app's rules (workspaceCaseChannel.ts). Change both copies and both constants together.",
+  "comment": "Golden vectors for the channel between the worklist and its reading window (Rev 11 milestone 6, approach C, phase 2): workspaceOpenCase (worklist to the viewer), workspaceCaseOpened and workspaceState (the viewer to the worklist), the closeWindow relay after Sign, and (F72, 28 Oct 2026) workspaceNextCase (the viewer to the worklist: the window opens the offered next case itself, under this launch). The SAME bytes live in the app (src/app/lib/readingChannel.vectors.json) and the viewer fork (extensions/pacsai-hp/src/readingDock/readingChannel.vectors.json); each side pins their sha256 (READING_CHANNEL_VECTORS_SHA256) and its tests fail on any difference. Generated from the app's rules (workspaceCaseChannel.ts). Change both copies and both constants together.",
   "channel": "pacsai.workspace",
   "version": 1,
   "constants": {
@@ -8,7 +8,8 @@
     "workspaceState": "workspaceState",
     "closeWindow": "closeWindow",
     "fallbackMs": 2000,
-    "answerMs": 1000
+    "answerMs": 1000,
+    "nextCase": "workspaceNextCase"
   },
   "commands": [
     {
@@ -1047,6 +1048,138 @@
           "why": "no-launch"
         }
       ]
+    }
+  ],
+  "nextCase": [
+    {
+      "name": "the window opens the offered case under its own launch",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300100000
+        }
+      },
+      "read": {
+        "action": "workspaceNextCase",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300100000
+        }
+      }
+    },
+    {
+      "name": "a launch id with dots and colons",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "fedcba9876543210fedcba9876543210",
+        "activeLaunch": {
+          "attempt": "att-cc.33:x",
+          "attemptT0": 1
+        }
+      },
+      "read": {
+        "action": "workspaceNextCase",
+        "documentId": "fedcba9876543210fedcba9876543210",
+        "activeLaunch": {
+          "attempt": "att-cc.33:x",
+          "attemptT0": 1
+        }
+      }
+    },
+    {
+      "name": "another action is not one",
+      "raw": {
+        "action": "workspaceState",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300100000
+        }
+      },
+      "read": null
+    },
+    {
+      "name": "no document id",
+      "raw": {
+        "action": "workspaceNextCase",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300100000
+        }
+      },
+      "read": null
+    },
+    {
+      "name": "a document id too short",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "abc",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300100000
+        }
+      },
+      "read": null
+    },
+    {
+      "name": "no launch",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "0123456789abcdef0123456789abcdef"
+      },
+      "read": null
+    },
+    {
+      "name": "a launch with no time",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222"
+        }
+      },
+      "read": null
+    },
+    {
+      "name": "a launch time that is not a whole number",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1.5
+        }
+      },
+      "read": null
+    },
+    {
+      "name": "a launch with a key of its own",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300100000,
+          "study": "1.2.3"
+        }
+      },
+      "read": null
+    },
+    {
+      "name": "a key the message does not have",
+      "raw": {
+        "action": "workspaceNextCase",
+        "documentId": "0123456789abcdef0123456789abcdef",
+        "activeLaunch": {
+          "attempt": "att-bbbb2222",
+          "attemptT0": 1759300100000
+        },
+        "studyInstanceUid": "1.2.3"
+      },
+      "read": null
     }
   ]
 }

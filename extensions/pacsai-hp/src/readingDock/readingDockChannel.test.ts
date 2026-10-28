@@ -374,6 +374,167 @@ describe('the reading dock and the worklist that opened its window', () => {
   });
 });
 
+// F72 (28 Oct 2026): the next case offered after Sign, in the island's line.
+const LAUNCH_C = { attempt: 'att-cccc3333', attemptT0: 1759300009000 };
+type OfferOpts = Opts & {
+  onOpenCase: (o: unknown) => boolean;
+  onBackToWorklist: (b: unknown) => boolean;
+};
+
+describe('the next case offered after Sign (F72)', () => {
+  it('the island is given Open and Worklist only in a window the worklist opened', async () => {
+    const { isl } = await mounted();
+    expect(typeof (isl.options() as OfferOpts).onOpenCase).toBe('function');
+    expect(typeof (isl.options() as OfferOpts).onBackToWorklist).toBe('function');
+    await dock?.destroy();
+    dock = null;
+    const isl2 = fakeIsland();
+    dock = createReadingDock({
+      win: window,
+      load: async () => ({ ok: true, module: isl2.module as never, build: 'test' }),
+      isReadingPath,
+      isErrorPath,
+    });
+    dock.enter(A, LAUNCH_A);
+    await flush();
+    expect('onOpenCase' in isl2.options()).toBe(false);
+    expect('onBackToWorklist' in isl2.options()).toBe(false);
+  });
+
+  it('a Sign with the offer up relays nothing: the window stays open', async () => {
+    const { opener, isl, dock: d } = await mounted();
+    isl.options().onSigned({ studyInstanceUid: A, sessionId: LAUNCH_A.attempt, offer: true });
+    expect(posted(opener, 'closeWindow')).toEqual([]);
+    expect(d.getSnapshot()).toMatchObject({
+      signed: true,
+      channel: { relays: 0, offers: { signed: 1, opens: 0, refused: 0, backs: 0 } },
+    });
+    // A late Sign of a case switched away from is relayed as before, offer or not.
+    receive(command(), opener);
+    window.history.replaceState(
+      null,
+      '',
+      `/viewer/viewer/radcopilot?StudyInstanceUIDs=${B}&gatewayAET=GW1`
+    );
+    d.enter(B, LAUNCH_B);
+    isl.options().onSigned({ studyInstanceUid: B, sessionId: LAUNCH_A.attempt, offer: true });
+    expect(posted(opener, 'closeWindow').map(p => p.m)).toEqual([
+      { action: 'closeWindow', sessionId: LAUNCH_A.attempt },
+    ]);
+  });
+
+  it("Open tells the worklist first, then switches in this document with Open's launch", async () => {
+    const { opener, switchTo, loadNew, isl, dock: d } = await mounted();
+    isl.options().onSigned({ studyInstanceUid: A, sessionId: LAUNCH_A.attempt, offer: true });
+    const opts = isl.options() as OfferOpts;
+    expect(opts.onOpenCase({ studyInstanceUid: B, gatewayAET: 'GW1', launch: LAUNCH_C })).toBe(
+      true
+    );
+    expect(posted(opener, 'workspaceNextCase')).toEqual([
+      {
+        m: { action: 'workspaceNextCase', documentId: DOC, activeLaunch: LAUNCH_C },
+        target: ORIGIN,
+      },
+    ]);
+    // The worklist hears it before the switch.
+    const order = opener.postMessage.mock.invocationCallOrder.slice(-1)[0];
+    expect(order).toBeLessThan(switchTo.mock.invocationCallOrder[0]);
+    expect(switchTo).toHaveBeenCalledWith(
+      `${ORIGIN}/viewer/viewer/radcopilot?StudyInstanceUIDs=${B}&gatewayAET=GW1&attempt=${LAUNCH_C.attempt}&attemptT0=${LAUNCH_C.attemptT0}`
+    );
+    expect(loadNew).not.toHaveBeenCalled();
+    expect(d.getSnapshot().channel).toMatchObject({
+      casesInDocument: 2,
+      offers: { opens: 1, refused: 0 },
+      answers: { switched: 0 },
+    });
+    // The route lands: setCase with Open's launch, the advert names it, and B is not signed.
+    window.history.replaceState(
+      null,
+      '',
+      `/viewer/viewer/radcopilot?StudyInstanceUIDs=${B}&gatewayAET=GW1`
+    );
+    d.enter(B, LAUNCH_C);
+    expect(isl.handle.setCase).toHaveBeenCalledWith(B, LAUNCH_C);
+    expect(
+      posted(opener, 'workspaceState')
+        .map(p => p.m)
+        .pop()
+    ).toEqual({ action: 'workspaceState', documentId: DOC, activeLaunch: LAUNCH_C, caseSwitch: 1 });
+    expect(d.getSnapshot().signed).toBe(false);
+  });
+
+  it('Open on another gateway: the worklist told, then the planned reload (the report settled first)', async () => {
+    const { opener, switchTo, loadNew, isl } = await mounted();
+    const opts = isl.options() as OfferOpts;
+    expect(opts.onOpenCase({ studyInstanceUid: B, gatewayAET: 'GW2', launch: LAUNCH_C })).toBe(
+      true
+    );
+    expect(posted(opener, 'workspaceNextCase').map(p => p.m)).toEqual([
+      { action: 'workspaceNextCase', documentId: DOC, activeLaunch: LAUNCH_C },
+    ]);
+    await flush();
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(isl.handle.settle).toHaveBeenCalledTimes(1);
+    expect(loadNew).toHaveBeenCalledWith(
+      `${ORIGIN}/viewer/viewer/radcopilot?StudyInstanceUIDs=${B}&gatewayAET=GW2&attempt=${LAUNCH_C.attempt}&attemptT0=${LAUNCH_C.attemptT0}`
+    );
+    expect(switchTo).not.toHaveBeenCalled();
+  });
+
+  it('Open is refused (and nothing sent) for anything invalid, the case shown, or while a reload is under way', async () => {
+    const { opener, switchTo, loadNew, isl, dock: d } = await mounted();
+    const opts = isl.options() as OfferOpts;
+    for (const bad of [
+      null,
+      { studyInstanceUid: 'x.y', gatewayAET: 'GW1', launch: LAUNCH_C },
+      { studyInstanceUid: B, gatewayAET: 'GW 1', launch: LAUNCH_C },
+      { studyInstanceUid: B, gatewayAET: 'GW1', launch: { attempt: 'att 1', attemptT0: 1 } },
+      { studyInstanceUid: B, gatewayAET: 'GW1' },
+      { studyInstanceUid: A, gatewayAET: 'GW1', launch: LAUNCH_C },
+    ]) {
+      expect(opts.onOpenCase(bad)).toBe(false);
+    }
+    expect(posted(opener, 'workspaceNextCase')).toEqual([]);
+    expect(switchTo).not.toHaveBeenCalled();
+    expect(d.getSnapshot().channel.offers).toMatchObject({ opens: 0, refused: 6 });
+    // A reload under way (a worklist Read of another gateway): Open waits for nothing, it is refused.
+    receive(command({ gatewayAET: 'GW2' }), opener);
+    expect(
+      opts.onOpenCase({ studyInstanceUid: '1.2.840.1.3', gatewayAET: 'GW1', launch: LAUNCH_C })
+    ).toBe(false);
+    expect(posted(opener, 'workspaceNextCase')).toEqual([]);
+    expect(switchTo).not.toHaveBeenCalled();
+    await flush();
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(loadNew).toHaveBeenCalledTimes(1);
+  });
+
+  it("Worklist relays closeWindow for the signed case's session; false with no worklist to go back to", async () => {
+    const { opener, isl, dock: d } = await mounted();
+    isl.options().onSigned({ studyInstanceUid: A, sessionId: LAUNCH_A.attempt, offer: true });
+    const opts = isl.options() as OfferOpts;
+    expect(opts.onBackToWorklist({ sessionId: LAUNCH_A.attempt })).toBe(true);
+    expect(posted(opener, 'closeWindow').map(p => p.m)).toEqual([
+      { action: 'closeWindow', sessionId: LAUNCH_A.attempt },
+    ]);
+    expect(d.getSnapshot().channel).toMatchObject({ relays: 1, offers: { backs: 1 } });
+    expect(opts.onBackToWorklist({ sessionId: 'att 1' })).toBe(false);
+    await dock?.destroy();
+    dock = null;
+    const lone = await mounted({ opener: null });
+    const loneOpts = lone.isl.options() as OfferOpts;
+    expect(loneOpts.onBackToWorklist({ sessionId: LAUNCH_A.attempt })).toBe(false);
+    // With no worklist, Open still opens the case here (there is nobody to tell).
+    expect(loneOpts.onOpenCase({ studyInstanceUid: B, gatewayAET: 'GW1', launch: LAUNCH_C })).toBe(
+      true
+    );
+    expect(lone.switchTo).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the cover\'s "Report without images" (phase 2, PR 3)', () => {
   const button = () =>
     document.querySelector('[data-pacsai-reading-report-only]') as HTMLButtonElement | null;

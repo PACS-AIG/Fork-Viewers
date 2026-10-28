@@ -26,6 +26,12 @@
  *     in-document study switch, or, for a study on another gateway or a 13th
  *     case, a planned reload once the report is settled (no leave prompt);
  *     after Sign it relays `closeWindow`, so the worklist closes the window.
+ *   - F72 (28 Oct 2026): where the island offers the next case after Sign
+ *     (its line, Open / Skip; the island says so in `onSigned`), the window
+ *     stays open and nothing is relayed. Open is the island's `onOpenCase`:
+ *     the worklist is told first (`workspaceNextCase`, so the case this
+ *     window shows stays the worklist's to know), then the case opens as a
+ *     worklist Read would here. The offer's Worklist is the relay after Sign.
  *   - Phase 2 (PR 4): the dock tells the island what the viewer shows (the
  *     route's study and the viewer's own signed-in user) at the mount, after
  *     each route entry and when the window comes back to the front; the
@@ -68,10 +74,15 @@ import {
   type IslandLoadResult,
 } from './islandLoader';
 import {
+  OPEN_CASE_ACTION,
   buildAdvert,
   buildCloseWindow,
+  buildNextCase,
   caseOpenedAnswer,
   decideReadingCommand,
+  isCaseGatewayAet,
+  isCaseStudyUid,
+  isChannelLaunch,
   mintDocumentId,
   readingRouteFor,
   screenCaseCommand,
@@ -139,6 +150,9 @@ export interface ReadingDockSnapshot {
     answers: { switched: number; focusOnly: number; reloads: number; refused: number };
     ignored: Record<string, number>;
     relays: number;
+    /** F72: the next-case offer after Sign: cases signed with the offer up,
+     *  its Opens taken, refused, and its Worklist relays. */
+    offers: { signed: number; opens: number; refused: number; backs: number };
   };
 }
 
@@ -313,6 +327,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     answers: { switched: 0, focusOnly: 0, reloads: 0, refused: 0 },
     ignored: {} as Record<string, number>,
     relays: 0,
+    offers: { signed: 0, opens: 0, refused: 0, backs: 0 },
   };
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
@@ -512,6 +527,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       answers: { ...channelCounts.answers },
       ignored: { ...channelCounts.ignored },
       relays: channelCounts.relays,
+      offers: { ...channelCounts.offers },
     },
   });
 
@@ -613,11 +629,17 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     if (s && ofShownCase) {
       signed = true;
     }
-    // Phase 2: the relay after Sign; the worklist closes this window for the
-    // case it shows and ignores any other.
-    const relay = buildCloseWindow(s?.sessionId);
-    if (relay && postToOpener(relay)) {
-      channelCounts.relays++;
+    if (s && ofShownCase && (s as { offer?: unknown }).offer === true) {
+      // F72: the island offers the next case in its line: the window stays
+      // open, and the offer's Worklist is the relay when the reader wants it.
+      channelCounts.offers.signed++;
+    } else {
+      // Phase 2: the relay after Sign; the worklist closes this window for the
+      // case it shows and ignores any other.
+      const relay = buildCloseWindow(s?.sessionId);
+      if (relay && postToOpener(relay)) {
+        channelCounts.relays++;
+      }
     }
     if (submittingWait) {
       requestCase();
@@ -717,6 +739,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         onDictation,
         onNotice,
         onAuthRequired,
+        // F72: only a window the worklist opened can offer the next case.
+        ...(channel ? { onOpenCase: openCase, onBackToWorklist: backToWorklist } : {}),
       });
     } catch (e) {
       phase = 'failed';
@@ -870,6 +894,98 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     notify();
     channel?.loadNew(href);
   };
+  /**
+   * F72: Open on the case the island offered after Sign (claimed already by
+   * the island where a worklist Read would claim it). The worklist hears it
+   * first, so the case this window shows is still the one it knows; then the
+   * case opens as a worklist Read would: the in-document switch, or a planned
+   * reload for another gateway or a 13th case. False when it cannot be opened
+   * here (the island says so and points to the worklist).
+   */
+  const openCase = (open: unknown): boolean => {
+    const o = open as { studyInstanceUid?: unknown; gatewayAET?: unknown; launch?: unknown } | null;
+    const refuse = () => {
+      channelCounts.offers.refused++;
+      notify();
+      return false;
+    };
+    if (
+      !channel ||
+      gone ||
+      !o ||
+      !isCaseStudyUid(o.studyInstanceUid) ||
+      !isCaseGatewayAet(o.gatewayAET) ||
+      !isChannelLaunch(o.launch)
+    ) {
+      return refuse();
+    }
+    if (!documentId || plannedReload !== 'no') {
+      return refuse();
+    }
+    const launch = { attempt: o.launch.attempt, attemptT0: o.launch.attemptT0 };
+    const command: OpenCaseCommand = {
+      action: OPEN_CASE_ACTION,
+      requestId: documentId,
+      studyInstanceUid: o.studyInstanceUid,
+      attempt: launch.attempt,
+      attemptT0: launch.attemptT0,
+      gatewayAET: o.gatewayAET,
+    };
+    const decision = decideReadingCommand(command, {
+      phase,
+      routeStudy,
+      caseState:
+        islandCase && islandCase.study === routeStudy
+          ? (islandCase.state as 'reportable' | 'unavailable')
+          : null,
+      documentGateways: channel.documentGateways(),
+      casesInDocument,
+    });
+    if (decision.verdict !== 'switch' && decision.verdict !== 'reload') {
+      return refuse();
+    }
+    const href = readingRouteFor({
+      href: win.location.href,
+      openedPath: channel.openedPath,
+      studyInstanceUid: o.studyInstanceUid,
+      gateways: decision.verdict === 'reload' ? [o.gatewayAET] : channel.documentGateways(),
+      launch,
+    });
+    if (!href) {
+      return refuse();
+    }
+    try {
+      postToOpener(buildNextCase({ documentId, activeLaunch: launch }));
+    } catch (_) {
+      bumpIgnored('next-case-failed');
+    }
+    channelCounts.offers.opens++;
+    if (decision.verdict === 'reload') {
+      void plannedReloadTo(href);
+      return true;
+    }
+    casesInDocument++;
+    try {
+      channel.switchTo(href);
+    } catch (_) {
+      bumpIgnored('switch-failed');
+      return refuse();
+    }
+    notify();
+    return true;
+  };
+  /** F72: the offer's Worklist: the relay after Sign, for the signed case. */
+  const backToWorklist = (back: unknown): boolean => {
+    const relay = buildCloseWindow((back as { sessionId?: unknown } | null)?.sessionId);
+    const sent = !!relay && postToOpener(relay);
+    if (sent) {
+      channelCounts.relays++;
+      channelCounts.offers.backs++;
+    }
+    notify();
+    return sent;
+  };
+
   const onMessage = (event: MessageEvent) => {
     if (!channel || gone) {
       return;

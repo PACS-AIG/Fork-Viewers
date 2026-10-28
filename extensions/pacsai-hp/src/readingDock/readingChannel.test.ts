@@ -5,6 +5,7 @@ import {
   CASE_OPENED_ACTION,
   CLOSE_WINDOW_ACTION,
   MAX_CASES_IN_DOCUMENT,
+  NEXT_CASE_ACTION,
   OPEN_CASE_ACTION,
   OPEN_CASE_ANSWER_MS,
   OPEN_CASE_FALLBACK_MS,
@@ -12,6 +13,7 @@ import {
   WORKSPACE_STATE_ACTION,
   buildAdvert,
   buildCloseWindow,
+  buildNextCase,
   caseOpenedAnswer,
   decideReadingCommand,
   mintDocumentId,
@@ -32,7 +34,7 @@ describe('readingChannel: the vectors', () => {
   it('are the pinned bytes (the app pins the same)', () => {
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(READING_CHANNEL_VECTORS_SHA256);
     expect(READING_CHANNEL_VECTORS_SHA256).toBe(
-      '32b2c070483a02a07b215ddf3fd60f14b0cab834ffbf7f3ea9cd789c299d35e7'
+      'd8e82a90e58fde3d6d5d465ddec945e7eeec39e63b6c014d6f3cbd380cb68f8c'
     );
     expect(V.constants).toEqual({
       openCase: OPEN_CASE_ACTION,
@@ -41,6 +43,7 @@ describe('readingChannel: the vectors', () => {
       closeWindow: CLOSE_WINDOW_ACTION,
       fallbackMs: OPEN_CASE_FALLBACK_MS,
       answerMs: OPEN_CASE_ANSWER_MS,
+      nextCase: NEXT_CASE_ACTION,
     });
   });
 
@@ -112,6 +115,26 @@ describe('readingChannel: the vectors', () => {
     }
     expect(buildCloseWindow('att 1')).toBeNull();
     expect(buildCloseWindow(undefined)).toBeNull();
+  });
+
+  it('builds the workspaceNextCase the app reads (F72), and no other', () => {
+    expect(V.nextCase.length).toBeGreaterThanOrEqual(8);
+    for (const v of V.nextCase) {
+      if (v.read) {
+        expect([
+          v.name,
+          buildNextCase({ documentId: v.read.documentId, activeLaunch: v.read.activeLaunch }),
+        ]).toEqual([v.name, v.raw]);
+      }
+    }
+    const launch = { attempt: 'att-1', attemptT0: 1 };
+    expect(() => buildNextCase({ documentId: 'doc_1', activeLaunch: launch })).toThrow();
+    expect(() =>
+      buildNextCase({
+        documentId: '0123456789abcdef0123456789abcdef',
+        activeLaunch: { attempt: 'att 1', attemptT0: 1 },
+      })
+    ).toThrow();
   });
 });
 
