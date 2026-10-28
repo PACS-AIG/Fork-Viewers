@@ -30,6 +30,7 @@ import longitudinal from '@ohif/mode-longitudinal';
 import { TRACKING_PROMPTS_CUSTOMIZATION } from '@ohif/extension-measurement-tracking';
 import {
   IMAGES_WIDTH_VAR,
+  IMAGES_BOTTOM_VAR,
   READING_MIC_KEY,
   READING_MODES,
   READING_MODES_UITYPE,
@@ -207,6 +208,8 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
               ...layout.props,
               // The images' width, which the dock keeps as the reader moves the divider.
               contentWidth: `var(${IMAGES_WIDTH_VAR}, 100%)`,
+              // 28 Oct (F55): in Images, the strip under the images takes its height.
+              contentHeight: `calc(100vh - 52px - var(${IMAGES_BOTTOM_VAR}, 0px))`,
               studyListReturn: false,
               // The series rail (phase 1 PR 4): the study browser as one narrow,
               // fixed-width column, closed again if the reader closed it.

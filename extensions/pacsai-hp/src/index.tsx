@@ -36,7 +36,7 @@ import initAttemptObservers from './attempt/initAttemptObservers';
 import installImagePoolHold from './startup/installImagePoolHold';
 import { installParkedSuspend } from './startup/installParkedSuspend';
 import { getEmbedBridge } from './embed/browser';
-import { onParkedChange, IMAGES_WIDTH_VAR } from './readingDock/readingDock';
+import { onParkedChange, IMAGES_WIDTH_VAR, IMAGES_BOTTOM_VAR } from './readingDock/readingDock';
 import {
   currentReadingDock,
   ensureReadingDock,
@@ -341,5 +341,6 @@ export {
   READING_MIC_KEY,
   railLayoutProps,
   IMAGES_WIDTH_VAR,
+  IMAGES_BOTTOM_VAR,
   READING_MODES_UITYPE,
 };

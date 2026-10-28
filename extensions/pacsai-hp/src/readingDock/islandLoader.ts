@@ -61,6 +61,10 @@ export interface IslandHandleLike {
   /** Optional in v1 (18 Oct): the reader's quiet_workspace switch (D10). */
   quietWorkspace?: () => boolean;
   setQuietWorkspace?: (on: boolean) => boolean;
+  /** Optional in v1 (F55, 28 Oct): the strip's Sign ('signing', 'review', 'held', 'none'). */
+  sign?: () => string;
+  /** Optional in v1 (F55): an action of the island's line mirrored on the strip. */
+  lineAction?: (code: string, id: string) => boolean;
 }
 
 export interface IslandModuleLike {

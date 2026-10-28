@@ -28,6 +28,9 @@ function ViewerLayout({
   // the header (radcopilot's report column sits beside it) and hide the
   // header's return to the study list. Unset, the layout is as upstream's.
   contentWidth,
+  // pacsai (28 Oct, F55): a mode can give the content area a height of its own
+  // (radcopilot's Images strip under the images). Unset, the viewport's.
+  contentHeight,
   studyListReturn = true,
   // pacsai (phase 1 PR 4): a mode can fix the left panel's width in px
   // (radcopilot's series rail) and hear when the reader closes or opens it.
@@ -50,6 +53,7 @@ function ViewerLayout({
   headerPatientInfoShrinks,
 }: withAppTypes<{
   contentWidth?: string;
+  contentHeight?: string;
   studyListReturn?: boolean;
   leftPanelWidth?: number;
   onLeftPanelClosedChange?: (closed: boolean) => void;
@@ -192,8 +196,12 @@ function ViewerLayout({
         // under the report column beside or over it; dialogs portal to <body>.
         style={
           contentWidth
-            ? { height: 'calc(100vh - 52px)', width: contentWidth, isolation: 'isolate' }
-            : { height: 'calc(100vh - 52px)' }
+            ? {
+                height: contentHeight ?? 'calc(100vh - 52px)',
+                width: contentWidth,
+                isolation: 'isolate',
+              }
+            : { height: contentHeight ?? 'calc(100vh - 52px)' }
         }
       >
         <React.Fragment>
@@ -271,6 +279,7 @@ ViewerLayout.propTypes = {
   leftPanelClosed: PropTypes.bool.isRequired,
   rightPanelClosed: PropTypes.bool.isRequired,
   contentWidth: PropTypes.string,
+  contentHeight: PropTypes.string,
   studyListReturn: PropTypes.bool,
   leftPanelWidth: PropTypes.number,
   onLeftPanelClosedChange: PropTypes.func,
