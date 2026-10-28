@@ -16,6 +16,7 @@
  *   here → worklist   workspaceCaseOpened {action, requestId, documentId, accepted, sameCase?, activeLaunch | reason}
  *                     workspaceState {action, documentId, activeLaunch, caseSwitch?: 1}
  *                     closeWindow {action, sessionId}
+ *                     workspaceNextCase {action, documentId, activeLaunch}   (F72, 28 Oct 2026)
  *
  * Every message is a same-origin window post with the exact target origin. A
  * command counts only from this window's opener, from this origin, valid.
@@ -27,13 +28,19 @@ export const OPEN_CASE_ACTION = 'workspaceOpenCase';
 export const CASE_OPENED_ACTION = 'workspaceCaseOpened';
 export const WORKSPACE_STATE_ACTION = 'workspaceState';
 export const CLOSE_WINDOW_ACTION = 'closeWindow';
+/**
+ * F72 (28 Oct 2026): this window opens the next case itself (the offer after
+ * Sign, Open), under this launch; the worklist then takes it as the case the
+ * window shows (its closeWindow match and its adverts' filter).
+ */
+export const NEXT_CASE_ACTION = 'workspaceNextCase';
 /** The worklist falls back to replacing this page after this long with no answer. */
 export const OPEN_CASE_FALLBACK_MS = 2000;
 /** This window answers a command within this. */
 export const OPEN_CASE_ANSWER_MS = 1000;
 /** The same bytes as the app's src/app/lib/readingChannel.vectors.json. */
 export const READING_CHANNEL_VECTORS_SHA256 =
-  '32b2c070483a02a07b215ddf3fd60f14b0cab834ffbf7f3ea9cd789c299d35e7';
+  'd8e82a90e58fde3d6d5d465ddec945e7eeec39e63b6c014d6f3cbd380cb68f8c';
 /**
  * The cases one document holds (the 13th loads in a fresh one): the viewer's
  * DicomMetadataStore and metadata caches are never pruned (B30: do not keep
@@ -310,6 +317,23 @@ export function buildAdvert({
 }
 
 /** The relay after Sign: the signed case's session (its launch id, nothing about the patient). */
+/** F72: `workspaceNextCase`, before this window opens the offered case. */
+export function buildNextCase({
+  documentId,
+  activeLaunch,
+}: {
+  documentId: string;
+  activeLaunch: ChannelLaunch;
+}): { action: typeof NEXT_CASE_ACTION; documentId: string; activeLaunch: ChannelLaunch } {
+  if (!isChannelId(documentId)) {
+    throw new Error(`${NEXT_CASE_ACTION}: invalid documentId`);
+  }
+  if (!isChannelLaunch(activeLaunch)) {
+    throw new Error(`${NEXT_CASE_ACTION}: invalid activeLaunch`);
+  }
+  return { action: NEXT_CASE_ACTION, documentId, activeLaunch: copyLaunch(activeLaunch) };
+}
+
 export function buildCloseWindow(
   sessionId: unknown
 ): { action: typeof CLOSE_WINDOW_ACTION; sessionId: string } | null {
