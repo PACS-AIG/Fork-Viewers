@@ -51,6 +51,7 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   READING_MIC_KEY: jest.requireActual('./dockModel').READING_MIC_KEY,
   railLayoutProps: jest.requireActual('./seriesRail').railLayoutProps,
   IMAGES_WIDTH_VAR: jest.requireActual('./readingDock').IMAGES_WIDTH_VAR,
+  IMAGES_BOTTOM_VAR: jest.requireActual('./readingDock').IMAGES_BOTTOM_VAR,
   READING_MODES_UITYPE: 'pacsai.readingModes',
 }));
 
@@ -162,6 +163,8 @@ describe('the radcopilot mode', () => {
     expect(props).toEqual({
       ...off.props,
       contentWidth: 'var(--pacsai-reading-images-width, 100%)',
+      // 28 Oct (F55): in Images, the strip under the images takes its height.
+      contentHeight: 'calc(100vh - 52px - var(--pacsai-reading-images-bottom, 0px))',
       studyListReturn: false,
       // PR 4: the series rail, fixed at 112 px, open unless the reader closed it.
       leftPanels: ['@ohif/extension-measurement-tracking.panelModule.seriesRail'],

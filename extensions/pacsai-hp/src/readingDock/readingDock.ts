@@ -26,6 +26,13 @@
  *     in-document study switch, or, for a study on another gateway or a 13th
  *     case, a planned reload once the report is settled (no leave prompt);
  *     after Sign it relays `closeWindow`, so the worklist closes the window.
+ *   - F55 (28 Oct 2026): with the report hidden (Images), one strip under the
+ *     images, never over them (the images area gives it its height): Case
+ *     linked, the report's case by accession and exam, the last sentence
+ *     placed, the one thing to settle first, and Sign through the island (D5;
+ *     Review and Show report bring the report back, as Both); after Sign, the
+ *     island's offer of the next case. A spoken mode ("show images") is the
+ *     island's `onModeRequest`, under setMode's own rules.
  *   - F72 (28 Oct 2026): where the island offers the next case after Sign
  *     (its line, Open / Skip; the island says so in `onSigned`), the window
  *     stays open and nothing is relayed. Open is the island's `onOpenCase`:
@@ -88,6 +95,15 @@ import {
   screenCaseCommand,
   type OpenCaseCommand,
 } from './readingChannel';
+import {
+  IMAGES_BOTTOM_VAR,
+  STRIP_HEIGHT_PX,
+  readStripState,
+  stripSnapshot,
+  stripView,
+  type StripState,
+} from './readingStrip';
+export { IMAGES_BOTTOM_VAR } from './readingStrip';
 
 /** Above the viewer's layout and its viewport overlays, below its dialogs and menus (z-50). */
 export const DOCK_Z_INDEX = 40;
@@ -133,6 +149,15 @@ export interface ReadingDockSnapshot {
   /** Shown while the report is hidden; cleared once the reader sees the report. */
   notices: DockNotice[];
   signed: boolean;
+  /** F55: the Images strip (no report text, no study: readingStrip.ts stripSnapshot). */
+  strip: ReturnType<typeof stripSnapshot>;
+  stripCounts: {
+    signs: number;
+    reviews: number;
+    shows: number;
+    lineActions: number;
+    modeRequests: number;
+  };
   counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number; micKeys: number };
   /** Phase 2 (PR 3): "Report without images" opened from the cover. */
   reportOnlyOpens: number;
@@ -329,6 +354,10 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     relays: 0,
     offers: { signed: 0, opens: 0, refused: 0, backs: 0 },
   };
+  // F55: the Images strip, as the island last told it, and whether it shows.
+  let strip: StripState | null = null;
+  let stripShown = false;
+  const stripCounts = { signs: 0, reviews: 0, shows: 0, lineActions: 0, modeRequests: 0 };
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
   const listeners = new Set<() => void>();
@@ -432,6 +461,108 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     font: '13px/18px system-ui, -apple-system, "Segoe UI", sans-serif',
   });
 
+  // F55: the Images strip, under the images (the images area gives it its height).
+  const stripEl = doc.createElement('div');
+  stripEl.setAttribute('data-pacsai-reading-strip', '');
+  stripEl.setAttribute('role', 'region');
+  stripEl.setAttribute('aria-label', 'Report status');
+  Object.assign(stripEl.style, {
+    position: 'fixed',
+    left: '0',
+    bottom: '0',
+    height: `${STRIP_HEIGHT_PX}px`,
+    zIndex: String(DOCK_Z_INDEX),
+    display: 'none',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '0 12px',
+    boxSizing: 'border-box',
+    background: '#0D1218',
+    borderTop: '1px solid #1B2735',
+    color: '#E8EEF5',
+    font: '13px/18px system-ui, -apple-system, "Segoe UI", sans-serif',
+    whiteSpace: 'nowrap',
+  });
+  const stripLink = doc.createElement('span');
+  stripLink.setAttribute('data-pacsai-reading-strip-link', '');
+  const stripCase = doc.createElement('span');
+  stripCase.setAttribute('data-pacsai-reading-strip-case', '');
+  Object.assign(stripCase.style, {
+    color: '#A7B3C2',
+    flex: '0 1 auto',
+    minWidth: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  });
+  const stripMain = doc.createElement('span');
+  stripMain.setAttribute('data-pacsai-reading-strip-main', '');
+  stripMain.setAttribute('aria-live', 'polite');
+  Object.assign(stripMain.style, {
+    flex: '1 1 auto',
+    minWidth: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  });
+  const stripBlocker = doc.createElement('span');
+  stripBlocker.setAttribute('data-pacsai-reading-strip-blocker', '');
+  Object.assign(stripBlocker.style, {
+    color: '#F5C36B',
+    flex: '0 1 auto',
+    minWidth: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  });
+  const stripActions = doc.createElement('span');
+  stripActions.setAttribute('data-pacsai-reading-strip-actions', '');
+  Object.assign(stripActions.style, { display: 'flex', gap: '8px', flex: '0 0 auto' });
+  stripEl.append(stripLink, stripCase, stripMain, stripBlocker, stripActions);
+  // The strip's buttons are the reader's, never the viewer's hotkeys (its own
+  // keys, F4 and Alt+1/2/3, are taken on the window first, in capture).
+  for (const type of ['keydown', 'keyup', 'keypress']) {
+    stripEl.addEventListener(type, (e: Event) => e.stopPropagation());
+  }
+  const renderStrip = () => {
+    stripEl.style.display = stripShown ? 'flex' : 'none';
+    if (!stripShown || !strip) {
+      return;
+    }
+    const v = stripView(strip);
+    stripLink.textContent = v.linkText
+      ? `${strip.linked === 'linked' ? '✓' : '⚠'} ${v.linkText}`
+      : '';
+    stripLink.setAttribute('data-pacsai-reading-strip-link', strip.linked);
+    stripLink.style.color = strip.linked === 'linked' ? '#8FD7B2' : '#FFADB6';
+    stripLink.style.display = v.linkText ? '' : 'none';
+    stripCase.textContent = v.caseText;
+    stripCase.title = v.caseText;
+    stripMain.textContent = v.mainText;
+    stripMain.title = v.mainText;
+    stripBlocker.textContent = v.blockerText;
+    stripBlocker.style.display = v.blockerText ? '' : 'none';
+    stripActions.replaceChildren(
+      ...v.actions.map(a => {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.textContent = a.label;
+        b.disabled = a.disabled;
+        b.setAttribute('data-pacsai-reading-strip-action', a.id);
+        Object.assign(b.style, {
+          padding: '4px 12px',
+          borderRadius: '6px',
+          border: '1px solid #8AB4F8',
+          background: a.primary ? '#8AB4F8' : 'transparent',
+          color: a.primary ? '#0D1218' : '#8AB4F8',
+          cursor: a.disabled ? 'default' : 'pointer',
+          opacity: a.disabled ? '0.5' : '1',
+          font: 'inherit',
+          fontWeight: a.primary ? '600' : '400',
+        });
+        b.addEventListener('click', () => onStripAction(a.id));
+        return b;
+      })
+    );
+  };
+
   // ---- the channel's window ------------------------------------------------------
   function openerNow(): Window | null {
     if (!channel) {
@@ -509,6 +640,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     dictation: dictation ? { ...dictation } : null,
     notices: notices.map(n => ({ ...n })),
     signed,
+    strip: stripSnapshot(strip, stripShown),
+    stripCounts: { ...stripCounts },
     counts: { ...counts },
     reportOnlyOpens,
     identity: toldIdentity
@@ -562,6 +695,11 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     });
     shown = afterShown(view, shown);
     root.style.setProperty(IMAGES_WIDTH_VAR, `${view.imagesWidthPx}px`);
+    // F55: the strip shows while the report is hidden (Images), the report up.
+    stripShown = !!strip && phase === 'mounted' && viewerShown && !view.column.shown;
+    root.style.setProperty(IMAGES_BOTTOM_VAR, stripShown ? `${STRIP_HEIGHT_PX}px` : '0px');
+    stripEl.style.width = `${view.imagesWidthPx}px`;
+    renderStrip();
 
     place(column, view.column);
     (column as HTMLElement & { inert: boolean }).inert = !view.column.shown;
@@ -667,6 +805,57 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     notify();
   };
   const onAuthRequired = () => onNotice({ code: 'AUTH_REQUIRED', level: 'warning' });
+  // F55: the strip, as the island tells it (null: no report to show).
+  const onReportStatus = (state: unknown) => {
+    strip = readStripState(state);
+    apply();
+  };
+  // F55: a spoken reading mode, under setMode's own rules (Images refused
+  // until the report's microphone state is known).
+  const onModeRequest = (mode: unknown): boolean => {
+    if (typeof mode !== 'string' || !READING_MODES.some(m => m.value === mode)) {
+      return false;
+    }
+    stripCounts.modeRequests++;
+    return setMode(mode as WorkspaceMode);
+  };
+  /** F55: the strip's buttons. Review and Show report bring the report back
+   *  (Both; setMode gives it the caret); Sign is the island's, which signs
+   *  only a revision the reader has seen and else asks for the report. */
+  const onStripAction = (id: string) => {
+    if (id === 'sign') {
+      stripCounts.signs++;
+      let answer: unknown = 'none';
+      try {
+        answer = handle?.sign?.() ?? 'none';
+      } catch (_) {
+        answer = 'none';
+      }
+      if (answer === 'review') {
+        setMode('both');
+      }
+      notify();
+      return;
+    }
+    if (id === 'review' || id === 'show') {
+      if (id === 'review') {
+        stripCounts.reviews++;
+      } else {
+        stripCounts.shows++;
+      }
+      setMode('both');
+      return;
+    }
+    if (id.startsWith('line:')) {
+      stripCounts.lineActions++;
+      try {
+        handle?.lineAction?.('NEXT_CASE', id.slice('line:'.length));
+      } catch (_) {
+        /* the island keeps its line */
+      }
+      notify();
+    }
+  };
 
   const requestCase = () => {
     if (retryTimer) {
@@ -707,7 +896,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   const start = async () => {
     started = true;
     // The divider before the column: the Tab order follows the screen (images, divider, report).
-    doc.body.append(divider, column, goneLine);
+    doc.body.append(divider, column, goneLine, stripEl);
     apply();
     let result: IslandLoadResult;
     try {
@@ -739,6 +928,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         onDictation,
         onNotice,
         onAuthRequired,
+        // F55: the Images strip, and a spoken reading mode.
+        onReportStatus,
+        onModeRequest,
         // F72: only a window the worklist opened can offer the next case.
         ...(channel ? { onOpenCase: openCase, onBackToWorklist: backToWorklist } : {}),
       });
@@ -1254,6 +1446,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     column.remove();
     divider.remove();
     goneLine.remove();
+    stripEl.remove();
     await start();
   };
 
@@ -1369,6 +1562,11 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     divider.hidden = true;
     goneLine.style.display = 'none';
     root.style.removeProperty(IMAGES_WIDTH_VAR);
+    // F55: the strip goes with the report.
+    strip = null;
+    stripShown = false;
+    stripEl.style.display = 'none';
+    root.style.removeProperty(IMAGES_BOTTOM_VAR);
     publishParked('visible');
   };
 
@@ -1436,6 +1634,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     column.remove();
     divider.remove();
     goneLine.remove();
+    stripEl.remove();
+    root.style.removeProperty(IMAGES_BOTTOM_VAR);
     notify();
   };
 
