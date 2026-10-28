@@ -1363,6 +1363,31 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         },
       });
     }
+    // F55 PR 2 (29 Oct): the reader's sound cues, only where the app allows
+    // them (the island answers null otherwise; an older island has no switch).
+    if (typeof h.earcons === 'function' && typeof h.setEarcons === 'function') {
+      let cues: boolean | null = null;
+      try {
+        const v = h.earcons();
+        cues = typeof v === 'boolean' ? v : null;
+      } catch (_) {
+        cues = null;
+      }
+      if (cues !== null) {
+        const on = cues;
+        out.push({
+          title: on ? 'Sound cues: on' : 'Sound cues: off',
+          icon: 'settings',
+          onClick: () => {
+            try {
+              h.setEarcons?.(!on);
+            } catch (_) {
+              /* the report goes on */
+            }
+          },
+        });
+      }
+    }
     return out;
   };
 

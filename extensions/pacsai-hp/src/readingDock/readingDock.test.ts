@@ -122,6 +122,48 @@ describe("the reading dock's gear menu items (18 Oct)", () => {
     expect((isl.handle as unknown as { openReportSettings: jest.Mock }).openReportSettings).toHaveBeenCalledTimes(1);
   });
 
+  it('F55 PR 2: the sound cues switch, listed only where the app allows the cues, and flipped from the menu', async () => {
+    const isl = islandWithMenu();
+    let allowed = false;
+    let cues = false;
+    Object.assign(isl.handle, {
+      earcons: jest.fn(() => (allowed ? cues : null)),
+      setEarcons: jest.fn((on: boolean) => {
+        cues = on;
+        return true;
+      }),
+    });
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    await flush();
+    expect(d.menuOptions().map(o => o.title)).toEqual([
+      'Report settings',
+      'Quiet report layout: off',
+    ]);
+    allowed = true;
+    expect(d.menuOptions().map(o => o.title)).toEqual([
+      'Report settings',
+      'Quiet report layout: off',
+      'Sound cues: off',
+    ]);
+    d.menuOptions()[2].onClick();
+    expect((isl.handle as unknown as { setEarcons: jest.Mock }).setEarcons).toHaveBeenCalledWith(
+      true
+    );
+    expect(d.menuOptions()[2].title).toBe('Sound cues: on');
+    d.menuOptions()[2].onClick();
+    expect(
+      (isl.handle as unknown as { setEarcons: jest.Mock }).setEarcons
+    ).toHaveBeenLastCalledWith(false);
+    // A switch that throws or answers something else lists nothing.
+    (isl.handle as unknown as { earcons: jest.Mock }).earcons.mockImplementation(() => {
+      throw new Error('gone');
+    });
+    expect(d.menuOptions()).toHaveLength(2);
+    (isl.handle as unknown as { earcons: jest.Mock }).earcons.mockImplementation(() => 'on');
+    expect(d.menuOptions()).toHaveLength(2);
+  });
+
   it('lists nothing for an island without them (a v1 build from before), and nothing once the dock is gone', async () => {
     const isl = fakeIsland();
     const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
