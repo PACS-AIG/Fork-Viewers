@@ -694,3 +694,265 @@ describe('the paths', () => {
     expect(isErrorPath('/viewer/viewer/')).toBe(false);
   });
 });
+
+describe('F56: the reading layouts (29 Oct)', () => {
+  type Layout = { mode: string; reportRatio: number };
+  function islandWithLayouts(
+    menu: { modality: string | null; ownLayout: boolean } | null = {
+      modality: 'CT',
+      ownLayout: false,
+    }
+  ) {
+    const isl = fakeIsland();
+    const told: Layout[] = [];
+    const actions: Array<[string, Layout]> = [];
+    let shown: Layout | null = null;
+    Object.assign(isl.handle, {
+      layoutChanged: jest.fn((l: Layout) => {
+        told.push({ ...l });
+        return true;
+      }),
+      layoutMenu: jest.fn(() => menu),
+      layoutAction: jest.fn((action: string, current: Layout) => {
+        actions.push([action, { ...current }]);
+        // Reset shows the Saved default through onLayout, as the island does.
+        if (action === 'reset' && shown) {
+          isl.options().onLayout(shown, 'reader');
+        }
+        return true;
+      }),
+    });
+    return { isl, told, actions, setDefault: (l: Layout) => (shown = l) };
+  }
+  async function up(isl: ReturnType<typeof fakeIsland>, { micKnown = true } = {}) {
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    await flush();
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    if (micKnown) {
+      isl.options().onDictation({ started: true, busy: false, available: true, pending: 0 });
+    }
+    return d;
+  }
+
+  it("tells the island the reader's own choices, and not the dock's or the report's", async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = await up(isl);
+    expect(d.setMode('report')).toBe(true);
+    expect(told).toEqual([{ mode: 'report', reportRatio: 0.4 }]);
+    d.setMode('report');
+    expect(told).toHaveLength(1);
+    d.setMode('both', 'system');
+    expect(told).toHaveLength(1);
+    // A spoken mode is the reader's; the report's own request is not.
+    expect(isl.options().onModeRequest('images', 'spoken')).toBe(true);
+    expect(told[1]).toEqual({ mode: 'images', reportRatio: 0.4 });
+    isl.options().onModeRequest('both', 'report');
+    isl.options().onModeRequest('report');
+    expect(told).toHaveLength(2);
+    // Report settings from Images brings the report back: not a choice.
+    Object.assign(isl.handle, { openReportSettings: jest.fn(() => true) });
+    d.setMode('images');
+    const before = told.length;
+    d.menuOptions()
+      .find(o => o.title === 'Report settings')!
+      .onClick();
+    expect(d.getSnapshot().mode).toBe('both');
+    expect(told).toHaveLength(before);
+    expect(d.getSnapshot().layoutCounts.told).toBe(told.length);
+  });
+
+  it('tells the divider once a drag ends, and each key step', async () => {
+    const { isl, told } = islandWithLayouts();
+    await up(isl);
+    const divider = document.querySelector('[data-pacsai-reading-divider]') as HTMLElement;
+    divider.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })
+    );
+    expect(told).toEqual([{ mode: 'both', reportRatio: 0.42 }]);
+    const pointer = (type: string, clientX: number) => {
+      const e = new MouseEvent(type, { clientX, bubbles: true, cancelable: true, button: 0 });
+      Object.defineProperty(e, 'pointerId', { value: 1 });
+      divider.dispatchEvent(e);
+    };
+    pointer('pointerdown', 1000);
+    pointer('pointermove', 1920 - 4 - 0.5 * 1912);
+    pointer('pointermove', 1920 - 4 - 0.45 * 1912);
+    expect(told).toHaveLength(1);
+    pointer('pointerup', 1920 - 4 - 0.45 * 1912);
+    expect(told).toHaveLength(2);
+    expect(told[1].mode).toBe('both');
+    expect(Math.round(told[1].reportRatio * 100)).toBe(45);
+    // A click on the divider that moves nothing tells nothing.
+    pointer('pointerdown', 1000);
+    pointer('pointerup', 1000);
+    expect(told).toHaveLength(2);
+  });
+
+  it("shows the island's layout without telling it back; Images waits for the microphone", async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = await up(isl, { micKnown: false });
+    expect(isl.options().onLayout({ mode: 'report', reportRatio: 0.5 })).toBe(true);
+    expect(d.getSnapshot()).toMatchObject({
+      requested: 'report',
+      mode: 'report',
+      reportPercent: 50,
+    });
+    expect(isl.options().onLayout({ mode: 'images', reportRatio: 0.45 })).toBe(true);
+    expect(d.getSnapshot()).toMatchObject({
+      requested: 'images',
+      mode: 'both',
+      imagesHeld: true,
+      reportPercent: 45,
+    });
+    isl.options().onDictation({ started: true, busy: false, available: true, pending: 0 });
+    expect(d.getSnapshot()).toMatchObject({
+      requested: 'images',
+      mode: 'images',
+      imagesHeld: false,
+    });
+    expect(told).toEqual([]);
+    expect(d.getSnapshot().layoutCounts).toEqual({ restores: 2, refusedRestores: 0, told: 0 });
+    for (const bad of [
+      null,
+      {},
+      { mode: 'wide', reportRatio: 0.4 },
+      { mode: 'both', reportRatio: 1 },
+      { mode: 'both', reportRatio: '0.4' },
+    ]) {
+      expect(isl.options().onLayout(bad)).toBe(false);
+    }
+    expect(d.getSnapshot()).toMatchObject({ requested: 'images', reportPercent: 45 });
+    expect(d.getSnapshot().layoutCounts.refusedRestores).toBe(5);
+  });
+
+  it("keeps a drag under the reader's hand: a layout arriving mid-drag is refused", async () => {
+    const { isl } = islandWithLayouts();
+    const d = await up(isl);
+    const divider = document.querySelector('[data-pacsai-reading-divider]') as HTMLElement;
+    const e = new MouseEvent('pointerdown', {
+      clientX: 1000,
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+    });
+    Object.defineProperty(e, 'pointerId', { value: 1 });
+    divider.dispatchEvent(e);
+    expect(isl.options().onLayout({ mode: 'report', reportRatio: 0.5 })).toBe(false);
+    expect(d.getSnapshot().requested).toBe('both');
+  });
+
+  it("lists the gear menu's layout items and passes the layout on screen", async () => {
+    const { isl, actions, setDefault } = islandWithLayouts();
+    const d = await up(isl);
+    d.setMode('report');
+    const titles = () => d.menuOptions().map(o => o.title);
+    expect(titles()).toEqual([
+      'Layout: save as my default',
+      'Layout: reset to my default',
+      'Own layout for CT: off',
+    ]);
+    d.menuOptions()[0].onClick();
+    expect(actions[0]).toEqual(['save', { mode: 'report', reportRatio: 0.4 }]);
+    d.menuOptions()[2].onClick();
+    expect(actions[1]).toEqual(['own-on', { mode: 'report', reportRatio: 0.4 }]);
+    setDefault({ mode: 'both', reportRatio: 0.44 });
+    d.menuOptions()[1].onClick();
+    expect(actions[2][0]).toBe('reset');
+    expect(d.getSnapshot()).toMatchObject({ requested: 'both', reportPercent: 44 });
+  });
+
+  it('lists the own-layout item only for a modality code, and nothing when the island cannot remember', async () => {
+    let menu: { modality: unknown; ownLayout: unknown } | null = {
+      modality: 'CT',
+      ownLayout: true,
+    };
+    const { isl } = islandWithLayouts();
+    (isl.handle as unknown as { layoutMenu: jest.Mock }).layoutMenu.mockImplementation(() => menu);
+    const d = await up(isl);
+    const titles = () => d.menuOptions().map(o => o.title);
+    expect(titles()).toContain('Own layout for CT: on');
+    menu = { modality: null, ownLayout: false };
+    expect(titles()).toEqual(['Layout: save as my default', 'Layout: reset to my default']);
+    menu = { modality: 'ct<b>', ownLayout: false };
+    expect(titles()).toEqual(['Layout: save as my default', 'Layout: reset to my default']);
+    menu = { modality: 'CT', ownLayout: 'yes' };
+    expect(titles()).toEqual([]);
+    menu = null;
+    expect(titles()).toEqual([]);
+    (isl.handle as unknown as { layoutMenu: jest.Mock }).layoutMenu.mockImplementation(() => {
+      throw new Error('gone');
+    });
+    expect(titles()).toEqual([]);
+  });
+
+  it("refuses the case's remembered layout once the reader chose in the case, and takes it again for the next case", async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = await up(isl);
+    expect(d.setMode('report')).toBe(true);
+    expect(isl.options().onLayout({ mode: 'both', reportRatio: 0.5 }, 'case')).toBe(false);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'report', reportPercent: 40 });
+    // The reader's own Reset is shown whatever was chosen, and is not told back.
+    expect(isl.options().onLayout({ mode: 'both', reportRatio: 0.44 }, 'reader')).toBe(true);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'both', reportPercent: 44 });
+    expect(told).toHaveLength(1);
+    // The next case opens with its remembered layout again.
+    setPath('/viewer/viewer/radcopilot?StudyInstanceUIDs=' + B);
+    d.enter(B);
+    d.routeLeft();
+    jest.runOnlyPendingTimers();
+    expect(isl.handle.setCase).toHaveBeenCalledWith(B, undefined);
+    expect(isl.options().onLayout({ mode: 'report', reportRatio: 0.5 }, 'case')).toBe(true);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'report', reportPercent: 50 });
+    expect(d.getSnapshot().layoutCounts.refusedRestores).toBe(1);
+  });
+
+  it('tells a choice made while the island loaded once it is up, and keeps it over the remembered one', async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    expect(d.getSnapshot().phase).toBe('loading');
+    expect(d.setMode('report')).toBe(true);
+    expect(told).toEqual([]);
+    await flush();
+    expect(d.getSnapshot().phase).toBe('mounted');
+    expect(told).toEqual([{ mode: 'report', reportRatio: 0.4 }]);
+    expect(isl.options().onLayout({ mode: 'both', reportRatio: 0.46 }, 'case')).toBe(false);
+    expect(d.getSnapshot().requested).toBe('report');
+  });
+
+  it("tells a choice again when the case is ready, if the island's tree was not up to take it", async () => {
+    const { isl, told } = islandWithLayouts();
+    // The island's handle answers false until its tree is up.
+    let up = false;
+    (isl.handle as unknown as { layoutChanged: jest.Mock }).layoutChanged.mockImplementation(
+      (l: { mode: string; reportRatio: number }) => {
+        if (!up) {
+          return false;
+        }
+        told.push({ ...l });
+        return true;
+      }
+    );
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    d.setMode('report');
+    await flush();
+    expect(told).toEqual([]);
+    expect(d.getSnapshot().layoutCounts.told).toBe(0);
+    up = true;
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    expect(told).toEqual([{ mode: 'report', reportRatio: 0.4 }]);
+    // Told once: a later ready tells nothing more.
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    expect(told).toHaveLength(1);
+  });
+
+  it('an island without them (a v1 build from before) is told nothing and lists nothing', async () => {
+    const isl = fakeIsland();
+    const d = await up(isl);
+    expect(d.setMode('report')).toBe(true);
+    expect(d.getSnapshot().layoutCounts.told).toBe(0);
+    expect(d.menuOptions()).toEqual([]);
+  });
+});
