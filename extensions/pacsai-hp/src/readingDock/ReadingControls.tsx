@@ -199,6 +199,67 @@ export function ReadingMicLine(): React.ReactElement | null {
 }
 
 /**
+ * F58 (29 Oct 2026): while a place is held, Back beside the controls (Alt+B,
+ * or say "back"), and for a few seconds after Hold or Back the line saying
+ * what it did and what arrived meanwhile. In a narrow window the line moves
+ * to Back's title, still read out here, as the microphone's does.
+ */
+export function ReadingPlace(): React.ReactElement | null {
+  const { dock, snap } = useReadingDock();
+  if (!dock || !snap || (!snap.place.held && !snap.place.line)) {
+    return null;
+  }
+  const line = snap.place.line;
+  return (
+    <div
+      data-cy="pacsai-reading-place"
+      style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, marginLeft: 8 }}
+    >
+      {snap.place.held && (
+        <button
+          type="button"
+          data-reading-back=""
+          title={snap.narrow && line ? line : 'Back to your held place (Alt+B, or say "back")'}
+          disabled={snap.place.busy}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => {
+            void dock.backToPlace();
+          }}
+          style={{
+            ...SEGMENT,
+            borderRadius: 4,
+            opacity: snap.place.busy ? 0.6 : 1,
+            cursor: snap.place.busy ? 'progress' : 'pointer',
+          }}
+        >
+          Back
+        </button>
+      )}
+      <span
+        data-reading-place-line=""
+        role="status"
+        aria-live="polite"
+        style={
+          snap.narrow
+            ? VISUALLY_HIDDEN
+            : {
+                fontSize: 12,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: 560,
+                color: 'rgb(var(--pacs-text))',
+              }
+        }
+        title={line ?? undefined}
+      >
+        {line ?? ''}
+      </span>
+    </div>
+  );
+}
+
+/**
  * 22 Oct: the controls as the section's one item, in one row: the layout's
  * buttons, then, while the report is hidden, its microphone beside them.
  * OHIF's Toolbar draws each item of a section in a block of its own, so as
@@ -217,6 +278,7 @@ export function ReadingControls(): React.ReactElement | null {
     >
       <ReadingModeControl />
       <ReadingMicLine />
+      <ReadingPlace />
     </div>
   );
 }

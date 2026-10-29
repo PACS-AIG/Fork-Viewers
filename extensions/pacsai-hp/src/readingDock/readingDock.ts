@@ -39,6 +39,13 @@
  *     the worklist is told first (`workspaceNextCase`, so the case this
  *     window shows stays the worklist's to know), then the case opens as a
  *     worklist Read would here. The offer's Worklist is the relay after Sign.
+ *   - F58 (29 Oct 2026): Hold / Back. "Hold" (or "save place", Alt+H) keeps
+ *     where the reader is: the images through viewerPlace.ts (the grid and each
+ *     viewport's series and view), the report through the island's
+ *     `holdPlace` (the caret's place), and the mode and share. "Back" (or
+ *     "return to survey", Alt+B, the header's Back) puts them back, names a
+ *     series no longer available instead of guessing, and says in one line
+ *     what arrived meanwhile (placeModel.ts). One place per case.
  *   - Phase 2 (PR 4): the dock tells the island what the viewer shows (the
  *     route's study and the viewer's own signed-in user) at the mount, after
  *     each route entry and when the window comes back to the front; the
@@ -103,6 +110,15 @@ import {
   stripView,
   type StripState,
 } from './readingStrip';
+import {
+  NOTHING_HELD_LINE,
+  arrivedSince,
+  backLine,
+  heldLine,
+  reportReturnOf,
+  type SeriesSeen,
+} from './placeModel';
+import type { HeldView, ViewerPlace } from './viewerPlace';
 export { IMAGES_BOTTOM_VAR } from './readingStrip';
 
 /** Above the viewer's layout and its viewport overlays, below its dialogs and menus (z-50). */
@@ -115,6 +131,8 @@ export const SUBMIT_BEFORE_RELOAD_MS = 15_000;
 const SET_CASE_RETRY_MS = 200;
 const SUBMITTING_RETRY_MS = 1000;
 const MAX_NOTICES = 5;
+/** F58: how long the header shows what Hold or Back did. */
+export const PLACE_LINE_MS = 12_000;
 
 export type DockPhase = 'loading' | 'mounted' | 'failed' | 'gone';
 export type ParkedState = 'visible' | 'parked';
@@ -160,6 +178,23 @@ export interface ReadingDockSnapshot {
   };
   /** F56: layouts the island showed (and refused), and the reader's choices told to it. */
   layoutCounts: { restores: number; refusedRestores: number; told: number };
+  /** F58: a place held for the open case, the header's line, and what the last
+   *  Back did (counts and the report's section name only). */
+  place: {
+    held: boolean;
+    line: string | null;
+    busy: boolean;
+    holds: number;
+    backs: number;
+    lastBack: {
+      missing: number;
+      arrived: number;
+      caret: string | null;
+      section: string | null;
+      placedSince: number;
+      waiting: number;
+    } | null;
+  };
   counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number; micKeys: number };
   /** Phase 2 (PR 3): "Report without images" opened from the cover. */
   reportOnlyOpens: number;
@@ -221,6 +256,8 @@ export interface ReadingDockDeps {
   viewerUserIsApp?: () => boolean;
   /** 21 Oct: the app's sign-out (./appSignOut); true once it answered. */
   signOutOfApp?: () => Promise<boolean>;
+  /** F58: the viewer's half of a held place (./viewerPlace); none: the images are not held. */
+  viewerPlace?: ViewerPlace;
   /**
    * 21 Oct: after Logout. Signed out: the window closes, else the app's sign-in
    * page; not signed out (no answer): the app's own sign-out page, which asks.
@@ -248,6 +285,10 @@ export interface ReadingDock {
    *  told to the island, which remembers it; 'system' is not. */
   setMode: (mode: WorkspaceMode, by?: LayoutBy) => boolean;
   setReportRatio: (ratio: number) => void;
+  /** F58: hold the reader's place (the images, the report's caret, the mode). */
+  holdPlace: () => boolean;
+  /** F58: back to the held place; false when nothing is held for the open case. */
+  backToPlace: () => Promise<boolean>;
   /** The header's toggle: start or stop the report's recognizer. */
   toggleDictation: () => boolean;
   /** The caret back to the report (after a viewer control). */
@@ -371,6 +412,20 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let readerChoseThisCase = false;
   /** F56: that choice has not reached the island yet (it was not up). */
   let choiceUntold = false;
+  /** F58: the place held for the open case. */
+  let held: {
+    study: string;
+    view: HeldView | null;
+    report: boolean;
+    mode: WorkspaceMode;
+    reportRatio: number;
+    series: SeriesSeen[];
+  } | null = null;
+  let placeLine: string | null = null;
+  let placeLineTimer: number | null = null;
+  let placeBusy = false;
+  const placeCounts = { holds: 0, backs: 0 };
+  let lastBack: ReadingDockSnapshot['place']['lastBack'] = null;
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
   const listeners = new Set<() => void>();
@@ -656,6 +711,14 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     strip: stripSnapshot(strip, stripShown),
     stripCounts: { ...stripCounts },
     layoutCounts: { ...layoutCounts },
+    place: {
+      held: !!held && held.study === routeStudy,
+      line: placeLine,
+      busy: placeBusy,
+      holds: placeCounts.holds,
+      backs: placeCounts.backs,
+      lastBack: lastBack ? { ...lastBack } : null,
+    },
     counts: { ...counts },
     reportOnlyOpens,
     identity: toldIdentity
@@ -896,6 +959,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         expected = { study, generation: answer.generation };
         readerChoseThisCase = false;
         choiceUntold = false;
+        // F58: a held place belongs to the case it was held in.
+        held = null;
+        lastBack = null;
         islandCase = null;
         signed = false;
         notices = [];
@@ -956,6 +1022,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         onModeRequest,
         // F56: the layout remembered for the case that opened.
         onLayout,
+        // F58: a spoken "hold" or "back".
+        onPlaceRequest,
         // F72: only a window the worklist opened can offer the next case.
         ...(channel ? { onOpenCase: openCase, onBackToWorklist: backToWorklist } : {}),
       });
@@ -1387,6 +1455,125 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     apply();
     return true;
   };
+
+  // ---- F58: Hold / Back ---------------------------------------------------------
+  const showPlaceLine = (text: string) => {
+    placeLine = text;
+    if (placeLineTimer) {
+      win.clearTimeout(placeLineTimer);
+    }
+    placeLineTimer = win.setTimeout(() => {
+      placeLine = null;
+      placeLineTimer = null;
+      notify();
+    }, PLACE_LINE_MS);
+    notify();
+  };
+  /** Holds where the reader is: the images (the viewer's half), the report's
+   *  caret (the island's), and the mode and share. One place per case: a new
+   *  hold replaces it. */
+  const holdPlace = (): boolean => {
+    if (gone || !routeStudy) {
+      return false;
+    }
+    let view: HeldView | null = null;
+    try {
+      view = deps.viewerPlace?.capture() ?? null;
+    } catch (_) {
+      view = null;
+    }
+    let report = false;
+    try {
+      report = handle?.holdPlace?.() === true;
+    } catch (_) {
+      report = false;
+    }
+    let series: SeriesSeen[] = [];
+    try {
+      series = deps.viewerPlace?.series(routeStudy) ?? [];
+    } catch (_) {
+      series = [];
+    }
+    held = { study: routeStudy, view, report, mode: requested, reportRatio, series };
+    placeCounts.holds++;
+    showPlaceLine(heldLine(report ? { section: null } : null));
+    return true;
+  };
+  /** Back to the held place: the mode and share (the dock's own change, not a
+   *  new choice to remember), the images, then the report's caret; the line
+   *  says what could not be put back and what arrived meanwhile. */
+  const backToPlace = async (): Promise<boolean> => {
+    if (gone || placeBusy) {
+      return false;
+    }
+    const at = held;
+    if (!at || at.study !== routeStudy) {
+      showPlaceLine(NOTHING_HELD_LINE);
+      return false;
+    }
+    placeBusy = true;
+    placeCounts.backs++;
+    notify();
+    try {
+      if (at.mode !== requested) {
+        setMode(at.mode, 'system');
+      }
+      if (at.reportRatio !== reportRatio) {
+        reportRatio = at.reportRatio;
+        apply();
+      }
+      let missing: string[] = [];
+      if (at.view && deps.viewerPlace) {
+        try {
+          missing = (await deps.viewerPlace.restore(at.view)).missing;
+        } catch (_) {
+          missing = [];
+        }
+      }
+      if (gone || held !== at) {
+        return false;
+      }
+      let report = null;
+      if (at.report) {
+        try {
+          report = reportReturnOf(handle?.returnToPlace?.());
+        } catch (_) {
+          report = null;
+        }
+      }
+      let now: SeriesSeen[] = [];
+      try {
+        now = deps.viewerPlace?.series(routeStudy) ?? [];
+      } catch (_) {
+        now = [];
+      }
+      const arrived = arrivedSince(at.series, now);
+      lastBack = {
+        missing: missing.length,
+        arrived: arrived.length,
+        caret: report?.caret ?? null,
+        section: report?.section ?? null,
+        placedSince: report?.placedSince ?? 0,
+        waiting: report?.waiting ?? 0,
+      };
+      showPlaceLine(backLine({ missing, arrived, report }));
+      return true;
+    } finally {
+      placeBusy = false;
+      notify();
+    }
+  };
+  // A spoken "hold" / "save place" or "back" / "return to survey" (the island's).
+  const onPlaceRequest = (command: unknown): boolean => {
+    if (command === 'hold') {
+      return holdPlace();
+    }
+    if (command === 'back') {
+      void backToPlace();
+      return true;
+    }
+    return false;
+  };
   const setReportRatio = (ratio: number) => {
     if (gone || !Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) {
       return;
@@ -1620,6 +1807,26 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       !!(target as Element).closest?.('[data-pacs-island-portal-host]') ||
       !!(target.parentElement?.closest?.('[data-pacs-island-portal-host]')));
   const onKeyDown = (e: KeyboardEvent) => {
+    // F58: Alt+H holds the reader's place and Alt+B goes back to it, on the
+    // whole page (a held key once).
+    if (
+      e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      (e.code === 'KeyH' || e.code === 'KeyB')
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.repeat) {
+        if (e.code === 'KeyH') {
+          holdPlace();
+        } else {
+          void backToPlace();
+        }
+      }
+      return;
+    }
     // The microphone key (F4) on the whole page and in every mode, as the
     // header's microphone toggle; a held key toggles once.
     if (isMicKey(e)) {
@@ -1742,6 +1949,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       win.clearTimeout(leaveTimer);
     }
     stopSignInPoll();
+    if (placeLineTimer) {
+      win.clearTimeout(placeLineTimer);
+    }
     win.removeEventListener('resize', onResize);
     win.removeEventListener('keydown', onKeyDown, true);
     win.removeEventListener('beforeunload', onBeforeUnload);
@@ -1871,6 +2081,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     routeLeft,
     setMode,
     setReportRatio,
+    holdPlace,
+    backToPlace,
     toggleDictation,
     focusReport,
     menuOptions,

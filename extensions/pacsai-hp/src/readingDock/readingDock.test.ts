@@ -956,3 +956,184 @@ describe('F56: the reading layouts (29 Oct)', () => {
     expect(d.menuOptions()).toEqual([]);
   });
 });
+
+describe('F58: Hold / Back (29 Oct)', () => {
+  function islandWithPlace({ report = true } = {}) {
+    const isl = fakeIsland();
+    const ret = { caret: 'restored', section: 'FINDINGS', placedSince: 2, waiting: 0 };
+    const told: unknown[] = [];
+    if (report) {
+      Object.assign(isl.handle, {
+        holdPlace: jest.fn(() => true),
+        returnToPlace: jest.fn(() => ret),
+        layoutChanged: jest.fn((l: unknown) => {
+          told.push(l);
+          return true;
+        }),
+      });
+    }
+    return { isl, ret, told };
+  }
+  function viewerPlace() {
+    let series = [
+      { uid: 'a', label: 'series 1' },
+      { uid: 'b', label: 'series 2' },
+    ];
+    const view = { held: 'the grid' };
+    const adapter = {
+      capture: jest.fn(() => view),
+      restore: jest.fn(async () => ({ missing: [] as string[] })),
+      series: jest.fn(() => series),
+    };
+    return {
+      adapter,
+      view,
+      arrive: (s: { uid: string; label: string }) => (series = [...series, s]),
+    };
+  }
+  async function up(isl: ReturnType<typeof fakeIsland>, adapter: unknown) {
+    dock = createReadingDock({
+      win: window,
+      load: async () => ({ ok: true, module: isl.module as never, build: 'test' }),
+      isReadingPath,
+      isErrorPath,
+      viewerPlace: adapter as never,
+    });
+    const d = dock;
+    d.enter(A);
+    await flush();
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    isl.options().onDictation({ started: true, busy: false, available: true, pending: 0 });
+    return d;
+  }
+
+  it('holds the images, the report and the mode, and Back puts them back with a line', async () => {
+    const { isl, told } = islandWithPlace();
+    const vp = viewerPlace();
+    const d = await up(isl, vp.adapter);
+    expect(d.holdPlace()).toBe(true);
+    expect(vp.adapter.capture).toHaveBeenCalledTimes(1);
+    expect((isl.handle as unknown as { holdPlace: jest.Mock }).holdPlace).toHaveBeenCalledTimes(1);
+    expect(d.getSnapshot().place).toMatchObject({ held: true, holds: 1 });
+    expect(d.getSnapshot().place.line).toMatch(/^Place held: the images and the report/);
+    // The reader moves on: another mode, and a series arrives.
+    d.setMode('report');
+    vp.arrive({ uid: 'c', label: 'series 5' });
+    const toldBefore = told.length;
+    await expect(d.backToPlace()).resolves.toBe(true);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'both', mode: 'both' });
+    expect(told).toHaveLength(toldBefore);
+    expect(vp.adapter.restore).toHaveBeenCalledWith(vp.view);
+    expect(
+      (isl.handle as unknown as { returnToPlace: jest.Mock }).returnToPlace
+    ).toHaveBeenCalledTimes(1);
+    expect(d.getSnapshot().place.line).toBe(
+      'Back to your place. Since then: 1 new series (series 5), 2 sentences placed.'
+    );
+    expect(d.getSnapshot().place.lastBack).toEqual({
+      missing: 0,
+      arrived: 1,
+      caret: 'restored',
+      section: 'FINDINGS',
+      placedSince: 2,
+      waiting: 0,
+    });
+    // The place stays: Back again works.
+    await expect(d.backToPlace()).resolves.toBe(true);
+    expect(d.getSnapshot().place).toMatchObject({ held: true, backs: 2 });
+  });
+
+  it('names a series no longer available, and says nothing is held before a hold', async () => {
+    const { isl } = islandWithPlace();
+    const vp = viewerPlace();
+    vp.adapter.restore.mockResolvedValue({ missing: ['series 3'] });
+    const d = await up(isl, vp.adapter);
+    await expect(d.backToPlace()).resolves.toBe(false);
+    expect(d.getSnapshot().place.line).toMatch(/^Nothing held yet/);
+    expect(vp.adapter.restore).not.toHaveBeenCalled();
+    d.holdPlace();
+    await d.backToPlace();
+    expect(d.getSnapshot().place.line).toMatch(
+      /Series 3 is no longer available; its viewport is left as it is\.$/
+    );
+  });
+
+  it('Alt+H holds and Alt+B goes back on the whole page; a held key acts once', async () => {
+    const { isl } = islandWithPlace();
+    const vp = viewerPlace();
+    const d = await up(isl, vp.adapter);
+    const key = (code: string, repeat = false) => {
+      const e = new KeyboardEvent('keydown', {
+        code,
+        altKey: true,
+        repeat,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(e);
+      return e;
+    };
+    expect(key('KeyH').defaultPrevented).toBe(true);
+    key('KeyH', true);
+    expect(d.getSnapshot().place.holds).toBe(1);
+    key('KeyB');
+    await flush();
+    expect(vp.adapter.restore).toHaveBeenCalledTimes(1);
+    // Without Alt, or with another modifier, nothing.
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH', bubbles: true }));
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyH', altKey: true, ctrlKey: true, bubbles: true })
+    );
+    expect(d.getSnapshot().place.holds).toBe(1);
+  });
+
+  it('takes a spoken hold and back from the island', async () => {
+    const { isl } = islandWithPlace();
+    const vp = viewerPlace();
+    const d = await up(isl, vp.adapter);
+    expect(isl.options().onPlaceRequest('hold')).toBe(true);
+    expect(d.getSnapshot().place.held).toBe(true);
+    expect(isl.options().onPlaceRequest('back')).toBe(true);
+    await flush();
+    expect(vp.adapter.restore).toHaveBeenCalledTimes(1);
+    expect(isl.options().onPlaceRequest('forward')).toBe(false);
+  });
+
+  it('a held place belongs to its case: another case opened clears it', async () => {
+    const { isl } = islandWithPlace();
+    const vp = viewerPlace();
+    const d = await up(isl, vp.adapter);
+    d.holdPlace();
+    setPath('/viewer/viewer/radcopilot?StudyInstanceUIDs=' + B);
+    d.enter(B);
+    d.routeLeft();
+    jest.runOnlyPendingTimers();
+    expect(d.getSnapshot().place.held).toBe(false);
+    await expect(d.backToPlace()).resolves.toBe(false);
+    expect(vp.adapter.restore).not.toHaveBeenCalled();
+  });
+
+  it('an island without the report half (an older build) still holds the images', async () => {
+    const { isl } = islandWithPlace({ report: false });
+    const vp = viewerPlace();
+    const d = await up(isl, vp.adapter);
+    d.holdPlace();
+    expect(d.getSnapshot().place.line).toBe(
+      'Place held: the images. Say "back" or press Alt+B to return'
+    );
+    await d.backToPlace();
+    expect(vp.adapter.restore).toHaveBeenCalledTimes(1);
+    expect(d.getSnapshot().place.lastBack).toMatchObject({ caret: null, section: null });
+  });
+
+  it('the line goes after a while', async () => {
+    const { isl } = islandWithPlace();
+    const vp = viewerPlace();
+    const d = await up(isl, vp.adapter);
+    d.holdPlace();
+    expect(d.getSnapshot().place.line).not.toBeNull();
+    jest.advanceTimersByTime(12_001);
+    expect(d.getSnapshot().place.line).toBeNull();
+    expect(d.getSnapshot().place.held).toBe(true);
+  });
+});
