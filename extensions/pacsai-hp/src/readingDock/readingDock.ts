@@ -158,6 +158,8 @@ export interface ReadingDockSnapshot {
     lineActions: number;
     modeRequests: number;
   };
+  /** F56: layouts the island showed (and refused), and the reader's choices told to it. */
+  layoutCounts: { restores: number; refusedRestores: number; told: number };
   counts: { mounts: number; unmounts: number; setCases: number; refusedImages: number; settles: number; micKeys: number };
   /** Phase 2 (PR 3): "Report without images" opened from the cover. */
   reportOnlyOpens: number;
@@ -226,6 +228,9 @@ export interface ReadingDockDeps {
   leaveAfterSignOut?: (signedOut: boolean) => void;
 }
 
+/** F56: whose a change of layout is: the reader's (remembered) or the dock's and report's own (not). */
+export type LayoutBy = 'reader' | 'system';
+
 /** 18 Oct 2026: an item the dock offers the viewer's gear menu (radcopilot passes them to OHIF's header). */
 export interface ReadingMenuOption {
   title: string;
@@ -238,8 +243,10 @@ export interface ReadingDock {
   enter: (studyInstanceUid: string | null, launch?: IslandLaunch) => void;
   /** The mode's run ended (onModeExit): a case switch, an error route, or leaving the mode. */
   routeLeft: () => void;
-  /** Refused (false) for Images while the report's microphone state is unknown. */
-  setMode: (mode: WorkspaceMode) => boolean;
+  /** Refused (false) for Images while the report's microphone state is unknown.
+   *  F56: `by` 'reader' (the default: the header's control, the mode keys) is
+   *  told to the island, which remembers it; 'system' is not. */
+  setMode: (mode: WorkspaceMode, by?: LayoutBy) => boolean;
   setReportRatio: (ratio: number) => void;
   /** The header's toggle: start or stop the report's recognizer. */
   toggleDictation: () => boolean;
@@ -358,6 +365,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let strip: StripState | null = null;
   let stripShown = false;
   const stripCounts = { signs: 0, reviews: 0, shows: 0, lineActions: 0, modeRequests: 0 };
+  const layoutCounts = { restores: 0, refusedRestores: 0, told: 0 };
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
   const listeners = new Set<() => void>();
@@ -642,6 +650,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     signed,
     strip: stripSnapshot(strip, stripShown),
     stripCounts: { ...stripCounts },
+    layoutCounts: { ...layoutCounts },
     counts: { ...counts },
     reportOnlyOpens,
     identity: toldIdentity
@@ -811,13 +820,15 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     apply();
   };
   // F55: a spoken reading mode, under setMode's own rules (Images refused
-  // until the report's microphone state is known).
-  const onModeRequest = (mode: unknown): boolean => {
+  // until the report's microphone state is known). F56: a spoken one is the
+  // reader's choice, remembered; the report's own request (Both, to show why a
+  // Sign did not sign) is not.
+  const onModeRequest = (mode: unknown, why?: unknown): boolean => {
     if (typeof mode !== 'string' || !READING_MODES.some(m => m.value === mode)) {
       return false;
     }
     stripCounts.modeRequests++;
-    return setMode(mode as WorkspaceMode);
+    return setMode(mode as WorkspaceMode, why === 'spoken' ? 'reader' : 'system');
   };
   /** F55: the strip's buttons. Review and Show report bring the report back
    *  (Both; setMode gives it the caret); Sign is the island's, which signs
@@ -832,7 +843,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         answer = 'none';
       }
       if (answer === 'review') {
-        setMode('both');
+        setMode('both', 'system');
       }
       notify();
       return;
@@ -843,7 +854,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       } else {
         stripCounts.shows++;
       }
-      setMode('both');
+      // F56: the strip's steps bring the report back for this case only.
+      setMode('both', 'system');
       return;
     }
     if (id.startsWith('line:')) {
@@ -931,6 +943,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         // F55: the Images strip, and a spoken reading mode.
         onReportStatus,
         onModeRequest,
+        // F56: the layout remembered for the case that opened.
+        onLayout,
         // F72: only a window the worklist opened can offer the next case.
         ...(channel ? { onOpenCase: openCase, onBackToWorklist: backToWorklist } : {}),
       });
@@ -1280,7 +1294,23 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       return false;
     }
   };
-  const setMode = (mode: WorkspaceMode): boolean => {
+  // F56: the reader's own choice of layout goes to the island, which remembers
+  // it for this display setup (and the case's modality, where it has its own).
+  const tellLayout = () => {
+    const h = handle;
+    if (!h || typeof h.layoutChanged !== 'function') {
+      return;
+    }
+    try {
+      if (h.layoutChanged({ mode: requested, reportRatio }) !== false) {
+        layoutCounts.told++;
+      }
+    } catch (_) {
+      /* the layout stays as shown */
+    }
+    notify();
+  };
+  const setMode = (mode: WorkspaceMode, by: LayoutBy = 'reader'): boolean => {
     if (gone || !READING_MODES.some(m => m.value === mode)) {
       return false;
     }
@@ -1289,6 +1319,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       notify();
       return false;
     }
+    const changed = requested !== mode;
     requested = mode;
     if (mode !== 'both') {
       fallback = mode;
@@ -1297,6 +1328,39 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     if (mode !== 'images') {
       focusReport();
     }
+    if (by === 'reader' && changed) {
+      tellLayout();
+    }
+    return true;
+  };
+  // F56: the island shows the layout remembered for the case that opened, or
+  // Reset's: not the reader's choice, so it is not told back. Images while the
+  // report's microphone state is unknown shows as Both until it is known
+  // (dockView), and a drag in progress keeps the divider under the reader's hand.
+  const onLayout = (value: unknown): boolean => {
+    const v = (typeof value === 'object' && value !== null ? value : {}) as {
+      mode?: unknown;
+      reportRatio?: unknown;
+    };
+    const ratio = v.reportRatio;
+    const usable =
+      READING_MODES.some(m => m.value === v.mode) &&
+      typeof ratio === 'number' &&
+      Number.isFinite(ratio) &&
+      ratio > 0 &&
+      ratio < 1;
+    if (gone || !usable || dragging !== null) {
+      layoutCounts.refusedRestores++;
+      notify();
+      return false;
+    }
+    requested = v.mode as WorkspaceMode;
+    if (requested !== 'both') {
+      fallback = requested;
+    }
+    reportRatio = ratio as number;
+    layoutCounts.restores++;
+    apply();
     return true;
   };
   const setReportRatio = (ratio: number) => {
@@ -1334,7 +1398,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         onClick: () => {
           // The report's popups hide with it: from Images, the report comes back first.
           if (snapshot.mode === 'images') {
-            setMode('both');
+            setMode('both', 'system');
           }
           try {
             h.openReportSettings?.();
@@ -1388,17 +1452,54 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         });
       }
     }
+    // F56 (29 Oct): the reading layouts, where the island can remember them
+    // (null: the reader's settings could not be read; an older island has none).
+    if (typeof h.layoutMenu === 'function' && typeof h.layoutAction === 'function') {
+      let menu: { modality: string | null; ownLayout: boolean } | null = null;
+      try {
+        const v = h.layoutMenu();
+        if (v && typeof v === 'object' && typeof v.ownLayout === 'boolean') {
+          const modality =
+            typeof v.modality === 'string' && /^[A-Z]{2,4}$/.test(v.modality) ? v.modality : null;
+          menu = { modality, ownLayout: v.ownLayout };
+        }
+      } catch (_) {
+        menu = null;
+      }
+      if (menu) {
+        const act = (action: string) => () => {
+          try {
+            h.layoutAction?.(action, { mode: requested, reportRatio });
+          } catch (_) {
+            /* the layout stays as shown */
+          }
+          notify();
+        };
+        out.push({ title: 'Layout: save as my default', icon: 'settings', onClick: act('save') });
+        out.push({ title: 'Layout: reset to my default', icon: 'settings', onClick: act('reset') });
+        if (menu.modality) {
+          out.push({
+            title: `Own layout for ${menu.modality}: ${menu.ownLayout ? 'on' : 'off'}`,
+            icon: 'settings',
+            onClick: act(menu.ownLayout ? 'own-off' : 'own-on'),
+          });
+        }
+      }
+    }
     return out;
   };
 
   // ---- the divider --------------------------------------------------------------------
   let dragging: number | null = null;
+  /** F56: the share when the drag began; a drag that moved it is told at its end. */
+  let dragFrom: number | null = null;
   divider.addEventListener('pointerdown', (e: PointerEvent) => {
     if (e.button !== 0) {
       return;
     }
     e.preventDefault();
     dragging = e.pointerId;
+    dragFrom = reportRatio;
     try {
       divider.setPointerCapture(e.pointerId);
     } catch (_) {
@@ -1419,7 +1520,12 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       return;
     }
     dragging = null;
+    const moved = dragFrom !== null && dragFrom !== reportRatio;
+    dragFrom = null;
     focusReport();
+    if (moved) {
+      tellLayout();
+    }
   };
   divider.addEventListener('pointerup', endDrag);
   divider.addEventListener('pointercancel', endDrag);
@@ -1431,7 +1537,11 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     // The viewer's page-wide hotkeys bind arrows too.
     e.preventDefault();
     e.stopPropagation();
+    const before = reportRatio;
     setReportRatio(r);
+    if (reportRatio !== before) {
+      tellLayout();
+    }
   });
   const stopSignInPoll = () => {
     if (signInPoll) {

@@ -69,6 +69,12 @@ export interface IslandHandleLike {
   sign?: () => string;
   /** Optional in v1 (F55): an action of the island's line mirrored on the strip. */
   lineAction?: (code: string, id: string) => boolean;
+  /** Optional in v1 (F56, 29 Oct): the reader chose this layout (remembered by the island). */
+  layoutChanged?: (layout: { mode: string; reportRatio: number }) => boolean;
+  /** Optional in v1 (F56): the gear menu's layout items (null: nothing can be remembered). */
+  layoutMenu?: () => { modality: string | null; ownLayout: boolean } | null;
+  /** Optional in v1 (F56): 'save', 'reset', 'own-on' or 'own-off', with the layout on screen. */
+  layoutAction?: (action: string, current: { mode: string; reportRatio: number }) => boolean;
 }
 
 export interface IslandModuleLike {
