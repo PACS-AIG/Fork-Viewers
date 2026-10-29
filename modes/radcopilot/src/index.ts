@@ -41,6 +41,7 @@ import {
   readingDockEnabled,
   routeStudyOf,
   setReadingViewerUser,
+  setReadingViewerServices,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 
@@ -80,6 +81,12 @@ function enterReadingRoute(servicesManager?: unknown): void {
     ?.userAuthenticationService as { getUser?: () => unknown } | undefined;
   if (auth && typeof auth.getUser === 'function') {
     setReadingViewerUser(() => auth.getUser?.());
+  }
+  // F58: the grid, viewports and series, for Hold / Back.
+  const services = (servicesManager as { services?: Record<string, unknown> } | undefined)
+    ?.services;
+  if (services) {
+    setReadingViewerServices(services);
   }
   const search = window.location.search;
   const study = routeStudyOf(search);

@@ -75,6 +75,10 @@ export interface IslandHandleLike {
   layoutMenu?: () => { modality: string | null; ownLayout: boolean } | null;
   /** Optional in v1 (F56): 'save', 'reset', 'own-on' or 'own-off', with the layout on screen. */
   layoutAction?: (action: string, current: { mode: string; reportRatio: number }) => boolean;
+  /** Optional in v1 (F58, 29 Oct): hold the report's half of the reader's place (false: no report). */
+  holdPlace?: () => boolean;
+  /** Optional in v1 (F58): back to it; what it did (readingDock checks it), or null. */
+  returnToPlace?: () => unknown;
 }
 
 export interface IslandModuleLike {

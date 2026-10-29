@@ -42,6 +42,7 @@ import {
   ensureReadingDock,
   readingDockEnabled,
   setReadingViewerUser,
+  setReadingViewerServices,
 } from './readingDock/session';
 import { launchFromQuery, routeStudyOf } from './readingDock/islandLoader';
 import { READING_MIC_KEY, READING_MODES } from './readingDock/dockModel';
@@ -334,6 +335,7 @@ export {
   currentReadingDock,
   ensureReadingDock,
   setReadingViewerUser,
+  setReadingViewerServices,
   readingDockEnabled,
   routeStudyOf,
   launchFromQuery,

@@ -17,6 +17,7 @@ import {
 } from './readingDock';
 import { loadIsland } from './islandLoader';
 import { signOutOfApp } from './appSignOut';
+import { createViewerPlace, type ViewerServices } from './viewerPlace';
 
 declare global {
   interface Window {
@@ -143,6 +144,19 @@ function viewerUserSub(): string | null {
   }
 }
 
+/**
+ * F58: OHIF's services, for the viewer's half of a held place (./viewerPlace).
+ * The mode hands them in at its route entries; null before then.
+ */
+let viewerServices: ViewerServices | null = null;
+export function setReadingViewerServices(services: unknown): void {
+  const s = services as Partial<ViewerServices> | null | undefined;
+  viewerServices =
+    s && s.viewportGridService && s.cornerstoneViewportService && s.displaySetService
+      ? (s as ViewerServices)
+      : null;
+}
+
 let current: ReadingDock | null = null;
 const changeListeners = new Set<() => void>();
 
@@ -208,6 +222,7 @@ export function ensureReadingDock(): ReadingDock {
         REPORT_WINDOW,
         reportWindowFeatures(window.screen)
       ),
+    viewerPlace: createViewerPlace(() => viewerServices, window),
   });
   installHarnessHook();
   changeListeners.forEach(listener => listener());
