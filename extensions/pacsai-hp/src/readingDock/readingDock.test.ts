@@ -717,7 +717,7 @@ describe('F56: the reading layouts (29 Oct)', () => {
         actions.push([action, { ...current }]);
         // Reset shows the Saved default through onLayout, as the island does.
         if (action === 'reset' && shown) {
-          isl.options().onLayout(shown);
+          isl.options().onLayout(shown, 'reader');
         }
         return true;
       }),
@@ -884,6 +884,68 @@ describe('F56: the reading layouts (29 Oct)', () => {
       throw new Error('gone');
     });
     expect(titles()).toEqual([]);
+  });
+
+  it("refuses the case's remembered layout once the reader chose in the case, and takes it again for the next case", async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = await up(isl);
+    expect(d.setMode('report')).toBe(true);
+    expect(isl.options().onLayout({ mode: 'both', reportRatio: 0.5 }, 'case')).toBe(false);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'report', reportPercent: 40 });
+    // The reader's own Reset is shown whatever was chosen, and is not told back.
+    expect(isl.options().onLayout({ mode: 'both', reportRatio: 0.44 }, 'reader')).toBe(true);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'both', reportPercent: 44 });
+    expect(told).toHaveLength(1);
+    // The next case opens with its remembered layout again.
+    setPath('/viewer/viewer/radcopilot?StudyInstanceUIDs=' + B);
+    d.enter(B);
+    d.routeLeft();
+    jest.runOnlyPendingTimers();
+    expect(isl.handle.setCase).toHaveBeenCalledWith(B, undefined);
+    expect(isl.options().onLayout({ mode: 'report', reportRatio: 0.5 }, 'case')).toBe(true);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'report', reportPercent: 50 });
+    expect(d.getSnapshot().layoutCounts.refusedRestores).toBe(1);
+  });
+
+  it('tells a choice made while the island loaded once it is up, and keeps it over the remembered one', async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    expect(d.getSnapshot().phase).toBe('loading');
+    expect(d.setMode('report')).toBe(true);
+    expect(told).toEqual([]);
+    await flush();
+    expect(d.getSnapshot().phase).toBe('mounted');
+    expect(told).toEqual([{ mode: 'report', reportRatio: 0.4 }]);
+    expect(isl.options().onLayout({ mode: 'both', reportRatio: 0.46 }, 'case')).toBe(false);
+    expect(d.getSnapshot().requested).toBe('report');
+  });
+
+  it("tells a choice again when the case is ready, if the island's tree was not up to take it", async () => {
+    const { isl, told } = islandWithLayouts();
+    // The island's handle answers false until its tree is up.
+    let up = false;
+    (isl.handle as unknown as { layoutChanged: jest.Mock }).layoutChanged.mockImplementation(
+      (l: { mode: string; reportRatio: number }) => {
+        if (!up) {
+          return false;
+        }
+        told.push({ ...l });
+        return true;
+      }
+    );
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    d.setMode('report');
+    await flush();
+    expect(told).toEqual([]);
+    expect(d.getSnapshot().layoutCounts.told).toBe(0);
+    up = true;
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    expect(told).toEqual([{ mode: 'report', reportRatio: 0.4 }]);
+    // Told once: a later ready tells nothing more.
+    isl.options().onReady({ studyInstanceUid: A, generation: 1, state: 'reportable' });
+    expect(told).toHaveLength(1);
   });
 
   it('an island without them (a v1 build from before) is told nothing and lists nothing', async () => {

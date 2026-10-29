@@ -366,6 +366,11 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let stripShown = false;
   const stripCounts = { signs: 0, reviews: 0, shows: 0, lineActions: 0, modeRequests: 0 };
   const layoutCounts = { restores: 0, refusedRestores: 0, told: 0 };
+  /** F56: the reader chose a layout since this case opened, so the layout the
+   *  island remembered for the case no longer replaces it. */
+  let readerChoseThisCase = false;
+  /** F56: that choice has not reached the island yet (it was not up). */
+  let choiceUntold = false;
   let view: DockView | null = null;
   let snapshot: ReadingDockSnapshot;
   const listeners = new Set<() => void>();
@@ -765,6 +770,10 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       expected = { study: expected.study, generation: s.generation };
     }
     apply();
+    // F56: a choice the island was not up to take is told now that its case is.
+    if (choiceUntold) {
+      tellLayout();
+    }
   };
   const onSigned = (signal: unknown) => {
     const s = signal as { studyInstanceUid?: unknown; sessionId?: unknown } | null;
@@ -885,6 +894,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       if (!answer.sameCase) {
         islandStudy = study;
         expected = { study, generation: answer.generation };
+        readerChoseThisCase = false;
+        choiceUntold = false;
         islandCase = null;
         signed = false;
         notices = [];
@@ -977,6 +988,10 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     islandVisible = true;
     apply();
     advertise();
+    // F56: a layout the reader chose while the island loaded is theirs to keep.
+    if (readerChoseThisCase) {
+      tellLayout();
+    }
     // The route moved on while the module loaded.
     if (routeStudy !== islandStudy) {
       requestCase();
@@ -1297,6 +1312,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   // F56: the reader's own choice of layout goes to the island, which remembers
   // it for this display setup (and the case's modality, where it has its own).
   const tellLayout = () => {
+    readerChoseThisCase = true;
+    choiceUntold = true;
     const h = handle;
     if (!h || typeof h.layoutChanged !== 'function') {
       return;
@@ -1304,6 +1321,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     try {
       if (h.layoutChanged({ mode: requested, reportRatio }) !== false) {
         layoutCounts.told++;
+        choiceUntold = false;
       }
     } catch (_) {
       /* the layout stays as shown */
@@ -1333,11 +1351,13 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     }
     return true;
   };
-  // F56: the island shows the layout remembered for the case that opened, or
-  // Reset's: not the reader's choice, so it is not told back. Images while the
-  // report's microphone state is unknown shows as Both until it is known
-  // (dockView), and a drag in progress keeps the divider under the reader's hand.
-  const onLayout = (value: unknown): boolean => {
+  // F56: the island shows the layout remembered for the case that opened
+  // ('case'), refused once the reader has chosen one in this case, or the
+  // reader's own Reset or own layout turned off ('reader'); neither is told
+  // back. Images while the report's microphone state is unknown shows as Both
+  // until it is known (dockView), and a drag in progress keeps the divider
+  // under the reader's hand.
+  const onLayout = (value: unknown, why?: unknown): boolean => {
     const v = (typeof value === 'object' && value !== null ? value : {}) as {
       mode?: unknown;
       reportRatio?: unknown;
@@ -1349,10 +1369,14 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       Number.isFinite(ratio) &&
       ratio > 0 &&
       ratio < 1;
-    if (gone || !usable || dragging !== null) {
+    const byReader = why === 'reader';
+    if (gone || !usable || dragging !== null || (!byReader && readerChoseThisCase)) {
       layoutCounts.refusedRestores++;
       notify();
       return false;
+    }
+    if (byReader) {
+      readerChoseThisCase = true;
     }
     requested = v.mode as WorkspaceMode;
     if (requested !== 'both') {
