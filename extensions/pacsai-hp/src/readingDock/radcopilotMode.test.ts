@@ -53,11 +53,15 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   IMAGES_WIDTH_VAR: jest.requireActual('./readingDock').IMAGES_WIDTH_VAR,
   IMAGES_BOTTOM_VAR: jest.requireActual('./readingDock').IMAGES_BOTTOM_VAR,
   READING_MODES_UITYPE: 'pacsai.readingModes',
+  getSessionStudies: jest.requireActual('../priors/roleRegistry').getSessionStudies,
+  subscribeSessionStudies: jest.requireActual('../priors/roleRegistry').subscribeSessionStudies,
 }));
 
 import longitudinal from '@ohif/mode-longitudinal';
 import radcopilot, { RADCOPILOT_HOTKEYS_NAME } from '../../../../modes/radcopilot/src/index';
 import { currentReadingDock } from './session';
+// eslint-disable-next-line import/first
+import { setSessionStudies } from '../priors/roleRegistry';
 
 const services = () => {
   const sections: Record<string, string[]> = {};
@@ -252,6 +256,65 @@ describe('the radcopilot mode', () => {
     await flushMicrotasks();
     expect(currentReadingDock()).not.toBeNull();
     expect(document.querySelector('[data-pacsai-reading-column]')).not.toBeNull();
+  });
+
+  // 30 Oct (the acceptance, pass 2): the toolbar's session switcher gives way in a
+  // window too narrow for Images + Report, and its studies are the gear's instead.
+  it("in a window too narrow for Both, the gear menu lists the session's studies, the one shown marked; a wide window, none", async () => {
+    (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
+    window.history.replaceState(null, '', '/viewer/viewer/radcopilot?StudyInstanceUIDs=1.2.3');
+    const width = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 960 });
+    try {
+      const m = radcopilot.modeFactory({});
+      const menu = m.routes[0].layoutTemplate({}).props.headerMenuOptions as () => Array<{
+        title: string;
+        onClick: () => void;
+      }>;
+      const runCommand = jest.fn();
+      const s = services();
+      (s.servicesManager.services as Record<string, unknown>).hangingProtocolService = {
+        getState: () => ({ activeStudyUID: '1.2.3' }),
+      };
+      m.onModeEnter.call(m, {
+        servicesManager: s.servicesManager,
+        commandsManager: { runCommand },
+      });
+      await flushMicrotasks();
+      expect(currentReadingDock()?.getSnapshot().narrow).toBe(true);
+      // One study in the session: nothing to list.
+      setSessionStudies([{ uid: '1.2.3', label: 'CT HEAD' }] as never);
+      expect(menu().filter(o => /^Show/.test(o.title))).toEqual([]);
+      setSessionStudies([
+        { uid: '1.2.3', label: 'CT HEAD' },
+        { uid: '1.2.4', label: 'CT C-SPINE' },
+      ] as never);
+      const items = menu().filter(o => /^Show/.test(o.title));
+      expect(items.map(o => o.title)).toEqual(['Showing: CT HEAD', 'Show: CT C-SPINE']);
+      items[0].onClick();
+      expect(runCommand).not.toHaveBeenCalled();
+      items[1].onClick();
+      expect(runCommand).toHaveBeenCalledWith('focusSessionStudy', { studyInstanceUID: '1.2.4' });
+      // The header hears the session's studies change.
+      const heard = jest.fn();
+      const off = (
+        m.routes[0].layoutTemplate({}).props.headerMenuSubscribe as (l: () => void) => () => void
+      )(heard);
+      setSessionStudies([
+        { uid: '1.2.3', label: 'CT HEAD' },
+        { uid: '1.2.5', label: 'CTA NECK' },
+      ] as never);
+      expect(heard).toHaveBeenCalled();
+      off();
+      // Wide enough for Both: the toolbar's switcher is back, and the gear lists none.
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1920 });
+      window.dispatchEvent(new Event('resize'));
+      expect(currentReadingDock()?.getSnapshot().narrow).toBe(false);
+      expect(menu().filter(o => /^Show/.test(o.title))).toEqual([]);
+    } finally {
+      setSessionStudies([]);
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    }
   });
 
   it("tells the dock the run ended before longitudinal's own exit", async () => {

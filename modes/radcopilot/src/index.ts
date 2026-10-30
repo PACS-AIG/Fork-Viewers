@@ -36,12 +36,14 @@ import {
   READING_MODES_UITYPE,
   currentReadingDock,
   ensureReadingDock,
+  getSessionStudies,
   launchFromQuery,
   railLayoutProps,
   readingDockEnabled,
   routeStudyOf,
   setReadingViewerUser,
   setReadingViewerServices,
+  subscribeSessionStudies,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 
@@ -94,11 +96,48 @@ function enterReadingRoute(servicesManager?: unknown): void {
   queueMicrotask(() => ensureReadingDock().enter(study, launch));
 }
 
+// 30 Oct (the acceptance, pass 2): in a window too narrow for Images + Report
+// the toolbar's session switcher gives way (SessionStudyDropdown.tsx), and the
+// session's studies are listed here instead, the one shown marked; choosing
+// another re-hangs it, as the switcher does (focusSessionStudy).
+type SessionCommands = { runCommand: (name: string, options?: Record<string, unknown>) => unknown };
+let sessionCommands: SessionCommands | null = null;
+let sessionProtocol: { getState?: () => { activeStudyUID?: string } | undefined } | null = null;
+const sessionStudyMenuOptions = () => {
+  if (currentReadingDock()?.getSnapshot().narrow !== true || !sessionCommands) {
+    return [];
+  }
+  const studies = getSessionStudies();
+  if (studies.length < 2) {
+    return [];
+  }
+  const shown = sessionProtocol?.getState?.()?.activeStudyUID;
+  return studies.map(s => ({
+    title: s.uid === shown ? `Showing: ${s.label}` : `Show: ${s.label}`,
+    icon: '',
+    onClick: () => {
+      if (s.uid !== shown) {
+        sessionCommands?.runCommand('focusSessionStudy', { studyInstanceUID: s.uid });
+      }
+    },
+  }));
+};
+
 // 18 Oct: the dock's items for the viewer's gear menu (stable functions, so the
-// header subscribes once): the report's settings and its quiet_workspace switch.
-const readingMenuOptions = () => currentReadingDock()?.menuOptions() ?? [];
-const readingMenuSubscribe = (listener: () => void) =>
-  currentReadingDock()?.subscribe(listener) ?? (() => {});
+// header subscribes once): the report's settings and its quiet_workspace switch;
+// since 30 Oct the session's studies after them in a narrow window.
+const readingMenuOptions = () => [
+  ...(currentReadingDock()?.menuOptions() ?? []),
+  ...sessionStudyMenuOptions(),
+];
+const readingMenuSubscribe = (listener: () => void) => {
+  const offDock = currentReadingDock()?.subscribe(listener) ?? (() => {});
+  const offSession = subscribeSessionStudies(listener);
+  return () => {
+    offDock();
+    offSession();
+  };
+};
 // 21 Oct: the gear's Logout, the dock's when the viewer holds the app's sign-in.
 const readingLogout = () => currentReadingDock()?.logout() ?? false;
 
@@ -179,6 +218,10 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
     },
     onModeEnter: function (args: withAppTypes<{ studyInstanceUIDs?: string[] }>) {
       base.onModeEnter.call(this, args);
+      // The gear menu's session studies (a narrow window) re-hang through these.
+      sessionCommands = (args as { commandsManager?: SessionCommands }).commandsManager ?? null;
+      sessionProtocol = (args.servicesManager.services as Record<string, unknown>)
+        .hangingProtocolService as typeof sessionProtocol;
       if (readingDockEnabled()) {
         const { toolbarService, customizationService } = args.servicesManager.services;
         // The reader's report is the app's: OHIF's own (an SR) asks nothing here.

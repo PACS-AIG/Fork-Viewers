@@ -30,7 +30,7 @@ import getImagePlane from './utils/getImagePlane';
 import getImageKernel from './utils/getImageKernel';
 import getImageColor from './utils/getImageColor';
 import installRgbStackViewportFix from './utils/installRgbStackViewportFix';
-import { getStudyRole } from './priors/roleRegistry';
+import { getSessionStudies, getStudyRole, subscribeSessionStudies } from './priors/roleRegistry';
 import { configurePriorSwitching } from './priors/selectPrior';
 import initAttemptObservers from './attempt/initAttemptObservers';
 import installImagePoolHold from './startup/installImagePoolHold';
@@ -333,6 +333,9 @@ export {
   installImagePoolHold,
   // Rev 11 milestone 6, approach C: the reading dock, for the radcopilot mode.
   currentReadingDock,
+  // 30 Oct: the session's studies, for radcopilot's gear menu in a narrow window.
+  getSessionStudies,
+  subscribeSessionStudies,
   ensureReadingDock,
   setReadingViewerUser,
   setReadingViewerServices,
