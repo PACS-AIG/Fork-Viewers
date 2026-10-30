@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { getSessionStudies, subscribeSessionStudies } from '../priors/roleRegistry';
+import { currentReadingDock, onReadingDockChange } from '../readingDock/session';
+
+/** The reading dock's window is too narrow for Images + Report (200 % zoom among them). */
+const readingNarrow = (): boolean => currentReadingDock()?.getSnapshot().narrow === true;
 
 /**
  * Toolbar study switcher for same-session multi-region sets (e.g. CT head + CT
@@ -10,6 +14,13 @@ import { getSessionStudies, subscribeSessionStudies } from '../priors/roleRegist
  * Hidden unless there is more than one session study, so single-study reads are
  * unaffected. Renders a plain styled <select> for portability across OHIF UI
  * versions; restyle/replace with a ui-next dropdown if preferred.
+ *
+ * 30 Oct (Rev 11 M6, the acceptance, pass 2): in radcopilot's window too narrow
+ * for Images + Report (the reading dock's narrow ladder, 200 % zoom among them)
+ * its 212 px took the header's whole tools zone (109 px at 200 %) and no image
+ * tool showed. It gives way there, and the session's studies are the gear
+ * menu's instead (the radcopilot mode's readingMenuOptions). Outside radcopilot
+ * there is no dock, and nothing changes.
  */
 function SessionStudyDropdown({ commandsManager, servicesManager }: Record<string, any>) {
   const hangingProtocolService = servicesManager?.services?.hangingProtocolService;
@@ -17,6 +28,7 @@ function SessionStudyDropdown({ commandsManager, servicesManager }: Record<strin
   const [activeUID, setActiveUID] = useState<string | undefined>(
     hangingProtocolService?.getState?.()?.activeStudyUID
   );
+  const [narrow, setNarrow] = useState(readingNarrow());
 
   useEffect(() => {
     const refresh = () => {
@@ -35,7 +47,23 @@ function SessionStudyDropdown({ commandsManager, servicesManager }: Record<strin
     };
   }, [hangingProtocolService]);
 
-  if (!studies || studies.length < 2) {
+  // The dock's narrow state, and the dock made again after a leave.
+  useEffect(() => {
+    const follow = () => setNarrow(readingNarrow());
+    let unsubDock = currentReadingDock()?.subscribe(follow) ?? (() => {});
+    const unsubChange = onReadingDockChange(() => {
+      unsubDock();
+      unsubDock = currentReadingDock()?.subscribe(follow) ?? (() => {});
+      follow();
+    });
+    follow();
+    return () => {
+      unsubDock();
+      unsubChange();
+    };
+  }, []);
+
+  if (!studies || studies.length < 2 || narrow) {
     return null;
   }
 

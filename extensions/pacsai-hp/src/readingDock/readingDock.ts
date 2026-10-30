@@ -380,6 +380,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** Watches the app's sign-in pop-up until it closes; ends with the dock. */
   let signInPoll: ReturnType<typeof setInterval> | null = null;
+  /** 30 Oct: ends the dock's watch of the window's own route (see routeLeft). */
+  let stopRouteWatch = () => {};
   const counts = { mounts: 0, unmounts: 0, setCases: 0, refusedImages: 0, settles: 0, micKeys: 0 };
   // Phase 2: the channel to the worklist that opened this window.
   const channel = deps.channel ?? null;
@@ -1949,6 +1951,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       win.clearTimeout(leaveTimer);
     }
     stopSignInPoll();
+    stopRouteWatch();
     if (placeLineTimer) {
       win.clearTimeout(placeLineTimer);
     }
@@ -2030,6 +2033,35 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       }
       void destroy();
     }, 0);
+  };
+
+  // 30 Oct (the acceptance, pass 2): OHIF calls onModeExit, and so routeLeft,
+  // from the route's setup (setupRouteInit), which a route that never set up
+  // never registers. With the app's session gone the mode never enters (the
+  // dock, made at the route's first render, says Sign in), and a reader who
+  // left that route kept the dock on the next one; signed in again, the report
+  // opened there. So the dock also watches the window's own route: a path that
+  // is no longer radcopilot's is a leave, however the router moved (the
+  // Navigation API sees its pushes; popstate the back and forward moves).
+  // routeLeft reads the path again and destroy runs once, so OHIF's own call
+  // after this one changes nothing.
+  let pathSeen = win.location.pathname;
+  const onRouteMoved = () => {
+    const path = win.location.pathname;
+    if (path === pathSeen) {
+      return;
+    }
+    pathSeen = path;
+    if (!deps.isReadingPath(path)) {
+      routeLeft();
+    }
+  };
+  const navigation = (win as Window & { navigation?: EventTarget }).navigation;
+  navigation?.addEventListener?.('currententrychange', onRouteMoved);
+  win.addEventListener('popstate', onRouteMoved);
+  stopRouteWatch = () => {
+    navigation?.removeEventListener?.('currententrychange', onRouteMoved);
+    win.removeEventListener('popstate', onRouteMoved);
   };
 
   // ---- 21 Oct: Logout with the app's sign-in -----------------------------------------

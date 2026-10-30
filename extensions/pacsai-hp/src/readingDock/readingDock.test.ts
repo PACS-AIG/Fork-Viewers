@@ -549,6 +549,65 @@ describe('the reading dock', () => {
     expect(column()).toBeNull();
   });
 
+  // 30 Oct (the acceptance, pass 2): a signed-out route never enters its mode,
+  // so OHIF never calls onModeExit (routeLeft) when the reader leaves it.
+  it("leaving a route whose mode never entered: the window's own route takes the dock away", async () => {
+    const popup = { closed: false };
+    const load = jest.fn(async () => ({ ok: false as const, failure: 'APP_SIGNED_OUT' as const }));
+    dock = createReadingDock({
+      win: window,
+      load,
+      isReadingPath,
+      isErrorPath,
+      openAppSignIn: () => popup as unknown as Window,
+    });
+    dock.enter(A);
+    await flush();
+    (document.querySelector('[data-pacsai-reading-cover-action]') as HTMLButtonElement).click();
+    expect(jest.getTimerCount()).toBe(1);
+    // The router moves to the study list; nothing calls routeLeft.
+    window.history.pushState(null, '', '/viewer/viewer/');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(dock.isGone()).toBe(true);
+    expect(column()).toBeNull();
+    expect(jest.getTimerCount()).toBe(0);
+    // The pop-up closes with the session back: no report on the study list.
+    popup.closed = true;
+    jest.advanceTimersByTime(2000);
+    await flush();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(column()).toBeNull();
+  });
+
+  it("the window's own route: a move that stays on radcopilot keeps the dock, an error route keeps the report", async () => {
+    const load = jest.fn(async () => ({ ok: false as const, failure: 'APP_SIGNED_OUT' as const }));
+    const d = makeDock(load);
+    d.enter(A);
+    await flush();
+    // radcopilot under a data source: still the reading route.
+    window.history.pushState(null, '', '/viewer/viewer/radcopilot/dicomweb?StudyInstanceUIDs=' + A);
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(d.isGone()).toBe(false);
+    expect(column()).not.toBeNull();
+    // The viewer's not-found route keeps the report, as onModeExit's routeLeft does.
+    window.history.pushState(null, '', '/viewer/notfoundstudy');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(d.isGone()).toBe(false);
+    expect(d.getSnapshot().viewerShown).toBe(false);
+    expect(column()).not.toBeNull();
+    // A path the watch has already seen is not a move.
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    jest.advanceTimersByTime(0);
+    await flush();
+    expect(d.isGone()).toBe(false);
+  });
+
   it('asks before the page unloads while a report is open, not after it is signed', async () => {
     const isl = fakeIsland();
     const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
