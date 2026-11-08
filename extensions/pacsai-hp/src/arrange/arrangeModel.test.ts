@@ -2,6 +2,7 @@ import {
   ALL_IN_ONE_CHOICE,
   MANUAL_CHOICE,
   browsingForChoice,
+  hiddenStages,
   imagesSummary,
   priorChoices,
   protocolChoices,
@@ -79,15 +80,39 @@ describe('Arrange: the Images group', () => {
     expect(browsingForChoice('manual', 'append')).toBe('manual');
   });
 
-  it("lists the protocol's layouts, one the case cannot fill as not available", () => {
+  it("lists the protocol's layouts the case can show; the others are counted, not listed", () => {
     const stages = stageChoices(chest, 1);
-    expect(stages.map(s => [s.label, s.available, s.selected])).toEqual([
-      ['Axial Lung (current/prior)', true, false],
-      ['Axial Soft Tissue (current/prior)', true, true],
-      ['Axial MIP (current/prior)', false, false],
-      ['Layout 4', true, false],
+    expect(stages.map(s => [s.index, s.label, s.available, s.selected])).toEqual([
+      [0, 'Axial Lung (current/prior)', true, false],
+      [1, 'Axial Soft Tissue (current/prior)', true, true],
+      [3, 'Layout 4', true, false],
     ]);
+    expect(hiddenStages(chest, 1)).toBe(1);
     expect(stageChoices({ id: 'default', stages: [{}] }, 0)).toEqual([]);
+    expect(hiddenStages({ id: 'default', stages: [{}] }, 0)).toBe(0);
+  });
+
+  it('names a repeated layout by its grid, and by its place where the grid repeats too', () => {
+    const grid = (rows: number, columns: number) => ({
+      viewportStructure: { properties: { rows, columns } },
+    });
+    const p = {
+      id: '@pacsai/compareCTA',
+      stages: [
+        { name: 'Current', status: 'enabled', ...grid(1, 3) },
+        { name: 'Current', status: 'enabled', ...grid(1, 2) },
+        { name: 'Current', status: 'passive', ...grid(1, 2) },
+        { name: 'Current', status: 'disabled', ...grid(1, 1) },
+        { name: 'All-in-one', status: 'enabled', ...grid(1, 1) },
+      ],
+    };
+    expect(stageChoices(p, 0).map(s => s.label)).toEqual([
+      'Current · 1×3',
+      'Current · 1×2 (1)',
+      'Current · 1×2 (2)',
+      'All-in-one',
+    ]);
+    expect(hiddenStages(p, 0)).toBe(1);
   });
 
   it('offers the prior only for a compare protocol with a prior loaded', () => {

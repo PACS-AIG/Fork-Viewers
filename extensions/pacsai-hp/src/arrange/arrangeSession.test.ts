@@ -191,8 +191,8 @@ describe('Arrange (milestone 7, N05)', () => {
     expect(v.stages.map(s => [s.label, s.available])).toEqual([
       ['Axial Lung (current/prior)', true],
       ['Axial Soft Tissue (current/prior)', true],
-      ['Axial MIP (current/prior)', false],
     ]);
+    expect(v.hiddenStages).toBe(1);
     expect(v.workspace?.modes.find(m => m.selected)?.value).toBe('both');
     expect(v.workspace?.shares.find(s => s.selected)?.label).toBe('40 %');
     expect(v.workspace?.layoutMenu).toEqual({ modality: 'CT', ownLayout: false });

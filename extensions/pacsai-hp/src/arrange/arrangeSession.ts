@@ -29,6 +29,7 @@ import {
   ALL_IN_ONE_CHOICE,
   MANUAL_CHOICE,
   browsingForChoice,
+  hiddenStages,
   imagesSummary,
   priorChoices,
   protocolChoices,
@@ -109,6 +110,8 @@ export interface ArrangeView {
   protocols: ProtocolChoice[];
   prior: PriorChoice[];
   stages: StageChoice[];
+  /** The protocol's layouts this case cannot fill (not listed). */
+  hiddenStages: number;
   /** Null without a dock (another mode). */
   workspace: {
     modes: Array<{ value: ArrangeMode; label: string; selected: boolean }>;
@@ -469,6 +472,7 @@ export function createArrange(deps: ArrangeDeps): Arrange {
       protocols: images ? protocolChoices(held ? matchedProtocols() : [], state) : [],
       prior: priorChoices(state, deps.priorLoaded()),
       stages: stageChoices(protocol, state.stageIndex),
+      hiddenStages: hiddenStages(protocol, state.stageIndex),
       workspace:
         dock && ws
           ? {

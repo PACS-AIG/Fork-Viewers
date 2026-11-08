@@ -240,7 +240,7 @@ function ArrangePanel({
               {view.stages.map(s => (
                 <Choice
                   key={s.index}
-                  label={s.available ? s.label : `${s.label} (not in this case)`}
+                  label={s.label}
                   selected={s.selected}
                   disabled={imagesDisabled || !s.available}
                   onPick={() => arrange.chooseStage(s.index)}
@@ -248,6 +248,16 @@ function ArrangePanel({
                 />
               ))}
             </div>
+            {view.hiddenStages > 0 && (
+              <div
+                data-arrange-hidden-stages={String(view.hiddenStages)}
+                style={{ ...LABEL, marginTop: 6 }}
+              >
+                {view.hiddenStages === 1
+                  ? '1 more layout needs a series or prior this case lacks'
+                  : `${view.hiddenStages} more layouts need series or priors this case lacks`}
+              </div>
+            )}
           </>
         )}
       </section>

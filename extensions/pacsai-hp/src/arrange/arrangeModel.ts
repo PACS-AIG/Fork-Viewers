@@ -26,7 +26,12 @@ export interface ImagesState {
 export interface ProtocolLike {
   id: string;
   name?: string;
-  stages?: Array<{ id?: string; name?: string; status?: string }>;
+  stages?: Array<{
+    id?: string;
+    name?: string;
+    status?: string;
+    viewportStructure?: { properties?: { rows?: number; columns?: number } };
+  }>;
 }
 
 export type ProtocolKind = 'compare' | 'allinone' | 'manual';
@@ -164,6 +169,23 @@ export function protocolChoices(
 }
 
 /** The protocol's layouts (its stages) by name; one the case cannot fill is listed, not offered. */
+/** A stage's grid ("1×3"), when its protocol says. */
+function gridOf(
+  stage: { viewportStructure?: { properties?: { rows?: number; columns?: number } } } | undefined
+): string | null {
+  const p = stage?.viewportStructure?.properties;
+  return p && Number.isFinite(p.rows) && Number.isFinite(p.columns)
+    ? `${p.rows}×${p.columns}`
+    : null;
+}
+
+/**
+ * The protocol's layouts (its stages) this case can show, by name; a name the
+ * protocol repeats ("Current", one per density) gets its grid ("Current · 1×3"),
+ * and where the grid repeats too, its place among them. A stage the case cannot
+ * fill (OHIF's `disabled`: a prior or a series it lacks) is not listed (docs/12
+ * §3: one small panel, not a dashboard): `hiddenStages` counts them.
+ */
 export function stageChoices(
   protocol: ProtocolLike | null | undefined,
   stageIndex: number
@@ -172,12 +194,47 @@ export function stageChoices(
   if (stages.length < 2) {
     return [];
   }
-  return stages.map((s, index) => ({
-    index,
-    label: stageLabel(s, index),
-    available: s?.status !== 'disabled',
-    selected: index === stageIndex,
-  }));
+  const shown = stages
+    .map((s, index) => ({ s, index }))
+    .filter(({ s, index }) => s?.status !== 'disabled' || index === stageIndex);
+  const byName = new Map<string, number>();
+  for (const { s, index } of shown) {
+    const name = stageLabel(s, index);
+    byName.set(name, (byName.get(name) ?? 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  return shown.map(({ s, index }) => {
+    const name = stageLabel(s, index);
+    let label = name;
+    if ((byName.get(name) ?? 0) > 1) {
+      const grid = gridOf(s);
+      const key = `${name}|${grid}`;
+      const n = (seen.get(key) ?? 0) + 1;
+      seen.set(key, n);
+      const sameGrid = shown.filter(
+        x => stageLabel(x.s, x.index) === name && gridOf(x.s) === grid
+      ).length;
+      label = grid ? `${name} · ${grid}${sameGrid > 1 ? ` (${n})` : ''}` : `${name} (${n})`;
+    }
+    return {
+      index,
+      label,
+      available: s?.status !== 'disabled',
+      selected: index === stageIndex,
+    };
+  });
+}
+
+/** How many of the protocol's layouts this case cannot fill (not listed). */
+export function hiddenStages(
+  protocol: ProtocolLike | null | undefined,
+  stageIndex: number
+): number {
+  const stages = protocol?.stages ?? [];
+  if (stages.length < 2) {
+    return 0;
+  }
+  return stages.filter((s, index) => s?.status === 'disabled' && index !== stageIndex).length;
 }
 
 /** With or without the prior: only for a compare protocol with a prior loaded. */
