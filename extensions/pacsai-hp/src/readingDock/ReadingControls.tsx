@@ -2,6 +2,7 @@ import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { READING_MODES, micLine } from './dockModel';
 import { currentReadingDock, onReadingDockChange } from './session';
 import type { ReadingDock, ReadingDockSnapshot } from './readingDock';
+import { ArrangeControl } from './ArrangeControl';
 
 /**
  * Rev 11 milestone 6, approach C, phase 1: the reading dock's controls in the
@@ -277,6 +278,8 @@ export function ReadingControls(): React.ReactElement | null {
       style={{ display: 'flex', alignItems: 'center', height: 32 }}
     >
       <ReadingModeControl />
+      {/* Milestone 7: Arrange beside the three modes (docs/02 §5). */}
+      <ArrangeControl />
       <ReadingMicLine />
       <ReadingPlace />
     </div>

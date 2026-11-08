@@ -136,16 +136,17 @@ describe('the reading controls as one toolbar item', () => {
     });
     const row = rowOf(container);
     expect(row.style.display).toBe('flex');
-    expect(partsOf(row)).toEqual(['pacsai-reading-modes']);
+    // Milestone 7: Arrange sits beside the three modes.
+    expect(partsOf(row)).toEqual(['pacsai-reading-modes', 'pacsai-arrange']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Images' }));
-    expect(partsOf(row)).toEqual(['pacsai-reading-modes', 'pacsai-reading-mic']);
+    expect(partsOf(row)).toEqual(['pacsai-reading-modes', 'pacsai-arrange', 'pacsai-reading-mic']);
     expect(
       screen.getByText('Dictating into the report').closest('[data-cy="pacsai-reading-controls"]')
     ).toBe(row);
 
     fireEvent.click(screen.getByRole('button', { name: 'Report' }));
-    expect(partsOf(row)).toEqual(['pacsai-reading-modes']);
+    expect(partsOf(row)).toEqual(['pacsai-reading-modes', 'pacsai-arrange']);
   });
 });
 

@@ -36,6 +36,8 @@ import {
   READING_MODES_UITYPE,
   currentReadingDock,
   ensureReadingDock,
+  endCaseBrowsingMode,
+  arrangeCaseChanged,
   getSessionStudies,
   launchFromQuery,
   railLayoutProps,
@@ -217,6 +219,10 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
       enterReadingRoute(args.servicesManager);
     },
     onModeEnter: function (args: withAppTypes<{ studyInstanceUIDs?: string[] }>) {
+      // Milestone 7: a case's own browsing mode (Arrange's Use this case) ends
+      // with the case, and an Arrange left open puts nothing into the next one.
+      arrangeCaseChanged();
+      endCaseBrowsingMode();
       base.onModeEnter.call(this, args);
       // The gear menu's session studies (a narrow window) re-hang through these.
       sessionCommands = (args as { commandsManager?: SessionCommands }).commandsManager ?? null;
@@ -241,6 +247,7 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
       // A case switch, an error route or leaving the mode: the dock decides
       // once the router has moved (readingDock.ts routeLeft).
       currentReadingDock()?.routeLeft();
+      arrangeCaseChanged();
       base.onModeExit.call(this, args);
     },
     routes: [

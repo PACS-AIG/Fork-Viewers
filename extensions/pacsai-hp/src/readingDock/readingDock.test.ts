@@ -901,27 +901,30 @@ describe('F56: the reading layouts (29 Oct)', () => {
     expect(d.getSnapshot().requested).toBe('both');
   });
 
-  it("lists the gear menu's layout items and passes the layout on screen", async () => {
+  // Milestone 7: F56's layout items moved from the gear menu to Arrange's
+  // Workspace group (layoutMenu / layoutAction); the gear keeps none of them.
+  it('offers the layout items to Arrange, not the gear, and passes the layout on screen', async () => {
     const { isl, actions, setDefault } = islandWithLayouts();
     const d = await up(isl);
     d.setMode('report');
-    const titles = () => d.menuOptions().map(o => o.title);
-    expect(titles()).toEqual([
-      'Layout: save as my default',
-      'Layout: reset to my default',
-      'Own layout for CT: off',
-    ]);
-    d.menuOptions()[0].onClick();
+    expect(
+      d
+        .menuOptions()
+        .map(o => o.title)
+        .filter(t => /layout/i.test(t))
+    ).toEqual([]);
+    expect(d.layoutMenu()).toEqual({ modality: 'CT', ownLayout: false });
+    expect(d.layoutAction('save')).toBe(true);
     expect(actions[0]).toEqual(['save', { mode: 'report', reportRatio: 0.4 }]);
-    d.menuOptions()[2].onClick();
+    expect(d.layoutAction('own-on')).toBe(true);
     expect(actions[1]).toEqual(['own-on', { mode: 'report', reportRatio: 0.4 }]);
     setDefault({ mode: 'both', reportRatio: 0.44 });
-    d.menuOptions()[1].onClick();
+    expect(d.layoutAction('reset')).toBe(true);
     expect(actions[2][0]).toBe('reset');
     expect(d.getSnapshot()).toMatchObject({ requested: 'both', reportPercent: 44 });
   });
 
-  it('lists the own-layout item only for a modality code, and nothing when the island cannot remember', async () => {
+  it('gives the layout menu only for a modality code, and none when the island cannot remember', async () => {
     let menu: { modality: unknown; ownLayout: unknown } | null = {
       modality: 'CT',
       ownLayout: true,
@@ -929,20 +932,68 @@ describe('F56: the reading layouts (29 Oct)', () => {
     const { isl } = islandWithLayouts();
     (isl.handle as unknown as { layoutMenu: jest.Mock }).layoutMenu.mockImplementation(() => menu);
     const d = await up(isl);
-    const titles = () => d.menuOptions().map(o => o.title);
-    expect(titles()).toContain('Own layout for CT: on');
+    expect(d.layoutMenu()).toEqual({ modality: 'CT', ownLayout: true });
     menu = { modality: null, ownLayout: false };
-    expect(titles()).toEqual(['Layout: save as my default', 'Layout: reset to my default']);
+    expect(d.layoutMenu()).toEqual({ modality: null, ownLayout: false });
     menu = { modality: 'ct<b>', ownLayout: false };
-    expect(titles()).toEqual(['Layout: save as my default', 'Layout: reset to my default']);
+    expect(d.layoutMenu()).toEqual({ modality: null, ownLayout: false });
     menu = { modality: 'CT', ownLayout: 'yes' };
-    expect(titles()).toEqual([]);
+    expect(d.layoutMenu()).toBeNull();
+    expect(d.layoutAction('save')).toBe(false);
     menu = null;
-    expect(titles()).toEqual([]);
+    expect(d.layoutMenu()).toBeNull();
     (isl.handle as unknown as { layoutMenu: jest.Mock }).layoutMenu.mockImplementation(() => {
       throw new Error('gone');
     });
-    expect(titles()).toEqual([]);
+    expect(d.layoutMenu()).toBeNull();
+  });
+
+  // Milestone 7 (Arrange, N05): a previewed layout is shown, never told; Cancel
+  // puts back the layout before it, Apply is the reader's choice.
+  it('previews a layout without telling the island, and Cancel puts the held one back', async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = await up(isl);
+    expect(d.layoutNow()).toEqual({ mode: 'both', reportRatio: 0.4 });
+    expect(d.previewLayout({ mode: 'both', reportRatio: 0.5 })).toBe(true);
+    expect(d.previewLayout({ mode: 'report' })).toBe(true);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'report', reportPercent: 50 });
+    // A case's remembered layout does not land over a preview.
+    expect(isl.options().onLayout({ mode: 'images', reportRatio: 0.3 }, 'case')).toBe(false);
+    d.endLayoutPreview(false);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'both', reportPercent: 40 });
+    expect(told).toEqual([]);
+  });
+
+  it("applies a previewed layout as the reader's choice, told once", async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = await up(isl);
+    d.previewLayout({ mode: 'both', reportRatio: 0.45 });
+    d.endLayoutPreview(true);
+    expect(told).toEqual([{ mode: 'both', reportRatio: 0.45 }]);
+    // An apply that changed nothing tells nothing.
+    d.previewLayout({ mode: 'both', reportRatio: 0.45 });
+    d.endLayoutPreview(true);
+    expect(told).toHaveLength(1);
+    expect(d.splitBoundsNow()).not.toBeNull();
+  });
+
+  it("ends a preview when the reader picks a mode in the header, keeping the reader's pick", async () => {
+    const { isl, told } = islandWithLayouts();
+    const d = await up(isl);
+    d.previewLayout({ mode: 'both', reportRatio: 0.55 });
+    expect(d.setMode('report')).toBe(true);
+    d.endLayoutPreview(false);
+    expect(d.getSnapshot()).toMatchObject({ requested: 'report', reportPercent: 55 });
+    expect(told).toEqual([{ mode: 'report', reportRatio: 0.55 }]);
+  });
+
+  it('refuses a preview of Images while the microphone state is unknown, and bad values', async () => {
+    const { isl } = islandWithLayouts();
+    const d = await up(isl, { micKnown: false });
+    expect(d.previewLayout({ mode: 'images' })).toBe(false);
+    expect(d.previewLayout({ reportRatio: 1.5 })).toBe(false);
+    expect(d.previewLayout({ mode: 'side' as never })).toBe(false);
+    expect(d.getSnapshot().counts.refusedImages).toBe(1);
   });
 
   it("refuses the case's remembered layout once the reader chose in the case, and takes it again for the next case", async () => {

@@ -50,6 +50,8 @@ import initScrollSyncBinding from './sync/initScrollSyncBinding';
 import initMomentumScroll from './momentum/initMomentumScroll';
 import initPerfusion4DProvider from './perfusion/initPerfusion4DProvider';
 import registerHangingAttributes from './protocols/hangingAttributes';
+import { endCaseBrowsingMode } from './allinone/browsingMode';
+import { arrangeCaseChanged } from './arrange/arrangeHost';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -194,4 +196,7 @@ export {
   IMAGES_WIDTH_VAR,
   IMAGES_BOTTOM_VAR,
   READING_MODES_UITYPE,
+  // Rev 11 milestone 7: Arrange's case boundaries, for the radcopilot mode.
+  endCaseBrowsingMode,
+  arrangeCaseChanged,
 };

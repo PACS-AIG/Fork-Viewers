@@ -157,6 +157,23 @@ export function setReadingViewerServices(services: unknown): void {
       : null;
 }
 
+/** Milestone 7 (Arrange): the same services, as the mode handed them in (null before). */
+export function readingViewerServices(): Record<string, unknown> | null {
+  return viewerServices as unknown as Record<string, unknown> | null;
+}
+
+/** Milestone 7 (Arrange): F58's images place, over those services (one per document). */
+let arrangePlace: ReturnType<typeof createViewerPlace> | null = null;
+export function readingViewerPlace(): ReturnType<typeof createViewerPlace> | null {
+  if (!viewerServices) {
+    return null;
+  }
+  if (!arrangePlace) {
+    arrangePlace = createViewerPlace(() => viewerServices, window);
+  }
+  return arrangePlace;
+}
+
 let current: ReadingDock | null = null;
 const changeListeners = new Set<() => void>();
 

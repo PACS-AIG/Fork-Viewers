@@ -8,6 +8,8 @@ import { getPriorPolicy } from './priorPolicy';
 import scorePrior from './scorePrior';
 import { setAvailablePriors, setComparisonRoles, setSessionStudies } from './roleRegistry';
 import { caseKey, pinCase } from './pinCase';
+// Rev 11 milestone 7: Arrange waits while a case's comparison is being set up.
+import { clearSettling, markSettling } from './comparisonSettling';
 import type { PriorOption } from './roleRegistry';
 import {
   getBodyPart,
@@ -189,6 +191,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
   const { stillTheCase, noLongerTheCase } = pin;
 
   inFlight.add(inFlightKey);
+  markSettling(inFlightKey);
+  // Cleared in the finally below, unless the re-hang poll still runs (it clears it).
+  let pollRunning = false;
   try {
     const qidoForStudyUID = await dataSource.query.studies.search({
       studyInstanceUid: currentStudyUID,
@@ -555,19 +560,23 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     } else {
       let elapsed = 0;
       const intervalMs = 750;
+      pollRunning = true;
       const interval = setInterval(() => {
         elapsed += intervalMs;
         if (noLongerTheCase('re-hang poll')) {
           clearInterval(interval);
+          clearSettling(inFlightKey);
         } else if (currentReady()) {
           clearInterval(interval);
           log('current study became matchable — re-hanging');
           reHang();
           dismissLoading();
+          clearSettling(inFlightKey);
         } else if (elapsed >= 60000) {
           clearInterval(interval);
           log('current study never became matchable within 60s');
           dismissLoading();
+          clearSettling(inFlightKey);
         }
       }, intervalMs);
     }
@@ -585,6 +594,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     });
   } finally {
     inFlight.delete(inFlightKey);
+    if (!pollRunning) {
+      clearSettling(inFlightKey);
+    }
   }
 }
 
