@@ -102,6 +102,15 @@ export const VIEW_READY_MS = 15_000;
 /** OHIF applies its own remembered view to a viewport that shows a series again;
  *  the held view is checked this long after, and applied again where it was undone. */
 export const VIEW_SETTLE_MS = 400;
+/**
+ * Milestone 7 (8 Nov): a viewport whose grid changed (Arrange's Cancel from a
+ * 1×3 preview back to 1×2) can still be resizing at the first check, and its
+ * zoom then lands relative to the old size; or OHIF's remembered camera lands
+ * later. Checked once more this long after the first: only the zoom and pan
+ * are put back, and only while the slice and window are still the held ones
+ * (a reader who has scrolled or windowed since is not pulled back).
+ */
+export const VIEW_LATE_SETTLE_MS = 800;
 
 const sameList = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean =>
   !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
@@ -228,8 +237,42 @@ export function createViewerPlace(services: () => ViewerServices | null, win: Wi
     }
   };
 
-  /** Whether a viewport shows the held view (slice and window), as far as it can tell. */
-  const showsView = (cs: CsViewport, view: NonNullable<HeldViewport['view']>): boolean => {
+  /** Whether a viewport shows the held zoom and pan (rotation as held), as far as it can tell. */
+  const showsPresentation = (cs: CsViewport, view: NonNullable<HeldViewport['view']>): boolean => {
+    const held = view.presentation as { zoom?: unknown; pan?: unknown; rotation?: unknown } | null;
+    if (!held || typeof cs.getViewPresentation !== 'function') {
+      return true;
+    }
+    try {
+      const now = cs.getViewPresentation({ zoom: true, pan: true, rotation: true }) as {
+        zoom?: unknown;
+        pan?: unknown;
+        rotation?: unknown;
+      } | null;
+      if (!now) {
+        return true;
+      }
+      const near = (a: unknown, b: unknown, tol: number) =>
+        typeof a !== 'number' || typeof b !== 'number' || Math.abs(a - b) <= tol;
+      const zoomOk = near(
+        now.zoom,
+        held.zoom,
+        1e-3 * Math.max(1, Math.abs(Number(held.zoom) || 1))
+      );
+      const hp = Array.isArray(held.pan) ? held.pan : null;
+      const np = Array.isArray(now.pan) ? now.pan : null;
+      const panOk = !hp || !np || (near(np[0], hp[0], 1e-3) && near(np[1], hp[1], 1e-3));
+      return zoomOk && panOk && near(now.rotation, held.rotation, 0.5);
+    } catch (_) {
+      return true;
+    }
+  };
+
+  /** Whether a viewport shows the held slice and window, as far as it can tell. */
+  const showsSliceAndWindow = (
+    cs: CsViewport,
+    view: NonNullable<HeldViewport['view']>
+  ): boolean => {
     try {
       if (view.imageIndex !== null && typeof cs.getCurrentImageIdIndex === 'function') {
         if (cs.getCurrentImageIdIndex() !== view.imageIndex) {
@@ -243,6 +286,22 @@ export function createViewerPlace(services: () => ViewerServices | null, win: Wi
       return true;
     } catch (_) {
       return true;
+    }
+  };
+
+  /** Whether a viewport shows the held view: slice, window, zoom and pan (milestone 7: zoom and pan too). */
+  const showsView = (cs: CsViewport, view: NonNullable<HeldViewport['view']>): boolean =>
+    showsSliceAndWindow(cs, view) && showsPresentation(cs, view);
+
+  /** The held zoom and pan only. */
+  const applyPresentation = (cs: CsViewport, view: NonNullable<HeldViewport['view']>) => {
+    try {
+      if (view.presentation && cs.setViewPresentation) {
+        cs.setViewPresentation(view.presentation);
+        cs.render?.();
+      }
+    } catch (_) {
+      /* zoom and pan stay */
     }
   };
 
@@ -326,6 +385,21 @@ export function createViewerPlace(services: () => ViewerServices | null, win: Wi
       const view = v.view as NonNullable<HeldViewport['view']>;
       if (cs && ready.has(v.viewportId) && !showsView(cs, view)) {
         apply(cs, view);
+      }
+    }
+    // Milestone 7: and once more, later, for the zoom and pan alone, where the
+    // slice and window are still the held ones (nothing the reader did since).
+    await sleep(win, VIEW_LATE_SETTLE_MS);
+    for (const v of toApply) {
+      const cs = csOf(s, v.viewportId);
+      const view = v.view as NonNullable<HeldViewport['view']>;
+      if (
+        cs &&
+        ready.has(v.viewportId) &&
+        showsSliceAndWindow(cs, view) &&
+        !showsPresentation(cs, view)
+      ) {
+        applyPresentation(cs, view);
       }
     }
     try {
