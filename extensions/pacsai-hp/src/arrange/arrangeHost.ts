@@ -5,8 +5,19 @@
  * the prior loader's settling state and the in-memory browsing mode.
  */
 import { DicomMetadataStore } from '@ohif/core';
-import { getBrowsingMode, previewBrowsingMode } from '../allinone/browsingMode';
+import { getBrowsingMode, previewBrowsingMode, storedBrowsingMode } from '../allinone/browsingMode';
 import { comparisonSettling } from '../priors/comparisonSettling';
+import {
+  caseApplied,
+  hangingEntry,
+  hangingPresetCounts,
+  hangingPresetsState,
+  loadHangingPresets,
+  markCaseChoice,
+  saveHangingPreset,
+  startHangingCase,
+  suspendHangingPresets,
+} from './presetStore';
 import { getPriorUIDs } from '../priors/roleRegistry';
 import {
   currentReadingDock,
@@ -53,7 +64,18 @@ export function currentArrange(): Arrange {
           displaySets().some(d => !!d.StudyInstanceUID && priors.has(d.StudyInstanceUID))
         );
       },
-      browsing: { get: getBrowsingMode, preview: previewBrowsingMode },
+      browsing: {
+        get: getBrowsingMode,
+        preview: previewBrowsingMode,
+        stored: storedBrowsingMode,
+      },
+      presets: {
+        state: hangingPresetsState,
+        entry: hangingEntry,
+        save: saveHangingPreset,
+        markCaseChoice,
+        applied: caseApplied,
+      },
     });
   }
   return arrange;
@@ -80,4 +102,49 @@ export function takeArrangeFocusRequest(): boolean {
 /** A route entry or leave: an open Arrange closes, putting nothing back into the next case. */
 export function arrangeCaseChanged(): void {
   arrange?.caseChanged();
+}
+
+/**
+ * Milestone 7, PR 2: a case enters the reading window. Its own choices start
+ * clear, and with the reading dock on the reader's hanging presets are read
+ * for it (the case's re-hang waits for them, briefly); without, none applies.
+ */
+export function hangingCaseEntered(readPresets: boolean): void {
+  installArrangeHook();
+  startHangingCase();
+  if (readPresets) {
+    void loadHangingPresets();
+  } else {
+    suspendHangingPresets();
+  }
+}
+
+let hookInstalled = false;
+/** Read-only counts for the probes (`window.__pacsaiArrange`): no study data. */
+function installArrangeHook(): void {
+  if (hookInstalled || typeof window === 'undefined') {
+    return;
+  }
+  hookInstalled = true;
+  try {
+    Object.defineProperty(window, '__pacsaiArrange', {
+      value: Object.freeze({
+        counts: () => ({
+          arrange: arrange?.counts() ?? null,
+          presets: hangingPresetCounts(),
+          applied: caseApplied(),
+        }),
+      }),
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+  } catch (_) {
+    /* defined already */
+  }
+}
+
+/** The reading window's case is left: no preset applies until a case entry reads them again. */
+export function hangingCaseLeft(): void {
+  suspendHangingPresets();
 }

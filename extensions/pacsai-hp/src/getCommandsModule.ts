@@ -7,6 +7,9 @@ import { toggleClinicalContextVisibility } from './clinicalContext/clinicalConte
 import activeViewportHasCT from './utils/activeViewportHasCT';
 import HotkeysHelp from './components/HotkeysHelp';
 import { currentReadingDock } from './readingDock/session';
+// Rev 11 milestone 7, PR 2: the toolbar's browsing mode is the reader's choice for
+// the case (no preset overrides it); another study focused starts its own.
+import { markCaseChoice, startHangingCase } from './arrange/presetStore';
 
 const getCommandsModule = ({
   servicesManager,
@@ -71,6 +74,8 @@ const getCommandsModule = ({
       const studies = [studyInstanceUID, ...otherUIDs]
         .map((uid: string) => DicomMetadataStore.getStudy(uid))
         .filter(Boolean);
+      // Another study of the session in focus: its own hang, its study type's preset.
+      startHangingCase();
       hangingProtocolService.run({ studies, displaySets, activeStudy: study });
       // DEBUG: confirm run() actually switched the active study + auto-selected the
       // focused study's protocol (before loadRelevantPriors re-hangs with its prior).
@@ -96,6 +101,7 @@ const getCommandsModule = ({
       if (!mode) {
         return;
       }
+      markCaseChoice();
       persistBrowsingMode(mode);
       rehangForMode(servicesManager);
     },
