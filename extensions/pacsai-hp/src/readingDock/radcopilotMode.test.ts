@@ -58,6 +58,7 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   // Milestone 7: Arrange's case boundaries.
   endCaseBrowsingMode: jest.requireActual('../allinone/browsingMode').endCaseBrowsingMode,
   arrangeCaseChanged: jest.fn(),
+  openArrangeFromMenu: jest.fn(),
 }));
 
 import longitudinal from '@ohif/mode-longitudinal';
@@ -285,6 +286,8 @@ describe('the radcopilot mode', () => {
       });
       await flushMicrotasks();
       expect(currentReadingDock()?.getSnapshot().narrow).toBe(true);
+      // 8 Nov (milestone 7): Arrange's button gives way, and the gear opens it.
+      expect(menu().filter(o => o.title === 'Arrange…')).toHaveLength(1);
       // One study in the session: nothing to list.
       setSessionStudies([{ uid: '1.2.3', label: 'CT HEAD' }] as never);
       expect(menu().filter(o => /^Show/.test(o.title))).toEqual([]);
@@ -314,6 +317,7 @@ describe('the radcopilot mode', () => {
       window.dispatchEvent(new Event('resize'));
       expect(currentReadingDock()?.getSnapshot().narrow).toBe(false);
       expect(menu().filter(o => /^Show/.test(o.title))).toEqual([]);
+      expect(menu().filter(o => o.title === 'Arrange…')).toEqual([]);
     } finally {
       setSessionStudies([]);
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });

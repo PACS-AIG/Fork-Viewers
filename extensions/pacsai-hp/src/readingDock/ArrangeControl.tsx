@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { currentArrange } from '../arrange/arrangeHost';
+import { currentArrange, takeArrangeFocusRequest } from '../arrange/arrangeHost';
 import type { Arrange, ArrangeView } from '../arrange/arrangeSession';
 import { DOCK_Z_INDEX } from './readingDock';
+import { currentReadingDock, onReadingDockChange } from './session';
 
 /**
  * Rev 11 milestone 7 (B31, N05): Arrange ▾ beside Images / Both / Report in the
@@ -132,9 +133,10 @@ function ArrangePanel({
   onClose: (how: 'use' | 'cancel', byKeyboard: boolean) => void;
 }) {
   const top = anchor ? Math.round(anchor.bottom + 6) : 56;
+  // No anchor (opened from the gear menu): under the header, at its right end.
   const left = anchor
     ? Math.max(8, Math.min(Math.round(anchor.left), window.innerWidth - 8 - 420))
-    : 8;
+    : Math.max(8, window.innerWidth - 8 - 420);
   const ws = view.workspace;
   const imagesDisabled = view.settling;
   const changed = view.changed.images || view.changed.workspace;
@@ -402,10 +404,33 @@ function ArrangePanel({
   );
 }
 
+/** Whether the window is too narrow for Both (the dock's one pane): Arrange's button gives way. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => currentReadingDock()?.getSnapshot().narrow === true);
+  useEffect(() => {
+    let offDock: () => void = () => undefined;
+    const follow = () => {
+      offDock();
+      const dock = currentReadingDock();
+      setNarrow(dock?.getSnapshot().narrow === true);
+      offDock =
+        dock?.subscribe(() => setNarrow(dock.getSnapshot().narrow === true)) ?? (() => undefined);
+    };
+    follow();
+    const offChange = onReadingDockChange(follow);
+    return () => {
+      offDock();
+      offChange();
+    };
+  }, []);
+  return narrow;
+}
+
 export function ArrangeControl(): React.ReactElement | null {
   const [arrange] = useState(() => currentArrange());
   const [, setTick] = useState(0);
   useEffect(() => arrange.subscribe(() => setTick(t => t + 1)), [arrange]);
+  const narrow = useNarrow();
   const open = arrange.isOpen();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -474,6 +499,18 @@ export function ArrangeControl(): React.ReactElement | null {
     }
   }, [open]);
 
+  // Opened from the gear menu (a narrow window): the panel takes the focus once
+  // the menu has closed and handed it back to its trigger.
+  useEffect(() => {
+    if (!open || !takeArrangeFocusRequest()) {
+      return;
+    }
+    const id = window.setTimeout(() => {
+      panelRef.current?.querySelector<HTMLElement>('button:not([disabled])')?.focus();
+    }, 150);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
   const toggle = (byKeyboard: boolean) => {
     if (open) {
       close('cancel', byKeyboard);
@@ -485,6 +522,24 @@ export function ArrangeControl(): React.ReactElement | null {
   };
 
   const view = open ? arrange.view() : null;
+  const panel =
+    open && view
+      ? createPortal(
+          <ArrangePanel
+            arrange={arrange}
+            view={view}
+            anchor={narrow ? null : anchor}
+            panelRef={panelRef}
+            onClose={close}
+          />,
+          document.body
+        )
+      : null;
+  // A window too narrow for Both: the button gives way to the image tools (the
+  // gear menu's "Arrange…" opens the panel, as the session switcher gives way).
+  if (narrow) {
+    return panel;
+  }
   return (
     <>
       <button
@@ -511,18 +566,7 @@ export function ArrangeControl(): React.ReactElement | null {
       >
         Arrange ▾
       </button>
-      {open &&
-        view &&
-        createPortal(
-          <ArrangePanel
-            arrange={arrange}
-            view={view}
-            anchor={anchor}
-            panelRef={panelRef}
-            onClose={close}
-          />,
-          document.body
-        )}
+      {panel}
     </>
   );
 }

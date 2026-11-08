@@ -59,6 +59,24 @@ export function currentArrange(): Arrange {
   return arrange;
 }
 
+// In a window too narrow for Both, Arrange's header button gives way (as the
+// session switcher does, 30 Oct) and the gear menu opens it: the panel then
+// takes the focus, the menu's trigger having had it.
+let focusRequested = false;
+
+/** The gear menu's "Arrange…" (a window too narrow for Both). */
+export function openArrangeFromMenu(): void {
+  focusRequested = true;
+  currentArrange().open();
+}
+
+/** Whether the panel was opened from the menu (asked once). */
+export function takeArrangeFocusRequest(): boolean {
+  const asked = focusRequested;
+  focusRequested = false;
+  return asked;
+}
+
 /** A route entry or leave: an open Arrange closes, putting nothing back into the next case. */
 export function arrangeCaseChanged(): void {
   arrange?.caseChanged();

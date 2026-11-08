@@ -70,12 +70,35 @@ const deps: ArrangeDeps = {
   browsing: { get: () => browsing, preview: m => (browsing = m) },
 };
 const mockArrange = createArrange(deps);
-jest.mock('../arrange/arrangeHost', () => ({ currentArrange: () => mockArrange }));
+let mockFocusRequested = false;
+jest.mock('../arrange/arrangeHost', () => ({
+  currentArrange: () => mockArrange,
+  takeArrangeFocusRequest: () => {
+    const asked = mockFocusRequested;
+    mockFocusRequested = false;
+    return asked;
+  },
+}));
+// The dock's snapshot, for the narrow window (Arrange's button gives way).
+let mockNarrow = false;
+const mockDockListeners = new Set<() => void>();
+jest.mock('./session', () => ({
+  currentReadingDock: () => ({
+    getSnapshot: () => ({ narrow: mockNarrow }),
+    subscribe: (l: () => void) => {
+      mockDockListeners.add(l);
+      return () => mockDockListeners.delete(l);
+    },
+  }),
+  onReadingDockChange: () => () => undefined,
+}));
 
 // eslint-disable-next-line import/first
 import { ArrangeControl } from './ArrangeControl';
 
 beforeEach(() => {
+  mockNarrow = false;
+  mockFocusRequested = false;
   hp.stageIndex = 0;
   layout = { mode: 'both', reportRatio: 0.4 };
   held = null;
@@ -190,5 +213,32 @@ describe('Arrange in the header (milestone 7)', () => {
     expect(screen.getByRole('button', { name: 'Save this layout' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Restore saved' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Own layout for CT: off' })).toBeTruthy();
+  });
+  // 8 Nov: a window too narrow for Both (200 % zoom): the button gives way to the
+  // image tools, and the gear menu's "Arrange…" opens the panel, focus inside.
+  it('in a window too narrow for Both: no button; opened from the gear menu, the panel takes the focus', async () => {
+    jest.useFakeTimers();
+    try {
+      mockNarrow = true;
+      render(<ArrangeControl />);
+      expect(screen.queryByRole('button', { name: /Arrange/ })).toBeNull();
+      await act(async () => {
+        mockFocusRequested = true;
+        mockArrange.open();
+      });
+      expect(panel()).not.toBeNull();
+      await act(async () => {
+        jest.advanceTimersByTime(200);
+      });
+      expect(panel()?.contains(document.activeElement)).toBe(true);
+      // Wide again: the button is back.
+      await act(async () => {
+        mockNarrow = false;
+        mockDockListeners.forEach(l => l());
+      });
+      expect(screen.getByRole('button', { name: /Arrange/ })).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

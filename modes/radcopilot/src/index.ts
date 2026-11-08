@@ -38,6 +38,7 @@ import {
   ensureReadingDock,
   endCaseBrowsingMode,
   arrangeCaseChanged,
+  openArrangeFromMenu,
   getSessionStudies,
   launchFromQuery,
   railLayoutProps,
@@ -125,11 +126,20 @@ const sessionStudyMenuOptions = () => {
   }));
 };
 
+// Milestone 7 (8 Nov): in a window too narrow for Both, Arrange's header button
+// gives way to the image tools, as the session switcher does; the gear opens it.
+const arrangeMenuOptions = () =>
+  currentReadingDock()?.getSnapshot().narrow === true
+    ? [{ title: 'Arrange…', icon: 'settings', onClick: () => openArrangeFromMenu() }]
+    : [];
+
 // 18 Oct: the dock's items for the viewer's gear menu (stable functions, so the
 // header subscribes once): the report's settings and its quiet_workspace switch;
-// since 30 Oct the session's studies after them in a narrow window.
+// since 30 Oct the session's studies after them in a narrow window; since 8 Nov
+// (milestone 7) Arrange there too in a narrow window.
 const readingMenuOptions = () => [
   ...(currentReadingDock()?.menuOptions() ?? []),
+  ...arrangeMenuOptions(),
   ...sessionStudyMenuOptions(),
 ];
 const readingMenuSubscribe = (listener: () => void) => {
