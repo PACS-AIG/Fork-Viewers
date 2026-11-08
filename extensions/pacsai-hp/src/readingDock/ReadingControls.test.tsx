@@ -193,3 +193,72 @@ describe('the microphone in a window too narrow for Both', () => {
     ).toBeNull();
   });
 });
+
+// Milestone 7, PR 3 (docs/12 §4, N06): a re-hang held for the reader, offered beside Arrange.
+describe('New images available · Update layout', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const late = require('../arrange/lateArrivals') as typeof import('../arrange/lateArrivals');
+  const open = async () => {
+    const view = render(<ReadingControls />);
+    await act(async () => {
+      ensureReadingDock().enter('1.2.3');
+      await settle();
+    });
+    return view;
+  };
+  const hold = (kind: 'images' | 'layout', label: string | null = null) => {
+    const run = jest.fn();
+    act(() => {
+      late.latchInteraction('scroll');
+      late.holdOrRun({ kind: () => ({ kind, label }), run });
+    });
+    return run;
+  };
+  beforeEach(() => late.lateCaseEntered(true));
+  afterEach(() => late.lateCaseLeft());
+
+  it('nothing is offered while nothing is held', async () => {
+    const { container } = await open();
+    expect(container.querySelector('[data-cy="pacsai-late-layout"]')).toBeNull();
+    act(() => late.latchInteraction('scroll'));
+    expect(container.querySelector('[data-cy="pacsai-late-layout"]')).toBeNull();
+  });
+
+  it('beside Arrange, read out; Update layout hangs the case again, once, without taking the focus', async () => {
+    const { container } = await open();
+    const run = hold('images');
+    const offer = container.querySelector('[data-cy="pacsai-late-layout"]') as HTMLElement;
+    expect(offer).not.toBeNull();
+    expect(offer.getAttribute('data-late-kind')).toBe('images');
+    const line = screen.getByText('New images available');
+    expect(line.closest('[role="status"]')).not.toBeNull();
+    expect(line.style.position).toBe('');
+    const button = screen.getByRole('button', { name: 'Update layout' });
+    // A press does not take the focus from the report.
+    expect(fireEvent.mouseDown(button)).toBe(false);
+    await act(async () => {
+      fireEvent.click(button);
+      await settle();
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-cy="pacsai-late-layout"]')).toBeNull();
+  });
+
+  it("only the reader's layout waiting: said with its study type", async () => {
+    await open();
+    hold('layout', 'CTA Head/Neck');
+    expect(screen.getByText('Your CTA Head/Neck layout')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Update layout' })).not.toBeNull();
+  });
+
+  it("in a window too narrow for Both the line is read out off screen and is in the button's title", async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 960 });
+    await open();
+    hold('images');
+    const line = screen.getByText('New images available');
+    expect(line.style.position).toBe('absolute');
+    expect(screen.getByRole('button', { name: 'Update layout' }).getAttribute('title')).toBe(
+      'New images available. Hang the case again with the images that arrived.'
+    );
+  });
+});

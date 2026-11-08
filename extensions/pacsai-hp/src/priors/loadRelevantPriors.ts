@@ -28,8 +28,15 @@ import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
 import syncAllInOneDisplaySets from '../allinone/buildAllInOneDisplaySet';
 // Rev 11 milestone 7, PR 2: the reader's preset for the study type at the re-hang.
-import { applyRehangLayout, planCaseRehang, PRESET_WAIT_MS } from '../arrange/caseHanging';
+import {
+  applyRehangLayout,
+  caseUpdateKind,
+  noteCaseSite,
+  planCaseRehang,
+  PRESET_WAIT_MS,
+} from '../arrange/caseHanging';
 import { awaitHangingPresets } from '../arrange/presetStore';
+import { holdOrRun, newImagesSinceHang } from '../arrange/lateArrivals';
 
 /**
  * Auto-loads the most relevant prior study/studies for the active study and
@@ -159,6 +166,9 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
   if (!currentStudyUID || inFlight.has(inFlightKey)) {
     return;
   }
+  // Milestone 7, PR 3: the protocol the case's first hang matched, so its other
+  // automatic re-hangs (the all-in-one refresh) plan as this one does.
+  noteCaseSite(currentStudyUID, protocol);
 
   const [dataSource] = extensionManager.getActiveDataSource();
   // Patient-level query is required to discover priors; bail gracefully otherwise.
@@ -441,32 +451,54 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       if (noLongerTheCase('hanging presets')) {
         return;
       }
-      const currentStudy = DicomMetadataStore.getStudy(currentStudyUID);
-      const activeDisplaySets = displaySetService.getActiveDisplaySets();
-      if (currentStudy) {
-        // Honor the browsing mode: append/current -> this compare protocol (all-in-one
-        // last stage; identical here, there being no prior to suppress); allinone -> the
-        // all-in-one-only protocol; manual -> stock default. In the reading window the
-        // reader's preset for the study type may stand instead (caseHanging.ts).
-        const rehang = planCaseRehang(
-          hangingProtocolService,
-          protocol,
-          currentStudyUID,
-          activeDisplaySets,
-          currentStudy
-        );
-        hangingProtocolService.run(
-          { studies: [currentStudy], displaySets: activeDisplaySets, activeStudy: currentStudy },
-          rehang.runId
-        );
-        applyRehangLayout(hangingProtocolService, rehang);
-      }
-      // Dump the current study's series + planned stages so a no-prior / no-sibling
-      // case (US, single study, special-case protocol) is inspectable.
-      if (DEBUG) {
-        dumpSeries(activeDisplaySets, currentStudyUID, priorUIDs, log);
-        logPlannedStages(protocol, activeDisplaySets, currentStudyUID, log);
-      }
+      const hangCurrent = () => {
+        const currentStudy = DicomMetadataStore.getStudy(currentStudyUID);
+        const activeDisplaySets = displaySetService.getActiveDisplaySets();
+        if (currentStudy) {
+          // Honor the browsing mode: append/current -> this compare protocol (all-in-one
+          // last stage; identical here, there being no prior to suppress); allinone -> the
+          // all-in-one-only protocol; manual -> stock default. In the reading window the
+          // reader's preset for the study type may stand instead (caseHanging.ts).
+          const rehang = planCaseRehang(
+            hangingProtocolService,
+            protocol,
+            currentStudyUID,
+            activeDisplaySets,
+            currentStudy
+          );
+          hangingProtocolService.run(
+            { studies: [currentStudy], displaySets: activeDisplaySets, activeStudy: currentStudy },
+            rehang.runId
+          );
+          applyRehangLayout(hangingProtocolService, rehang);
+        }
+        // Dump the current study's series + planned stages so a no-prior / no-sibling
+        // case (US, single study, special-case protocol) is inspectable.
+        if (DEBUG) {
+          dumpSeries(activeDisplaySets, currentStudyUID, priorUIDs, log);
+          logPlannedStages(protocol, activeDisplaySets, currentStudyUID, log);
+        }
+      };
+      // Milestone 7, PR 3: once the reader has worked the images (the reading
+      // window's latch), the re-hang waits for them, offered as the case's update.
+      holdOrRun({
+        kind: () => {
+          const sets = displaySetService.getActiveDisplaySets();
+          return caseUpdateKind(
+            hangingProtocolService,
+            protocol,
+            currentStudyUID,
+            sets,
+            DicomMetadataStore.getStudy(currentStudyUID),
+            newImagesSinceHang(sets)
+          );
+        },
+        run: () => {
+          if (stillTheCase()) {
+            hangCurrent();
+          }
+        },
+      });
       return;
     }
 
@@ -504,13 +536,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
     // is role-/region-based (not order-based), so order only affects the prior
     // overlay's "current first" assumption. Always rebuild from the latest study/
     // display-set state so late-loading series are picked up.
-    const reHang = () => {
-      // Build/refresh the all-in-one composite for every loaded study (current +
-      // priors + siblings) BEFORE matching, so the all-in-one stage hangs the
-      // current study's concatenated scroll beside the prior's. Idempotent; the
-      // streaming poll re-runs this so a study that finishes loading late still
-      // gets its full composite.
-      syncAllInOneDisplaySets({ servicesManager, extensionManager });
+    const hangCase = () => {
       const orderedStudies = [
         DicomMetadataStore.getStudy(currentStudyUID),
         ...extraUIDs.map(uid => DicomMetadataStore.getStudy(uid)),
@@ -556,6 +582,36 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         const planned = hangingProtocolService.getProtocolById?.(appliedProtocolId) ?? protocol;
         logPlannedStages(planned, activeDisplaySets, currentStudyUID, log);
       }
+    };
+
+    const reHang = () => {
+      // Build/refresh the all-in-one composite for every loaded study (current +
+      // priors + siblings) BEFORE matching, so the all-in-one stage hangs the
+      // current study's concatenated scroll beside the prior's. Idempotent; the
+      // streaming poll re-runs this so a study that finishes loading late still
+      // gets its full composite. Data only: the rail lists it at once.
+      syncAllInOneDisplaySets({ servicesManager, extensionManager });
+      // Milestone 7, PR 3: the comparison (or the current study's late series)
+      // arrived; once the reader has worked the images it waits for them,
+      // offered as "New images available · Update layout".
+      holdOrRun({
+        kind: () => {
+          const sets = displaySetService.getActiveDisplaySets();
+          return caseUpdateKind(
+            hangingProtocolService,
+            protocol,
+            currentStudyUID,
+            sets,
+            DicomMetadataStore.getStudy(currentStudyUID),
+            newImagesSinceHang(sets)
+          );
+        },
+        run: () => {
+          if (stillTheCase()) {
+            hangCase();
+          }
+        },
+      });
     };
 
     // The current study's display sets can still be half-loaded "shell" sets when

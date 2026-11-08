@@ -69,9 +69,10 @@ function deferred<T>() {
 /** The viewer's services as the loader reads them, with the case at `state.active`. */
 function fakeViewer({ currentMatchable = true } = {}) {
   const state = { active: A as string | undefined };
-  const displaySets = [
+  const displaySets: Array<Record<string, unknown>> = [
     {
       StudyInstanceUID: A,
+      displaySetInstanceUID: 'a1',
       SeriesDescription: 'Axial',
       numImageFrames: currentMatchable ? 40 : 0,
       unsupported: !currentMatchable,
@@ -356,5 +357,91 @@ describe('loadRelevantPriors: per-case module state', () => {
     expect(getPriorUIDs()).toEqual([]);
     expect(getSessionStudies()).toEqual([]);
     expect(getAvailablePriors()).toEqual([]);
+  });
+});
+
+// Milestone 7, PR 3 (docs/12 §4, N06): in the reading window, once the reader
+// has worked the images, the loader's re-hang waits for them (lateArrivals.ts).
+describe('loadRelevantPriors: late arrivals in the reading window (milestone 7, PR 3)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const late = require('../arrange/lateArrivals') as typeof import('../arrange/lateArrivals');
+  /** The reading window's case as the route hung it: A's series. The prior's arrive with its load. */
+  const inReadingWindow = (viewer: ReturnType<typeof fakeViewer>) => {
+    late.lateCaseEntered(true);
+    late.noteHung(viewer.displaySets);
+    mockPatient.createDisplaySets.mockImplementation(async (...args: unknown[]) => {
+      if (args[2] === P && !viewer.displaySets.some(d => d.StudyInstanceUID === P)) {
+        viewer.displaySets.push({
+          StudyInstanceUID: P,
+          displaySetInstanceUID: 'p1',
+          SeriesDescription: 'Axial',
+          numImageFrames: 30,
+        });
+      }
+    });
+  };
+  afterEach(() => late.lateCaseLeft());
+
+  it('untouched, the comparison is hung as before', async () => {
+    const viewer = fakeViewer();
+    inReadingWindow(viewer);
+    await viewer.load();
+    expect(viewer.run).toHaveBeenCalledTimes(1);
+    expect(late.lateView().held).toBeNull();
+  });
+
+  it('once the reader worked the images it waits: no run, offered as new images; Update layout hangs it with the prior beside', async () => {
+    const viewer = fakeViewer();
+    inReadingWindow(viewer);
+    late.latchInteraction('scroll');
+    await viewer.load();
+    expect(viewer.run).not.toHaveBeenCalled();
+    expect(late.lateView().held).toEqual({ kind: 'images', label: null });
+    // Its indicator still goes: the comparison is set up, only not hung.
+    expect(viewer.hide).toHaveBeenCalledWith(LOADING);
+    expect(late.updateLayout()).toBe(true);
+    expect(viewer.run).toHaveBeenCalledTimes(1);
+    const [{ studies, activeStudy }, protocolId] = viewer.run.mock.calls[0];
+    expect(activeStudy).toBe(mockStudies[A]);
+    expect(studies).toEqual([mockStudies[A], mockStudies[P]]);
+    expect(protocolId).toBe('@pacsai/compareCT');
+  });
+
+  it('a held re-hang the case has moved on from does nothing when asked for', async () => {
+    const viewer = fakeViewer();
+    inReadingWindow(viewer);
+    late.latchInteraction('scroll');
+    await viewer.load();
+    mockTrace.generation = 2;
+    viewer.state.active = B;
+    late.updateLayout();
+    expect(viewer.run).not.toHaveBeenCalled();
+  });
+
+  it('the current study becoming usable late (the poll) waits too, as new images', async () => {
+    jest.useFakeTimers();
+    const viewer = fakeViewer({ currentMatchable: false });
+    inReadingWindow(viewer);
+    late.latchInteraction('images');
+    await viewer.load();
+    expect(late.lateView().held?.kind).toBe('images');
+    late.updateLayout(); // the reader takes the comparison as it is now
+    expect(viewer.run).toHaveBeenCalledTimes(1);
+    // A's series become usable: the poll's re-hang is held again, not run under the reader.
+    Object.assign(viewer.displaySets[0], { numImageFrames: 40, unsupported: false });
+    jest.advanceTimersByTime(800);
+    expect(viewer.run).toHaveBeenCalledTimes(1);
+    expect(late.lateView().held).toEqual({ kind: 'images', label: null });
+  });
+
+  it('no comparison, nothing new and the same layout: the held re-hang goes, nothing run or offered', async () => {
+    const viewer = fakeViewer();
+    inReadingWindow(viewer);
+    mockPatient.query.mockResolvedValue([qido(A, '20260901')]);
+    late.latchInteraction('keys');
+    await viewer.load();
+    expect(viewer.run).not.toHaveBeenCalled();
+    expect(late.lateView().held).toBeNull();
+    expect(late.lateCounts()).toMatchObject({ drops: 1, holds: 0 });
   });
 });

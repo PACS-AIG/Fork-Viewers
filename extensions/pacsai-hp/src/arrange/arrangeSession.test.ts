@@ -41,7 +41,13 @@ const PROTOCOLS: Record<string, typeof CHEST> = {
   },
 };
 
-function world(opts: { presets?: ArrangeDeps['presets'] } = {}) {
+function world(
+  opts: {
+    presets?: ArrangeDeps['presets'];
+    interaction?: ArrangeDeps['interaction'];
+    closed?: ArrangeDeps['closed'];
+  } = {}
+) {
   const calls: string[] = [];
   const hp = {
     protocolId: CHEST.id,
@@ -131,6 +137,8 @@ function world(opts: { presets?: ArrangeDeps['presets'] } = {}) {
   let settlingNow = false;
   const deps: ArrangeDeps = {
     presets: opts.presets,
+    interaction: opts.interaction,
+    closed: opts.closed,
     hanging: () => hanging as never,
     displaySets: () => [
       { StudyInstanceUID: 'study-A', Modality: 'CT' },
@@ -585,5 +593,70 @@ describe('Save for this study type (milestone 7, PR 2, N06)', () => {
     const plain = world();
     plain.arrange.open();
     expect(plain.arrange.view().preset).toBeNull();
+  });
+});
+
+// Milestone 7, PR 3 (lateArrivals.ts): what Arrange tells the case's latch.
+describe('Arrange and late arrivals (milestone 7, PR 3)', () => {
+  /** The two hooks, noted in the world's own calls (the world made after them). */
+  const hooks = (box: { w?: ReturnType<typeof world> }) => ({
+    interaction: jest.fn(() => box.w?.calls.push('latch')),
+    closed: jest.fn(() => box.w?.calls.push('closed')),
+  });
+
+  it('Use this case with other images latches the case before saying Arrange closed; the same images only close', () => {
+    const box: { w?: ReturnType<typeof world> } = {};
+    const h = hooks(box);
+    const w = (box.w = world(h));
+    w.arrange.open();
+    w.arrange.useThisCase();
+    expect(h.interaction).not.toHaveBeenCalled();
+    expect(h.closed).toHaveBeenCalledTimes(1);
+    w.arrange.open();
+    w.arrange.chooseStage(1);
+    w.calls.length = 0;
+    w.arrange.useThisCase();
+    expect(h.interaction).toHaveBeenCalledTimes(1);
+    // The latch first, so the close releases nothing held for the panel.
+    expect(w.calls).toEqual(['latch', 'closed']);
+  });
+
+  it('Cancel says Arrange closed only once everything it held is back', async () => {
+    const box: { w?: ReturnType<typeof world> } = {};
+    const h = hooks(box);
+    const w = (box.w = world(h));
+    w.arrange.open();
+    w.arrange.chooseStage(1);
+    w.calls.length = 0;
+    await w.arrange.cancel();
+    expect(h.interaction).not.toHaveBeenCalled();
+    expect(h.closed).toHaveBeenCalledTimes(1);
+    expect(w.calls.at(-1)).toBe('closed');
+    expect(w.calls).toContain('restore view');
+  });
+
+  it("Reset shows the site's layout as the reader's choice: the case latches", async () => {
+    const box: { w?: ReturnType<typeof world> } = {};
+    const h = hooks(box);
+    const p = presets();
+    p.entries[KEY] = { revision: 2, preset: saved(), at: 'x' };
+    const w = (box.w = world({ presets: p.deps, ...h }));
+    w.arrange.open();
+    expect(await w.arrange.resetStudyType()).toBe(true);
+    expect(h.interaction).toHaveBeenCalledTimes(1);
+    // A save changes no images: nothing to latch.
+    expect(await w.arrange.saveForStudyType()).toBe(true);
+    expect(h.interaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('a case change under an open Arrange releases nothing into the next case', () => {
+    const box: { w?: ReturnType<typeof world> } = {};
+    const h = hooks(box);
+    const w = (box.w = world(h));
+    w.arrange.open();
+    w.switchCase();
+    w.arrange.caseChanged();
+    expect(h.closed).not.toHaveBeenCalled();
+    expect(h.interaction).not.toHaveBeenCalled();
   });
 });

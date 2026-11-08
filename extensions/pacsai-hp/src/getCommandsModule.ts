@@ -10,6 +10,7 @@ import { currentReadingDock } from './readingDock/session';
 // Rev 11 milestone 7, PR 2: the toolbar's browsing mode is the reader's choice for
 // the case (no preset overrides it); another study focused starts its own.
 import { markCaseChoice, startHangingCase } from './arrange/presetStore';
+import { latchInteraction, lateFocusChanged } from './arrange/lateArrivals';
 
 const getCommandsModule = ({
   servicesManager,
@@ -74,8 +75,11 @@ const getCommandsModule = ({
       const studies = [studyInstanceUID, ...otherUIDs]
         .map((uid: string) => DicomMetadataStore.getStudy(uid))
         .filter(Boolean);
-      // Another study of the session in focus: its own hang, its study type's preset.
+      // Another study of the session in focus: its own hang, its study type's preset,
+      // and (milestone 7, PR 3) its own latch: its comparison may hang until the
+      // reader works its images.
       startHangingCase();
+      lateFocusChanged();
       hangingProtocolService.run({ studies, displaySets, activeStudy: study });
       // DEBUG: confirm run() actually switched the active study + auto-selected the
       // focused study's protocol (before loadRelevantPriors re-hangs with its prior).
@@ -102,6 +106,9 @@ const getCommandsModule = ({
         return;
       }
       markCaseChoice();
+      // Milestone 7, PR 3: the reader chose the case's images; this re-hang takes
+      // in everything loaded, and later arrivals wait for them.
+      latchInteraction('browsing', { hung: true });
       persistBrowsingMode(mode);
       rehangForMode(servicesManager);
     },

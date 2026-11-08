@@ -18,6 +18,16 @@ import {
   startHangingCase,
   suspendHangingPresets,
 } from './presetStore';
+import {
+  latchInteraction,
+  lateCaseEntered,
+  lateCaseLeft,
+  lateCounts,
+  releaseLateHold,
+  setLateHold,
+  updateLayout,
+  type LateServices,
+} from './lateArrivals';
 import { getPriorUIDs } from '../priors/roleRegistry';
 import {
   currentReadingDock,
@@ -76,9 +86,24 @@ export function currentArrange(): Arrange {
         markCaseChoice,
         applied: caseApplied,
       },
+      // PR 3: the reader's choice of images latches the case; a re-hang held
+      // only while the panel was open may run once it closes.
+      interaction: () => latchInteraction('arrange', { hung: true }),
+      closed: releaseLateHold,
     });
   }
   return arrange;
+}
+
+/**
+ * PR 3: the header's Update layout. An Arrange left open is cancelled first
+ * (its preview puts back what it held), then the case's held re-hang runs.
+ */
+export async function applyLateUpdate(): Promise<boolean> {
+  if (arrange?.isOpen()) {
+    await arrange.cancel();
+  }
+  return updateLayout();
 }
 
 // In a window too narrow for Both, Arrange's header button gives way (as the
@@ -108,10 +133,15 @@ export function arrangeCaseChanged(): void {
  * Milestone 7, PR 2: a case enters the reading window. Its own choices start
  * clear, and with the reading dock on the reader's hanging presets are read
  * for it (the case's re-hang waits for them, briefly); without, none applies.
+ * PR 3: so does its interaction latch (lateArrivals.ts), watching the viewer's
+ * hanging (`services`) with the dock on; automatic re-hangs also wait while
+ * Arrange holds a preview.
  */
-export function hangingCaseEntered(readPresets: boolean): void {
+export function hangingCaseEntered(readPresets: boolean, services?: LateServices): void {
   installArrangeHook();
   startHangingCase();
+  setLateHold(() => arrange?.isOpen() === true);
+  lateCaseEntered(readPresets, services);
   if (readPresets) {
     void loadHangingPresets();
   } else {
@@ -133,6 +163,7 @@ function installArrangeHook(): void {
           arrange: arrange?.counts() ?? null,
           presets: hangingPresetCounts(),
           applied: caseApplied(),
+          late: lateCounts(),
         }),
       }),
       writable: false,
@@ -147,4 +178,5 @@ function installArrangeHook(): void {
 /** The reading window's case is left: no preset applies until a case entry reads them again. */
 export function hangingCaseLeft(): void {
   suspendHangingPresets();
+  lateCaseLeft();
 }

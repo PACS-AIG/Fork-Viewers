@@ -19,6 +19,7 @@ import {
   type StudyType,
 } from './hangingPresets';
 import { caseChoiceMade, hangingEntry, hangingPresetsState, noteCaseApplied } from './presetStore';
+import type { HeldUpdate } from './lateArrivals';
 
 /** How long a re-hang waits for the reader's presets (read at the case's entry). */
 export const PRESET_WAIT_MS = 1500;
@@ -71,14 +72,16 @@ function matchedIds(
  * The plan for this case's re-hang over `displaySets`, with `siteProtocol` the
  * protocol the first hang matched. A preset's browsing mode goes into memory
  * for this case (previewBrowsingMode: the stored one comes back with the next
- * case), as Arrange's choices do.
+ * case), as Arrange's choices do; with `preview: false` (PR 3: asking what a
+ * held re-hang would do) nothing goes anywhere.
  */
 export function planCaseRehang(
   hps: CaseHangingService,
   siteProtocol: ProtocolLike,
   studyInstanceUID: string,
   displaySets: ReadonlyArray<DisplaySetFacts>,
-  study: { StudyDescription?: unknown } | null | undefined
+  study: { StudyDescription?: unknown } | null | undefined,
+  { preview = true }: { preview?: boolean } = {}
 ): RehangPlan {
   const site = (): RehangPlan => {
     const browsing = getBrowsingMode();
@@ -112,14 +115,83 @@ export function planCaseRehang(
     matchedIds: matchedIds(hps, study, displaySets),
     caseChoice: caseChoiceMade(),
   });
-  if (plan.source === 'preset' && getBrowsingMode() !== plan.browsing) {
+  if (preview && plan.source === 'preset' && getBrowsingMode() !== plan.browsing) {
     previewBrowsingMode(plan.browsing);
   }
+  // The plan's browsing mode: the preset's, else the one in use (planCase).
   return {
     plan,
     type,
-    runId: protocolIdForMode(getBrowsingMode(), plan.protocolId) ?? plan.protocolId,
+    runId: protocolIdForMode(plan.browsing, plan.protocolId) ?? plan.protocolId,
   };
+}
+
+/**
+ * PR 3: whether running `rehang` would put up another layout than the one on
+ * screen: another protocol, or the reader's preset layout where another of the
+ * protocol's layouts is shown. Re-running the same protocol only to start it
+ * over is not another layout.
+ */
+export function wouldChangeLayout(hps: CaseHangingService, rehang: RehangPlan): boolean {
+  const active = hps.getActiveProtocol();
+  const protocol = active?.protocol;
+  if (!protocol || protocol.id !== rehang.runId) {
+    return true;
+  }
+  const preset = rehang.plan.source === 'preset' ? rehang.plan.preset : null;
+  if (!preset || (!preset.stageId && !preset.stageName)) {
+    return false;
+  }
+  const index = presetStageIndex(protocol, preset);
+  if (index === null || protocol.stages?.[index]?.status === 'disabled') {
+    return false;
+  }
+  return index !== (active?.stageIndex ?? 0);
+}
+
+/**
+ * PR 3: what a held re-hang of this case would bring the reader: the images
+ * that arrived since the layout was hung, else another layout (the reader's
+ * preset for the study type, or the browsing mode's protocol); null when
+ * neither, the layout on screen being what it would put up.
+ */
+export function caseUpdateKind(
+  hps: CaseHangingService,
+  siteProtocol: ProtocolLike,
+  studyInstanceUID: string,
+  displaySets: ReadonlyArray<DisplaySetFacts>,
+  study: { StudyDescription?: unknown } | null | undefined,
+  imagesArrived: boolean
+): HeldUpdate | null {
+  if (imagesArrived) {
+    return { kind: 'images', label: null };
+  }
+  const rehang = planCaseRehang(hps, siteProtocol, studyInstanceUID, displaySets, study, {
+    preview: false,
+  });
+  if (!wouldChangeLayout(hps, rehang)) {
+    return null;
+  }
+  return {
+    kind: 'layout',
+    label: rehang.plan.source === 'preset' ? (rehang.type?.label ?? null) : null,
+  };
+}
+
+let caseSite: { studyInstanceUID: string; protocol: ProtocolLike } | null = null;
+
+/**
+ * PR 3: the prior loader's note of the protocol the case's first hang matched
+ * (the site's), so the case's other automatic re-hangs (the all-in-one
+ * refresh) plan as the loader's does.
+ */
+export function noteCaseSite(studyInstanceUID: string, protocol: ProtocolLike): void {
+  caseSite = { studyInstanceUID, protocol };
+}
+
+/** The site protocol noted for this study, if the loader noted it. */
+export function caseSiteProtocol(studyInstanceUID: string | undefined): ProtocolLike | null {
+  return caseSite && caseSite.studyInstanceUID === studyInstanceUID ? caseSite.protocol : null;
 }
 
 /**
