@@ -28,6 +28,7 @@
  *
  * No patient data: every study, series and description is made up here.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any -- drives OHIF's untyped hanging internals */
 jest.mock('@ohif/core', () => ({ classes: {} }));
 
 // eslint-disable-next-line import/first
@@ -45,11 +46,7 @@ import registerHangingAttributes from './hangingAttributes';
 // eslint-disable-next-line import/first
 import { clearComparisonRoles, setComparisonRoles } from '../priors/roleRegistry';
 // eslint-disable-next-line import/first
-import {
-  setBrowsingMode,
-  protocolIdForMode,
-  type BrowsingMode,
-} from '../allinone/browsingMode';
+import { setBrowsingMode, protocolIdForMode, type BrowsingMode } from '../allinone/browsingMode';
 
 const BASELINE = path.join(__dirname, '__fixtures__', 'hanging-baseline.json');
 const LONGITUDINAL_MODE = path.join(__dirname, '../../../../modes/longitudinal/src/index.ts');
@@ -480,9 +477,6 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
-let uidCounter = 0;
-const nextUid = (kind: string) => `9.9.${kind}.${++uidCounter}`;
-
 type DS = Record<string, any>;
 type Study = Record<string, any>;
 
@@ -530,7 +524,10 @@ function makeStudy(spec: StudySpec, tag: string): { study: Study; displaySets: D
 /** The all-in-one composite loadRelevantPriors builds per loaded study (buildAllInOneDisplaySet). */
 function compositeOf(study: Study, displaySets: DS[]): DS | null {
   const sources = displaySets.filter(
-    ds => ds.Modality !== 'SR' && ds.Modality !== 'US' && !/topo|scout|bolus/i.test(ds.SeriesDescription)
+    ds =>
+      ds.Modality !== 'SR' &&
+      ds.Modality !== 'US' &&
+      !/topo|scout|bolus/i.test(ds.SeriesDescription)
   );
   if (sources.length < 2) {
     return null;
@@ -624,12 +621,22 @@ function recordHang(hps: any, names: Map<string, string>, withStages: boolean) {
     const now = hps.getActiveProtocol();
     const props = now.stage?.viewportStructure?.properties ?? {};
     rec.grid = `${props.rows ?? '?'}x${props.columns ?? '?'}`;
-    rec.viewports = [...(now.viewportMatchDetails?.values?.() ?? [])].map((v: any) => {
+    // Each viewport: its display sets, the window preset its stage gives them
+    // (`options.voi`), and the scroll-sync links its stage sets.
+    const defs = now.stage?.viewports ?? [];
+    rec.viewports = [...(now.viewportMatchDetails?.values?.() ?? [])].map((v: any, i: number) => {
       const infos = v.displaySetsInfo ?? [];
-      const voi = infos[0]?.displaySetOptions?.voi;
+      const opts = infos[0]?.displaySetOptions ?? {};
+      const voi = opts?.options?.voi ?? opts?.voi;
+      const sync = (
+        v.viewportOptions?.syncGroups ??
+        defs[i]?.viewportOptions?.syncGroups ??
+        []
+      ).map((g: any) => `${g.type}:${g.id}`);
       return {
-        ds: infos.map((i: any) => dsName(i.displaySetInstanceUID, names)),
+        ds: infos.map((x: any) => dsName(x.displaySetInstanceUID, names)),
         ...(voi ? { voi: `${voi.windowWidth}/${voi.windowCenter}` } : {}),
+        ...(sync.length ? { sync } : {}),
       };
     });
   }
@@ -643,7 +650,6 @@ function recordHang(hps: any, names: Map<string, string>, withStages: boolean) {
 }
 
 function hangScenario(sc: Scenario) {
-  uidCounter = 0;
   clearComparisonRoles();
   setBrowsingMode('append');
   const current = makeStudy(sc.current, 'current');
@@ -671,12 +677,18 @@ function hangScenario(sc: Scenario) {
     priors: prior ? [prior.study.StudyInstanceUID] : [],
     siblings: sibling ? [sibling.study.StudyInstanceUID] : [],
   });
-  const loaded = [current, prior, sibling].filter(Boolean) as Array<{ study: Study; displaySets: DS[] }>;
+  const loaded = [current, prior, sibling].filter(Boolean) as Array<{
+    study: Study;
+    displaySets: DS[];
+  }>;
   active = loaded.flatMap(s => s.displaySets);
   for (const s of loaded) {
     const composite = compositeOf(s.study, s.displaySets);
     if (composite) {
-      names.set(composite.displaySetInstanceUID, `${names.get(s.displaySets[0].displaySetInstanceUID)?.split('#')[0]}#allinone`);
+      names.set(
+        composite.displaySetInstanceUID,
+        `${names.get(s.displaySets[0].displaySetInstanceUID)?.split('#')[0]}#allinone`
+      );
       active.push(composite);
     }
   }
@@ -714,9 +726,7 @@ describe('the existing auto-hanging (milestone 7 regression fixtures)', () => {
   });
 
   it('auto-matches each of the sixteen in at least one fixture', () => {
-    const matched = new Set(
-      Object.values(results).map((r: any) => r.first.protocol as string)
-    );
+    const matched = new Set(Object.values(results).map((r: any) => r.first.protocol as string));
     const compare = modeProtocolIds().filter(id => id.startsWith('@pacsai/compare'));
     expect(compare.filter(id => !matched.has(id))).toEqual([]);
   });

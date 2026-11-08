@@ -60,9 +60,7 @@ export const REGION_TIMEPOINT_ATTRIBUTE = 'pacsaiRegionTimepoint';
 
 /** Read the study description off a display set (StudyDescription lives on instances). */
 function studyDescriptionOf(displaySet: any): string {
-  return String(
-    displaySet?.instances?.[0]?.StudyDescription ?? displaySet?.StudyDescription ?? ''
-  );
+  return String(displaySet?.instances?.[0]?.StudyDescription ?? displaySet?.StudyDescription ?? '');
 }
 
 /** The services the attributes read: the hanging service itself and the display sets. */
@@ -122,9 +120,12 @@ export function registerHangingAttributes({
 
   // Diffusion b-value of a split DWI displaySet, so the DWI stage can prefer the
   // high-b trace (b1000) over b0. undefined for non-diffusion / unsplit series.
-  hangingProtocolService?.addCustomAttribute?.(BVALUE_ATTRIBUTE, 'Diffusion b-value', (
-    displaySet: any
-  ) => (typeof displaySet?.diffusionBValue === 'number' ? displaySet.diffusionBValue : undefined));
+  hangingProtocolService?.addCustomAttribute?.(
+    BVALUE_ATTRIBUTE,
+    'Diffusion b-value',
+    (displaySet: any) =>
+      typeof displaySet?.diffusionBValue === 'number' ? displaySet.diffusionBValue : undefined
+  );
 
   // All-in-one composite marker: 'allinone' for the synthetic concatenated stack
   // (built by loadRelevantPriors), 'series' for every real series. Lets the
