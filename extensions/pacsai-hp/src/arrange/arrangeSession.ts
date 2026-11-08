@@ -22,9 +22,28 @@
  *
  * Nothing here reads or writes a report, a claim or a study's status, and no
  * patient data is kept: study UIDs only, to know the case is still the one open.
+ *
+ * PR 2 (N06): the Images group's study type. Save for this study type keeps
+ * the images on screen as the reader's own for the case's study type (one
+ * deliberate write of the `hanging` namespace, no other; this case keeps them
+ * too, so Cancel does not take them back), and Reset puts the type back to the
+ * site's layout, saying so by name. Each is checked against the revision this
+ * window read: one saved in another window is shown, never overwritten, and
+ * the reader replaces it or keeps it.
  */
-import type { BrowsingMode } from '../allinone/browsingMode';
+import { protocolIdForMode, type BrowsingMode } from '../allinone/browsingMode';
 import type { HeldView, ViewerPlace } from '../readingDock/viewerPlace';
+import {
+  caseFacts,
+  presetFromImages,
+  showsPreset,
+  studyTypeOf,
+  type DisplaySetFacts,
+  type HangingEntry,
+  type HangingPreset,
+  type StudyType,
+} from './hangingPresets';
+import type { CaseApplied, PresetsState, SaveAnswer } from './presetStore';
 import {
   ALL_IN_ONE_CHOICE,
   MANUAL_CHOICE,
@@ -99,7 +118,52 @@ export interface ArrangeDeps {
   settling: (studyInstanceUID: string | undefined) => boolean;
   /** A prior study is loaded beside the current one. */
   priorLoaded: () => boolean;
-  browsing: { get: () => BrowsingMode; preview: (mode: BrowsingMode) => void };
+  browsing: {
+    get: () => BrowsingMode;
+    preview: (mode: BrowsingMode) => void;
+    /** The reader's stored mode (the next case's), for Reset; else the one in use. */
+    stored?: () => BrowsingMode;
+  };
+  /** PR 2: the reader's hanging presets (presetStore.ts); none, no study-type group. */
+  presets?: ArrangePresets;
+}
+
+/** The reader's hanging presets, as Arrange uses them (presetStore.ts). */
+export interface ArrangePresets {
+  state: () => PresetsState;
+  entry: (key: string) => HangingEntry | null;
+  save: (
+    key: string,
+    preset: HangingPreset | null,
+    expectedRevision: number
+  ) => Promise<SaveAnswer>;
+  /** The reader chose this case's images: no preset overrides them in it. */
+  markCaseChoice: () => void;
+  /** What the case's re-hang did with the reader's preset. */
+  applied: () => CaseApplied | null;
+}
+
+/** The Images group's study type: Save for it, Reset it, what is saved. */
+export interface PresetView {
+  type: StudyType;
+  /** 'ready': saving works; otherwise it waits, the line says why. */
+  state: PresetsState;
+  /** The reader's preset for the type, when one is saved. */
+  saved: { summary: string; revision: number } | null;
+  /** The images on screen are that preset. */
+  inUse: boolean;
+  /** What Save would keep, in one line. */
+  candidate: string | null;
+  canSave: boolean;
+  canReset: boolean;
+  /** A save or a reset in flight. */
+  busy: boolean;
+  /** After a save or a reset: one line. */
+  status: string | null;
+  /** Another window saved or reset the type since this one read it: what it keeps. */
+  conflict: { summary: string | null } | null;
+  /** The preset's layout this case could not show (the protocol's opening one stands). */
+  missingLayout: string | null;
 }
 
 export interface ArrangeView {
@@ -122,6 +186,8 @@ export interface ArrangeView {
   changed: { images: boolean; workspace: boolean };
   /** One line when a choice could not be shown. */
   note: string | null;
+  /** PR 2: the study type's save and reset; null when the case has none. */
+  preset: PresetView | null;
 }
 
 export interface Arrange {
@@ -140,6 +206,12 @@ export interface Arrange {
   saveLayout: () => boolean;
   restoreSaved: () => boolean;
   setOwnLayout: (on: boolean) => boolean;
+  /** PR 2: the images on screen as the reader's own for the case's study type. */
+  saveForStudyType: () => Promise<boolean>;
+  /** PR 2: the study type back to the site's layout (the case shows it). */
+  resetStudyType: () => Promise<boolean>;
+  /** PR 2: after a conflict, replace what another window keeps, or keep it. */
+  resolveConflict: (choice: 'replace' | 'keep') => Promise<boolean>;
   /** The case changed under an open Arrange: it closes, putting nothing back. */
   caseChanged: () => void;
   subscribe: (listener: () => void) => () => void;
@@ -155,6 +227,9 @@ export interface ArrangeCounts {
   restoredViews: number;
   missingSeries: number;
   dropped: number;
+  saves: number;
+  resets: number;
+  conflicts: number;
 }
 
 const MODES: Array<{ value: ArrangeMode; label: string }> = [
@@ -183,6 +258,24 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     restoredViews: 0,
     missingSeries: 0,
     dropped: 0,
+    saves: 0,
+    resets: 0,
+    conflicts: 0,
+  };
+  // PR 2: the study type's save in flight, its last line, a conflict to resolve.
+  interface Conflict {
+    type: StudyType;
+    current: HangingEntry | null;
+    /** What this window meant to keep (null: a reset). */
+    pending: HangingPreset | null;
+  }
+  let presetUi: { busy: boolean; status: string | null; conflict: Conflict | null } = {
+    busy: false,
+    status: null,
+    conflict: null,
+  };
+  const clearPresetUi = () => {
+    presetUi = { busy: presetUi.busy, status: null, conflict: null };
   };
   const notify = () => listeners.forEach(l => l());
 
@@ -254,6 +347,201 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     }
   };
 
+  // ---- PR 2: the study type ---------------------------------------------------------
+
+  /** The site protocol for this case: the best compare protocol the engine matches. */
+  const siteProtocol = (): ProtocolLike | null =>
+    matchedProtocols().find(p => protocolKind(p.id) === 'compare') ?? null;
+
+  /** The case's study type, while the reader's presets are on. */
+  const caseType = (): StudyType | null => {
+    const presets = deps.presets;
+    if (!presets || presets.state() === 'off') {
+      return null;
+    }
+    const uid = activeStudyUID();
+    const study = (uid ? deps.getStudy(uid) : null) as { StudyDescription?: unknown } | null;
+    return studyTypeOf({
+      siteProtocol: siteProtocol(),
+      ...caseFacts(uid, deps.displaySets() as DisplaySetFacts[], study),
+    });
+  };
+
+  /** What Save would keep: the protocol on screen, its layout, the prior choice. */
+  const candidatePreset = (type: StudyType | null): HangingPreset | null => {
+    const images = imagesNow();
+    const protocol = deps.hanging()?.getActiveProtocol?.()?.protocol ?? null;
+    if (!type || !images || !protocol) {
+      return null;
+    }
+    return presetFromImages({
+      type,
+      protocol,
+      stageIndex: images.stageIndex,
+      browsing: images.browsing,
+    });
+  };
+
+  /** Reset shows the site's layout: its protocol in the stored browsing mode, its opening layout. */
+  const showSiteHanging = (): boolean => {
+    const site = siteProtocol();
+    if (!site) {
+      return false;
+    }
+    const stored = deps.browsing.stored?.() ?? deps.browsing.get();
+    if (deps.browsing.get() !== stored) {
+      deps.browsing.preview(stored);
+    }
+    return runProtocol(protocolIdForMode(stored, site.id) ?? site.id);
+  };
+
+  /** One save or reset, against `expected`: a conflict is kept for the reader to resolve. */
+  const commitPreset = async (
+    type: StudyType,
+    pending: HangingPreset | null,
+    expected: number
+  ): Promise<boolean> => {
+    const presets = deps.presets;
+    if (!presets) {
+      return false;
+    }
+    presetUi = { busy: true, status: null, conflict: null };
+    note = null;
+    notify();
+    const answer = await presets.save(type.key, pending, expected);
+    presetUi = { ...presetUi, busy: false };
+    if (answer.ok) {
+      if (!pending) {
+        // Reset: the case shows the site's layout again.
+        showSiteHanging();
+      }
+      // Deliberate: what was saved, or reset to, is not put back by Cancel.
+      if (held) {
+        held = { ...held, images: imagesNow() ?? held.images };
+      }
+      presetUi.status = pending
+        ? `Saved for your ${type.label} studies.`
+        : `${type.label} studies: the site's layout again.`;
+      if (pending) {
+        tally.saves++;
+      } else {
+        tally.resets++;
+      }
+    } else if ('conflict' in answer) {
+      presetUi.conflict = { type, current: answer.conflict, pending };
+      tally.conflicts++;
+    } else {
+      note = 'Could not save: the app did not answer. Try again.';
+    }
+    notify();
+    return answer.ok;
+  };
+
+  /** A preset action: refused while the comparison settles, once the case moved on, or mid-save. */
+  const presetAction = (): StudyType | null => {
+    if (!held || !deps.presets || presetUi.busy) {
+      return null;
+    }
+    if (!stillTheCase()) {
+      dropHeld();
+      return null;
+    }
+    if (deps.settling(activeStudyUID())) {
+      note = 'Still setting up the comparison: try again in a moment.';
+      notify();
+      return null;
+    }
+    if (deps.presets.state() !== 'ready') {
+      return null;
+    }
+    return caseType();
+  };
+
+  const saveForStudyType = async (): Promise<boolean> => {
+    const type = presetAction();
+    const candidate = candidatePreset(type);
+    if (!type || !candidate || !deps.presets) {
+      return false;
+    }
+    return commitPreset(type, candidate, deps.presets.entry(type.key)?.revision ?? 0);
+  };
+
+  const resetStudyType = async (): Promise<boolean> => {
+    const type = presetAction();
+    const entry = type ? deps.presets?.entry(type.key) : null;
+    if (!type || !entry?.preset) {
+      return false;
+    }
+    return commitPreset(type, null, entry.revision);
+  };
+
+  const resolveConflict = async (choice: 'replace' | 'keep'): Promise<boolean> => {
+    const c = presetUi.conflict;
+    if (!held || !c || presetUi.busy) {
+      return false;
+    }
+    if (choice === 'keep') {
+      presetUi = {
+        busy: false,
+        conflict: null,
+        status: c.current?.preset
+          ? `Kept the ${c.type.label} layout saved in another window.`
+          : `Kept the site's layout for ${c.type.label} studies, as another window reset it.`,
+      };
+      notify();
+      return true;
+    }
+    if (!stillTheCase()) {
+      dropHeld();
+      return false;
+    }
+    return commitPreset(c.type, c.pending, c.current?.revision ?? 0);
+  };
+
+  const presetView = (
+    images: ImagesState | null,
+    protocol: ProtocolLike | null
+  ): PresetView | null => {
+    const presets = deps.presets;
+    if (!held || !presets) {
+      return null;
+    }
+    const state = presets.state();
+    const type = caseType();
+    if (state === 'off' || !type) {
+      return null;
+    }
+    const entry = presets.entry(type.key);
+    const saved = entry?.preset ?? null;
+    const inUse = showsPreset(saved, {
+      protocol,
+      stageIndex: images?.stageIndex ?? 0,
+      browsing: images?.browsing ?? deps.browsing.get(),
+    });
+    const candidate = candidatePreset(type);
+    const free =
+      state === 'ready' && !deps.settling(activeStudyUID()) && !presetUi.busy && !presetUi.conflict;
+    const applied = presets.applied();
+    return {
+      type,
+      state,
+      saved: saved && entry ? { summary: saved.summary, revision: entry.revision } : null,
+      inUse,
+      candidate: candidate?.summary ?? null,
+      canSave: free && !!candidate && !inUse,
+      canReset: free && !!saved,
+      busy: presetUi.busy,
+      status: presetUi.status,
+      conflict: presetUi.conflict
+        ? { summary: presetUi.conflict.current?.preset?.summary ?? null }
+        : null,
+      missingLayout:
+        applied?.source === 'preset' && applied.layout === 'fallback'
+          ? (applied.missingLayout ?? 'its layout')
+          : null,
+    };
+  };
+
   const open = (): boolean => {
     if (held) {
       return true;
@@ -277,6 +565,7 @@ export function createArrange(deps: ArrangeDeps): Arrange {
       workspace: dock ? { ...dock.layoutNow() } : null,
     };
     note = null;
+    clearPresetUi();
     tally.opens++;
     notify();
     return true;
@@ -375,6 +664,7 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     deps.dock()?.endLayoutPreview(false);
     held = null;
     note = null;
+    clearPresetUi();
     tally.dropped++;
     notify();
   };
@@ -388,10 +678,16 @@ export function createArrange(deps: ArrangeDeps): Arrange {
       return;
     }
     // The images are already the chosen ones; the browsing mode chosen stays in
-    // memory for this case (the next case's entry restores the stored one).
+    // memory for this case (the next case's entry restores the stored one), and
+    // no preset of the reader's overrides them in it (PR 2).
+    const now = imagesNow();
+    if (now && !sameImages(now, held.images)) {
+      deps.presets?.markCaseChoice();
+    }
     deps.dock()?.endLayoutPreview(true);
     held = null;
     note = null;
+    clearPresetUi();
     tally.uses++;
     notify();
   };
@@ -403,6 +699,7 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     }
     held = null;
     note = null;
+    clearPresetUi();
     tally.cancels++;
     // The workspace first: the images' place is measured in the layout it was held in.
     deps.dock()?.endLayoutPreview(false);
@@ -465,10 +762,14 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     };
     const dock = deps.dock();
     const ws = dock?.layoutNow() ?? null;
+    const preset = presetView(images, protocol);
+    const summary = imagesSummary(protocol, state.stageIndex, state.browsing);
     return {
       open: !!held,
       settling,
-      summary: imagesSummary(protocol, state.stageIndex, state.browsing),
+      summary: preset?.inUse
+        ? summary.replace(/^Using: /, `Using your ${preset.type.label} layout: `)
+        : summary,
       protocols: images ? protocolChoices(held ? matchedProtocols() : [], state) : [],
       prior: priorChoices(state, deps.priorLoaded()),
       stages: stageChoices(protocol, state.stageIndex),
@@ -486,6 +787,7 @@ export function createArrange(deps: ArrangeDeps): Arrange {
         workspace: !!held && !!ws && !!held.workspace && !sameWorkspace(ws, held.workspace),
       },
       note,
+      preset,
     };
   };
 
@@ -503,6 +805,9 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     saveLayout: () => layoutAction('save'),
     restoreSaved: () => layoutAction('reset'),
     setOwnLayout: (on: boolean) => layoutAction(on ? 'own-on' : 'own-off'),
+    saveForStudyType,
+    resetStudyType,
+    resolveConflict,
     caseChanged: dropHeld,
     subscribe: listener => {
       listeners.add(listener);

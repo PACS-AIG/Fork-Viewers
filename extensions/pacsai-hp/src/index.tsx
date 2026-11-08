@@ -51,7 +51,12 @@ import initMomentumScroll from './momentum/initMomentumScroll';
 import initPerfusion4DProvider from './perfusion/initPerfusion4DProvider';
 import registerHangingAttributes from './protocols/hangingAttributes';
 import { endCaseBrowsingMode } from './allinone/browsingMode';
-import { arrangeCaseChanged, openArrangeFromMenu } from './arrange/arrangeHost';
+import {
+  arrangeCaseChanged,
+  hangingCaseEntered,
+  hangingCaseLeft,
+  openArrangeFromMenu,
+} from './arrange/arrangeHost';
 
 /** Sync type registered for cross-study (current vs prior) relative scroll sync. */
 export const SCROLL_SYNC_TYPE = 'pacsaiscroll';
@@ -200,4 +205,7 @@ export {
   endCaseBrowsingMode,
   arrangeCaseChanged,
   openArrangeFromMenu,
+  // PR 2: the reader's hanging presets, read at the reading window's case entry.
+  hangingCaseEntered,
+  hangingCaseLeft,
 };

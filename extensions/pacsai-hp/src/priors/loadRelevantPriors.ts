@@ -27,7 +27,9 @@ import type { StudyLike } from './types';
 import getImagePlane from '../utils/getImagePlane';
 import getImageKernel from '../utils/getImageKernel';
 import syncAllInOneDisplaySets from '../allinone/buildAllInOneDisplaySet';
-import { getBrowsingMode, protocolIdForMode } from '../allinone/browsingMode';
+// Rev 11 milestone 7, PR 2: the reader's preset for the study type at the re-hang.
+import { applyRehangLayout, planCaseRehang, PRESET_WAIT_MS } from '../arrange/caseHanging';
+import { awaitHangingPresets } from '../arrange/presetStore';
 
 /**
  * Auto-loads the most relevant prior study/studies for the active study and
@@ -433,16 +435,31 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       // so its all-in-one stage becomes navigable — a single study still gets the
       // one-scroll view (and an "all-in-one only" mode would have something to show).
       syncAllInOneDisplaySets({ servicesManager, extensionManager });
+      // Milestone 7: the reader's presets, read at the case's entry (in the reading
+      // window only; at once elsewhere), so the re-hang below can apply theirs.
+      await awaitHangingPresets(PRESET_WAIT_MS);
+      if (noLongerTheCase('hanging presets')) {
+        return;
+      }
       const currentStudy = DicomMetadataStore.getStudy(currentStudyUID);
       const activeDisplaySets = displaySetService.getActiveDisplaySets();
       if (currentStudy) {
         // Honor the browsing mode: append/current -> this compare protocol (all-in-one
         // last stage; identical here, there being no prior to suppress); allinone -> the
-        // all-in-one-only protocol; manual -> stock default.
+        // all-in-one-only protocol; manual -> stock default. In the reading window the
+        // reader's preset for the study type may stand instead (caseHanging.ts).
+        const rehang = planCaseRehang(
+          hangingProtocolService,
+          protocol,
+          currentStudyUID,
+          activeDisplaySets,
+          currentStudy
+        );
         hangingProtocolService.run(
           { studies: [currentStudy], displaySets: activeDisplaySets, activeStudy: currentStudy },
-          protocolIdForMode(getBrowsingMode(), protocol.id) ?? protocol.id
+          rehang.runId
         );
+        applyRehangLayout(hangingProtocolService, rehang);
       }
       // Dump the current study's series + planned stages so a no-prior / no-sibling
       // case (US, single study, special-case protocol) is inspectable.
@@ -512,7 +529,16 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
       // prior stays loaded/co-visible in the rail); allinone -> the dedicated
       // all-in-one-only protocol; manual -> stock default. Prior discovery above used
       // the compare protocol's policy regardless, so priors are loaded either way.
-      const appliedProtocolId = protocolIdForMode(getBrowsingMode(), protocol.id) ?? protocol.id;
+      // In the reading window the reader's preset for the study type may stand
+      // instead, its layout put up once the protocol has run (caseHanging.ts).
+      const rehang = planCaseRehang(
+        hangingProtocolService,
+        protocol,
+        currentStudyUID,
+        activeDisplaySets,
+        orderedStudies[0]
+      );
+      const appliedProtocolId = rehang.runId;
       hangingProtocolService.run(
         {
           studies: orderedStudies,
@@ -521,6 +547,7 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
         },
         appliedProtocolId
       );
+      applyRehangLayout(hangingProtocolService, rehang);
 
       // Debug: log the full planned protocol — every stage with the series each
       // viewport's selector resolves to (replays the matcher's rule eval, so it is
@@ -547,6 +574,13 @@ export async function loadRelevantPriors({ servicesManager, extensionManager }: 
             !ds?.unsupported &&
             ds?.numImageFrames > 0
         );
+
+    // Milestone 7: the reader's presets, read at the case's entry (in the reading
+    // window only; at once elsewhere), so the re-hang can apply theirs.
+    await awaitHangingPresets(PRESET_WAIT_MS);
+    if (noLongerTheCase('hanging presets')) {
+      return;
+    }
 
     log('re-hanging', protocol.id, 'with studies', [currentStudyUID, ...extraUIDs]);
     reHang();

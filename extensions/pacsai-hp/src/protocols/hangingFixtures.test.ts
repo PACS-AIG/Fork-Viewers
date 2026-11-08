@@ -36,50 +36,24 @@ import fs from 'fs';
 // eslint-disable-next-line import/first
 import path from 'path';
 // eslint-disable-next-line import/first
-import HangingProtocolService from '../../../../platform/core/src/services/HangingProtocolService/HangingProtocolService';
-// eslint-disable-next-line import/first
-import getHangingProtocolModule from '../getHangingProtocolModule';
-// eslint-disable-next-line import/first
-import getDefaultHangingProtocolModule from '../../../default/src/getHangingProtocolModule';
-// eslint-disable-next-line import/first
-import registerHangingAttributes from './hangingAttributes';
+import {
+  compositeOf,
+  makeStudy,
+  modeProtocolIds,
+  newService,
+  type DS,
+  type Study,
+  type StudySpec,
+} from './__fixtures__/hangingHarness';
 // eslint-disable-next-line import/first
 import { clearComparisonRoles, setComparisonRoles } from '../priors/roleRegistry';
 // eslint-disable-next-line import/first
 import { setBrowsingMode, protocolIdForMode, type BrowsingMode } from '../allinone/browsingMode';
 
 const BASELINE = path.join(__dirname, '__fixtures__', 'hanging-baseline.json');
-const LONGITUDINAL_MODE = path.join(__dirname, '../../../../modes/longitudinal/src/index.ts');
-
-/** The protocol ids the reading modes offer, in the mode's order (radcopilot reuses longitudinal's). */
-function modeProtocolIds(): string[] {
-  const src = fs.readFileSync(LONGITUDINAL_MODE, 'utf8');
-  const m = src.match(/hangingProtocol:\s*\[([\s\S]*?)\]/);
-  if (!m) {
-    throw new Error('the longitudinal mode lists no hangingProtocol');
-  }
-  return [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]);
-}
 
 // ---- synthetic studies ----------------------------------------------------------
 
-type SeriesSpec = {
-  /** SeriesDescription (carries the plane word, kernel and keywords the selectors read). */
-  d: string;
-  /** Number of images (default 60). */
-  n?: number;
-  /** ConvolutionKernel (CT). */
-  k?: string;
-  /** Modality (default the study's). */
-  m?: string;
-  /** PhotometricInterpretation (default MONOCHROME2). */
-  p?: string;
-  /** A time-resolved (4D) source. */
-  dyn?: boolean;
-  /** ImageType (default ORIGINAL\PRIMARY\AXIAL). */
-  t?: string;
-};
-type StudySpec = { desc: string; modality: string; series: SeriesSpec[]; date: string };
 type Scenario = {
   name: string;
   current: StudySpec;
@@ -476,107 +450,6 @@ const SCENARIOS: Scenario[] = [
     },
   },
 ];
-
-type DS = Record<string, any>;
-type Study = Record<string, any>;
-
-function makeStudy(spec: StudySpec, tag: string): { study: Study; displaySets: DS[] } {
-  const StudyInstanceUID = `9.9.study.${tag}`;
-  const modalities = [...new Set([spec.modality, ...spec.series.map(s => s.m ?? spec.modality)])];
-  const study: Study = {
-    StudyInstanceUID,
-    StudyDescription: spec.desc,
-    ModalitiesInStudy: modalities.join('\\'),
-    StudyDate: spec.date,
-  };
-  const displaySets = spec.series.map((s, i) => {
-    const uid = `${StudyInstanceUID}.s${i + 1}`;
-    const n = s.n ?? 60;
-    const modality = s.m ?? spec.modality;
-    const instance = {
-      StudyInstanceUID,
-      StudyDescription: spec.desc,
-      SeriesDescription: s.d,
-      Modality: modality,
-      ConvolutionKernel: s.k,
-      PhotometricInterpretation: s.p ?? 'MONOCHROME2',
-      ImageType: (s.t ?? 'ORIGINAL\\PRIMARY\\AXIAL').split('\\'),
-      SamplesPerPixel: s.p === 'RGB' ? 3 : 1,
-    };
-    return {
-      StudyInstanceUID,
-      SeriesInstanceUID: uid,
-      displaySetInstanceUID: uid,
-      Modality: modality,
-      SeriesNumber: i + 1,
-      SeriesDescription: s.d,
-      SeriesDate: spec.date,
-      numImageFrames: n,
-      isDynamicVolume: !!s.dyn,
-      images: Array.from({ length: Math.min(n, 3) }, () => instance),
-      instances: Array.from({ length: Math.min(n, 3) }, () => instance),
-      instance,
-    } as DS;
-  });
-  return { study, displaySets };
-}
-
-/** The all-in-one composite loadRelevantPriors builds per loaded study (buildAllInOneDisplaySet). */
-function compositeOf(study: Study, displaySets: DS[]): DS | null {
-  const sources = displaySets.filter(
-    ds =>
-      ds.Modality !== 'SR' &&
-      ds.Modality !== 'US' &&
-      !/topo|scout|bolus/i.test(ds.SeriesDescription)
-  );
-  if (sources.length < 2) {
-    return null;
-  }
-  const uid = `${study.StudyInstanceUID}.allinone`;
-  return {
-    StudyInstanceUID: study.StudyInstanceUID,
-    SeriesInstanceUID: uid,
-    displaySetInstanceUID: uid,
-    SeriesNumber: 99999,
-    Modality: sources[0].Modality,
-    SeriesDescription: `All-in-one (${sources.length} series)`,
-    numImageFrames: sources.reduce((a, ds) => a + ds.numImageFrames, 0),
-    isReconstructable: false,
-    isAllInOne: true,
-    images: sources[0].images,
-    instances: sources[0].instances,
-    instance: sources[0].instance,
-  };
-}
-
-// ---- hanging through OHIF's own service ------------------------------------------
-
-function newService(activeDisplaySets: () => DS[]) {
-  const hps = new HangingProtocolService({ run: jest.fn() } as never, { services: {} } as never);
-  registerHangingAttributes({
-    hangingProtocolService: hps as never,
-    displaySetService: { getActiveDisplaySets: activeDisplaySets },
-  });
-  const all = new Map<string, any>();
-  for (const { name, protocol } of getHangingProtocolModule()) {
-    all.set(name, protocol);
-  }
-  for (const { name, protocol } of getDefaultHangingProtocolModule()) {
-    if (!all.has(name)) {
-      all.set(name, protocol);
-    }
-  }
-  const ids = modeProtocolIds();
-  for (const id of ids) {
-    const protocol = all.get(id);
-    if (!protocol) {
-      throw new Error(`the mode lists ${id}, which no extension registers`);
-    }
-    hps.addProtocol(id, protocol);
-  }
-  hps.setActiveProtocolIds(ids);
-  return hps;
-}
 
 type StageRecord = {
   index: number;

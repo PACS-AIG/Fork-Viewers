@@ -242,3 +242,89 @@ describe('Arrange in the header (milestone 7)', () => {
     }
   });
 });
+
+describe("Arrange's study type (milestone 7, PR 2, N06)", () => {
+  const KEY = 'v1|CT|@pacsai/compareCTChest';
+  const entries: Record<string, { revision: number; preset: unknown; at: string }> = {};
+  const saves: Array<{ key: string; expected: number }> = [];
+  let conflictNext: { revision: number; preset: unknown; at: string } | null = null;
+  const presets = {
+    state: () => 'ready' as const,
+    entry: (k: string) => (entries[k] as never) ?? null,
+    save: async (key: string, preset: unknown, expected: number) => {
+      saves.push({ key, expected });
+      if (conflictNext) {
+        const current = conflictNext;
+        conflictNext = null;
+        entries[key] = current;
+        return { ok: false as const, conflict: current as never };
+      }
+      const entry = { revision: (entries[key]?.revision ?? 0) + 1, preset, at: 'now' };
+      entries[key] = entry;
+      return { ok: true as const, entry: entry as never };
+    },
+    markCaseChoice: () => undefined,
+    applied: () => null,
+  };
+  const plain = { displaySets: deps.displaySets };
+  beforeEach(() => {
+    deps.presets = presets;
+    deps.displaySets = () => [{ StudyInstanceUID: 'A', Modality: 'CT' }] as never;
+    for (const k of Object.keys(entries)) {
+      delete entries[k];
+    }
+    saves.length = 0;
+    conflictNext = null;
+  });
+  afterEach(() => {
+    deps.presets = undefined;
+    deps.displaySets = plain.displaySets;
+  });
+
+  it("says whose layout the case shows and what Save keeps; one click saves the type's preset, its scope in its title", async () => {
+    render(<ArrangeControl />);
+    fireEvent.click(screen.getByRole('button', { name: /Arrange/ }), { detail: 1 });
+    expect(screen.getByText("CT Chest studies · the site's layout")).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Save keeps: CT Chest Compare · Axial Lung (current/prior) · prior when available'
+      )
+    ).toBeTruthy();
+    const save = screen.getByRole('button', { name: 'Save for CT Chest studies' });
+    expect(save.getAttribute('title')).toBe(
+      "Your CT Chest studies will open this way. Other study types, the site's layout and your workspace stay as they are."
+    );
+    // No Reset until there is something of the reader's to reset; the pointer never takes the focus.
+    expect(screen.queryByRole('button', { name: /^Reset CT Chest/ })).toBeNull();
+    expect(fireEvent.mouseDown(save)).toBe(false);
+    await act(async () => {
+      fireEvent.click(save);
+    });
+    expect(saves).toEqual([{ key: KEY, expected: 0 }]);
+    expect(screen.getByText('Saved for your CT Chest studies.')).toBeTruthy();
+    expect(screen.getByText('CT Chest studies · your layout')).toBeTruthy();
+    expect(screen.getByText(/^Using your CT Chest layout: /)).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: "Reset CT Chest to the site's layout" })
+    ).toBeTruthy();
+  });
+
+  it('a save another window made since is shown, with Replace and Keep theirs', async () => {
+    render(<ArrangeControl />);
+    fireEvent.click(screen.getByRole('button', { name: /Arrange/ }), { detail: 1 });
+    fireEvent.click(screen.getByRole('radio', { name: 'Coronal (current/prior)' }));
+    conflictNext = { revision: 4, preset: { summary: 'Theirs' }, at: 'y' };
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save for CT Chest studies' }));
+    });
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Another window saved a CT Chest layout since this one opened: Theirs.'
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Keep theirs' }));
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(saves).toHaveLength(1);
+    expect(screen.getByText('Kept the CT Chest layout saved in another window.')).toBeTruthy();
+  });
+});

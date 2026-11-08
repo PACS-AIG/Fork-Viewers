@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { currentArrange, takeArrangeFocusRequest } from '../arrange/arrangeHost';
-import type { Arrange, ArrangeView } from '../arrange/arrangeSession';
+import type { Arrange, ArrangeView, PresetView } from '../arrange/arrangeSession';
 import { DOCK_Z_INDEX } from './readingDock';
 import { currentReadingDock, onReadingDockChange } from './session';
 
@@ -10,7 +10,8 @@ import { currentReadingDock, onReadingDockChange } from './session';
  * reading window's header: one panel, two groups (docs/12 §3).
  *
  *   Images     the hanging in use; the protocols that match, All-in-one only
- *              and Manual; with or without the prior; the protocol's layouts.
+ *              and Manual; with or without the prior; the protocol's layouts;
+ *              Save for <study type> studies and Reset it (PR 2, N06).
  *   Workspace  Images / Both / Report, the report's width; Save this layout
  *              (the Saved default), Restore saved, a modality's own layout.
  *
@@ -116,6 +117,156 @@ function Choice({
     >
       {label}
     </button>
+  );
+}
+
+/** A button that wraps its words (a study type's name can be long), never taking the focus from the pointer. */
+const ACTION: React.CSSProperties = {
+  ...CHOICE,
+  height: 'auto',
+  minHeight: 28,
+  lineHeight: '18px',
+  padding: '4px 8px',
+  whiteSpace: 'normal',
+  textAlign: 'left',
+};
+
+/**
+ * PR 2 (N06): the Images group's study type. One line says whose layout the
+ * case shows; Save for <type> studies keeps the images above as the reader's
+ * own for the type (the line above it says what it keeps, and its title where:
+ * nothing else changes), Reset puts the type back to the site's layout. A save
+ * made in another window since this one read it is shown, to replace or keep.
+ */
+function StudyTypePresets({ arrange, preset }: { arrange: Arrange; preset: PresetView }) {
+  const label = preset.type.label;
+  const scope = preset.inUse
+    ? 'your layout'
+    : preset.saved
+      ? 'you have your own layout'
+      : "the site's layout";
+  const waiting =
+    preset.state === 'loading'
+      ? 'Reading your saved layouts…'
+      : preset.state === 'failed'
+        ? 'Your saved layouts could not be read: saving waits.'
+        : null;
+  return (
+    <div
+      data-arrange-study-type={label}
+      style={{
+        marginTop: 10,
+        paddingTop: 8,
+        borderTop: '1px dashed rgb(var(--pacs-border-strong))',
+      }}
+    >
+      <div
+        data-arrange-type-line=""
+        style={{ ...LABEL, marginTop: 0 }}
+      >
+        {`${label} studies · ${scope}`}
+      </div>
+      {preset.missingLayout && (
+        <div
+          data-arrange-type-fallback=""
+          style={{ ...LABEL, marginTop: 2 }}
+        >
+          {`Your layout “${preset.missingLayout}” needs series this case lacks: its protocol's first layout is shown.`}
+        </div>
+      )}
+      {preset.candidate && !preset.inUse && (
+        <div
+          data-arrange-candidate=""
+          style={{ fontSize: 12.5, margin: '2px 0 4px' }}
+        >
+          {`Save keeps: ${preset.candidate}`}
+        </div>
+      )}
+      <div style={{ ...ROW, flexDirection: 'column', alignItems: 'stretch' }}>
+        <button
+          type="button"
+          data-arrange-save-type=""
+          disabled={!preset.canSave}
+          title={`Your ${label} studies will open this way. Other study types, the site's layout and your workspace stay as they are.`}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => void arrange.saveForStudyType()}
+          style={{
+            ...ACTION,
+            opacity: preset.canSave ? 1 : 0.45,
+            cursor: preset.canSave ? 'pointer' : 'not-allowed',
+          }}
+        >
+          {preset.busy ? 'Saving…' : `Save for ${label} studies`}
+        </button>
+        {preset.saved && (
+          <button
+            type="button"
+            data-arrange-reset-type=""
+            disabled={!preset.canReset}
+            title={`Forget your ${label} layout: these studies open with the site's again. Nothing else changes.`}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => void arrange.resetStudyType()}
+            style={{
+              ...ACTION,
+              opacity: preset.canReset ? 1 : 0.45,
+              cursor: preset.canReset ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {`Reset ${label} to the site's layout`}
+          </button>
+        )}
+      </div>
+      {waiting && (
+        <div
+          data-arrange-type-waiting=""
+          style={{ ...LABEL, marginTop: 4 }}
+        >
+          {waiting}
+        </div>
+      )}
+      {preset.conflict && (
+        <div
+          role="alert"
+          data-arrange-conflict=""
+          style={{ ...LABEL, color: '#F5C36B', marginTop: 6 }}
+        >
+          <div>
+            {preset.conflict.summary
+              ? `Another window saved a ${label} layout since this one opened: ${preset.conflict.summary}.`
+              : `Another window reset ${label} to the site's layout since this one opened.`}
+          </div>
+          <div style={{ ...ROW, marginTop: 4 }}>
+            <button
+              type="button"
+              data-arrange-conflict-replace=""
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => void arrange.resolveConflict('replace')}
+              style={CHOICE}
+            >
+              Replace with this one
+            </button>
+            <button
+              type="button"
+              data-arrange-conflict-keep=""
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => void arrange.resolveConflict('keep')}
+              style={CHOICE}
+            >
+              Keep theirs
+            </button>
+          </div>
+        </div>
+      )}
+      {preset.status && (
+        <div
+          role="status"
+          data-arrange-type-status=""
+          style={{ ...LABEL, marginTop: 6 }}
+        >
+          {preset.status}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -259,6 +410,12 @@ function ArrangePanel({
               </div>
             )}
           </>
+        )}
+        {view.preset && (
+          <StudyTypePresets
+            arrange={arrange}
+            preset={view.preset}
+          />
         )}
       </section>
       {ws && (

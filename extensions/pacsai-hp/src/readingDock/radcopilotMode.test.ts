@@ -59,9 +59,14 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   endCaseBrowsingMode: jest.requireActual('../allinone/browsingMode').endCaseBrowsingMode,
   arrangeCaseChanged: jest.fn(),
   openArrangeFromMenu: jest.fn(),
+  // PR 2: the reader's hanging presets, read at the case's entry.
+  hangingCaseEntered: jest.fn(),
+  hangingCaseLeft: jest.fn(),
 }));
 
 import longitudinal from '@ohif/mode-longitudinal';
+// eslint-disable-next-line import/first
+import { hangingCaseEntered, hangingCaseLeft } from '@ohif/extension-pacsai-hp';
 import radcopilot, { RADCOPILOT_HOTKEYS_NAME } from '../../../../modes/radcopilot/src/index';
 import { currentReadingDock } from './session';
 // eslint-disable-next-line import/first
@@ -238,6 +243,25 @@ describe('the radcopilot mode', () => {
     // 22 Oct: one item, so the report's microphone keeps to the buttons' row.
     expect(on.sections.secondary).toEqual(['ReadingModes']);
     expect(on.buttons).toEqual([{ id: 'ReadingModes', uiType: 'pacsai.readingModes', props: {} }]);
+  });
+
+  it('milestone 7, PR 2: each case entry starts the case and reads the presets only with the reading dock; leaving suspends them', () => {
+    const entered = hangingCaseEntered as jest.Mock;
+    const left = hangingCaseLeft as jest.Mock;
+    entered.mockClear();
+    left.mockClear();
+    const m = radcopilot.modeFactory({});
+    m.onModeEnter.call(m, { servicesManager: services().servicesManager });
+    expect(entered.mock.calls).toEqual([[false]]);
+    (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
+    m.onModeEnter.call(m, { servicesManager: services().servicesManager });
+    expect(entered.mock.calls).toEqual([[false], [true]]);
+    // Before longitudinal's own entry, whose first hang the prior loader re-hangs.
+    expect(entered.mock.invocationCallOrder[1]).toBeLessThan(
+      mockBase.onModeEnter.mock.invocationCallOrder.at(-1) as number
+    );
+    m.onModeExit.call(m, {});
+    expect(left).toHaveBeenCalledTimes(1);
   });
 
   it("with READING_DOCK on, turns OHIF's own report prompts off for this mode only (a mode customization)", () => {
