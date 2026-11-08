@@ -296,6 +296,26 @@ export interface ReadingDock {
   /** The viewer's gear menu: the report's settings and its quiet_workspace
    *  switch, once the report is up and only as far as the island has them. */
   menuOptions: () => ReadingMenuOption[];
+  /** Milestone 7 (Arrange): the layout in use, the reader's mode and the report's share. */
+  layoutNow: () => { mode: WorkspaceMode; reportRatio: number };
+  /** Milestone 7: the report shares this window can take (null: no split fits). */
+  splitBoundsNow: () => { min: number; max: number } | null;
+  /**
+   * Milestone 7 (Arrange's Preview): show a layout without telling the island,
+   * so nothing is remembered; the layout before the first preview is held.
+   * Refused (false) as setMode refuses Images, or once the dock is gone.
+   */
+  previewLayout: (layout: { mode?: WorkspaceMode; reportRatio?: number }) => boolean;
+  /**
+   * Milestone 7: the preview ends. Applied: the reader's choice, told to the
+   * island (remembered as every layout the reader chooses, decision 4).
+   * Cancelled: the held layout comes back, nothing told.
+   */
+  endLayoutPreview: (apply: boolean) => void;
+  /** F56's layout items, for Arrange's Workspace group (null: the island cannot remember layouts). */
+  layoutMenu: () => { modality: string | null; ownLayout: boolean } | null;
+  /** F56's actions, at once: save as the Saved default, reset to it, a modality's own layout on/off. */
+  layoutAction: (action: 'save' | 'reset' | 'own-on' | 'own-off') => boolean;
   /**
    * 21 Oct: the viewer's Logout, taken (true) when the viewer holds the app's
    * sign-in: the report settles (its draft saved while the session still takes
@@ -414,6 +434,12 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let readerChoseThisCase = false;
   /** F56: that choice has not reached the island yet (it was not up). */
   let choiceUntold = false;
+  /** Milestone 7: the layout before Arrange's preview, while one is shown. */
+  let layoutPreview: {
+    requested: WorkspaceMode;
+    reportRatio: number;
+    fallback: PaneRole | null;
+  } | null = null;
   /** F58: the place held for the open case. */
   let held: {
     study: string;
@@ -1412,6 +1438,11 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     if (mode !== 'both') {
       fallback = mode;
     }
+    // Milestone 7: the reader's own choice while Arrange previews a layout is
+    // theirs; Arrange's Cancel no longer puts the held layout back over it.
+    if (by === 'reader') {
+      layoutPreview = null;
+    }
     apply();
     if (mode !== 'images') {
       focusReport();
@@ -1440,7 +1471,13 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       ratio > 0 &&
       ratio < 1;
     const byReader = why === 'reader';
-    if (gone || !usable || dragging !== null || (!byReader && readerChoseThisCase)) {
+    if (
+      gone ||
+      !usable ||
+      dragging !== null ||
+      layoutPreview !== null ||
+      (!byReader && readerChoseThisCase)
+    ) {
       layoutCounts.refusedRestores++;
       notify();
       return false;
@@ -1583,6 +1620,97 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     reportRatio = ratio;
     apply();
   };
+
+  // ---- milestone 7: Arrange's Workspace group --------------------------------------
+  const layoutNow = () => ({ mode: requested, reportRatio });
+  const splitBoundsNow = () => splitBounds(widthNow());
+  const previewLayout = (layout: { mode?: WorkspaceMode; reportRatio?: number }): boolean => {
+    if (gone) {
+      return false;
+    }
+    const mode = layout?.mode;
+    const ratio = layout?.reportRatio;
+    if (mode !== undefined && !READING_MODES.some(m => m.value === mode)) {
+      return false;
+    }
+    if (ratio !== undefined && !(Number.isFinite(ratio) && ratio > 0 && ratio < 1)) {
+      return false;
+    }
+    if (mode === 'images' && !dictationKnown()) {
+      counts.refusedImages++;
+      notify();
+      return false;
+    }
+    if (!layoutPreview) {
+      layoutPreview = { requested, reportRatio, fallback };
+    }
+    if (mode !== undefined) {
+      requested = mode;
+      if (mode !== 'both') {
+        fallback = mode;
+      }
+    }
+    if (ratio !== undefined) {
+      reportRatio = ratio;
+    }
+    apply();
+    return true;
+  };
+  const endLayoutPreview = (applyIt: boolean) => {
+    const held = layoutPreview;
+    if (!held || gone) {
+      layoutPreview = null;
+      return;
+    }
+    layoutPreview = null;
+    if (applyIt) {
+      if (held.requested !== requested || Math.abs(held.reportRatio - reportRatio) > 1e-9) {
+        tellLayout();
+      }
+      return;
+    }
+    requested = held.requested;
+    reportRatio = held.reportRatio;
+    fallback = held.fallback;
+    apply();
+  };
+  const islandLayoutMenu = (): { modality: string | null; ownLayout: boolean } | null => {
+    const h = handle;
+    if (gone || phase !== 'mounted' || !h) {
+      return null;
+    }
+    if (typeof h.layoutMenu !== 'function' || typeof h.layoutAction !== 'function') {
+      return null;
+    }
+    try {
+      const v = h.layoutMenu();
+      if (v && typeof v === 'object' && typeof v.ownLayout === 'boolean') {
+        const modality =
+          typeof v.modality === 'string' && /^[A-Z]{2,4}$/.test(v.modality) ? v.modality : null;
+        return { modality, ownLayout: v.ownLayout };
+      }
+    } catch (_) {
+      /* no items */
+    }
+    return null;
+  };
+  const layoutAction = (action: 'save' | 'reset' | 'own-on' | 'own-off'): boolean => {
+    const h = handle;
+    if (!islandLayoutMenu() || !h || typeof h.layoutAction !== 'function') {
+      return false;
+    }
+    // A deliberate save or reset ends any preview: the layout on screen is the
+    // one saved (or the Saved default replaces it).
+    layoutPreview = null;
+    let done = false;
+    try {
+      done = h.layoutAction(action, { mode: requested, reportRatio }) !== false;
+    } catch (_) {
+      done = false;
+    }
+    notify();
+    return done;
+  };
   const toggleDictation = (): boolean => {
     if (!handle || typeof handle.toggleDictation !== 'function') {
       return false;
@@ -1665,40 +1793,9 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
         });
       }
     }
-    // F56 (29 Oct): the reading layouts, where the island can remember them
-    // (null: the reader's settings could not be read; an older island has none).
-    if (typeof h.layoutMenu === 'function' && typeof h.layoutAction === 'function') {
-      let menu: { modality: string | null; ownLayout: boolean } | null = null;
-      try {
-        const v = h.layoutMenu();
-        if (v && typeof v === 'object' && typeof v.ownLayout === 'boolean') {
-          const modality =
-            typeof v.modality === 'string' && /^[A-Z]{2,4}$/.test(v.modality) ? v.modality : null;
-          menu = { modality, ownLayout: v.ownLayout };
-        }
-      } catch (_) {
-        menu = null;
-      }
-      if (menu) {
-        const act = (action: string) => () => {
-          try {
-            h.layoutAction?.(action, { mode: requested, reportRatio });
-          } catch (_) {
-            /* the layout stays as shown */
-          }
-          notify();
-        };
-        out.push({ title: 'Layout: save as my default', icon: 'settings', onClick: act('save') });
-        out.push({ title: 'Layout: reset to my default', icon: 'settings', onClick: act('reset') });
-        if (menu.modality) {
-          out.push({
-            title: `Own layout for ${menu.modality}: ${menu.ownLayout ? 'on' : 'off'}`,
-            icon: 'settings',
-            onClick: act(menu.ownLayout ? 'own-off' : 'own-on'),
-          });
-        }
-      }
-    }
+    // F56's layout items (save as my default, reset to it, a modality's own
+    // layout) moved to Arrange's Workspace group in milestone 7 (layoutMenu,
+    // layoutAction): one home for the layout, as docs/12 §3 asks.
     return out;
   };
 
@@ -2118,6 +2215,12 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     toggleDictation,
     focusReport,
     menuOptions,
+    layoutNow,
+    splitBoundsNow,
+    previewLayout,
+    endLayoutPreview,
+    layoutMenu: islandLayoutMenu,
+    layoutAction,
     logout,
     subscribe: listener => {
       listeners.add(listener);

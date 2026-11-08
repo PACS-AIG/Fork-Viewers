@@ -58,9 +58,18 @@ export function getBrowsingMode(): BrowsingMode {
   return mode;
 }
 
-/** Persist + broadcast a new browsing mode (no-op if unchanged or invalid). */
+/**
+ * Persist + broadcast a new browsing mode (no-op if invalid, or if it is both the
+ * mode in use and the one stored). Milestone 7: the mode in use can differ from
+ * the stored one (Arrange's preview, or a case's own mode after Use this case),
+ * so a deliberate choice of the mode already in use still stores it.
+ */
 export function setBrowsingMode(next: BrowsingMode): void {
-  if (!BROWSING_MODES.includes(next) || next === mode) {
+  if (!BROWSING_MODES.includes(next)) {
+    return;
+  }
+  const changed = next !== mode;
+  if (!changed && readStored() === next) {
     return;
   }
   mode = next;
@@ -69,7 +78,36 @@ export function setBrowsingMode(next: BrowsingMode): void {
   } catch {
     /* localStorage unavailable — keep the in-memory value */
   }
+  if (changed) {
+    listeners.forEach(cb => cb());
+  }
+}
+
+/**
+ * Rev 11 milestone 7 (Arrange): the mode in use, NOT stored. Arrange previews a
+ * browsing mode with it (Preview and Cancel never write), and Use this case
+ * keeps it for the case; the stored mode comes back with the next case
+ * (`endCaseBrowsingMode`). No-op if invalid or unchanged.
+ */
+export function previewBrowsingMode(next: BrowsingMode): void {
+  if (!BROWSING_MODES.includes(next) || next === mode) {
+    return;
+  }
+  mode = next;
   listeners.forEach(cb => cb());
+}
+
+/** The stored browsing mode (the reader's sticky choice), whatever is in use. */
+export function storedBrowsingMode(): BrowsingMode {
+  return readStored();
+}
+
+/**
+ * A case ends (the reading route's next entry): a mode kept for that case only
+ * gives way to the stored one. Nothing is written.
+ */
+export function endCaseBrowsingMode(): void {
+  previewBrowsingMode(readStored());
 }
 
 /** Subscribe to mode changes (for the toolbar control); returns an unsubscribe fn. */

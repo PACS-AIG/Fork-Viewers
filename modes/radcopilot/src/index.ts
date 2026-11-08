@@ -36,6 +36,9 @@ import {
   READING_MODES_UITYPE,
   currentReadingDock,
   ensureReadingDock,
+  endCaseBrowsingMode,
+  arrangeCaseChanged,
+  openArrangeFromMenu,
   getSessionStudies,
   launchFromQuery,
   railLayoutProps,
@@ -123,11 +126,20 @@ const sessionStudyMenuOptions = () => {
   }));
 };
 
+// Milestone 7 (8 Nov): in a window too narrow for Both, Arrange's header button
+// gives way to the image tools, as the session switcher does; the gear opens it.
+const arrangeMenuOptions = () =>
+  currentReadingDock()?.getSnapshot().narrow === true
+    ? [{ title: 'Arrange…', icon: 'settings', onClick: () => openArrangeFromMenu() }]
+    : [];
+
 // 18 Oct: the dock's items for the viewer's gear menu (stable functions, so the
 // header subscribes once): the report's settings and its quiet_workspace switch;
-// since 30 Oct the session's studies after them in a narrow window.
+// since 30 Oct the session's studies after them in a narrow window; since 8 Nov
+// (milestone 7) Arrange there too in a narrow window.
 const readingMenuOptions = () => [
   ...(currentReadingDock()?.menuOptions() ?? []),
+  ...arrangeMenuOptions(),
   ...sessionStudyMenuOptions(),
 ];
 const readingMenuSubscribe = (listener: () => void) => {
@@ -217,6 +229,10 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
       enterReadingRoute(args.servicesManager);
     },
     onModeEnter: function (args: withAppTypes<{ studyInstanceUIDs?: string[] }>) {
+      // Milestone 7: a case's own browsing mode (Arrange's Use this case) ends
+      // with the case, and an Arrange left open puts nothing into the next one.
+      arrangeCaseChanged();
+      endCaseBrowsingMode();
       base.onModeEnter.call(this, args);
       // The gear menu's session studies (a narrow window) re-hang through these.
       sessionCommands = (args as { commandsManager?: SessionCommands }).commandsManager ?? null;
@@ -241,6 +257,7 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
       // A case switch, an error route or leaving the mode: the dock decides
       // once the router has moved (readingDock.ts routeLeft).
       currentReadingDock()?.routeLeft();
+      arrangeCaseChanged();
       base.onModeExit.call(this, args);
     },
     routes: [
