@@ -234,10 +234,11 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
       // Milestone 7: a case's own browsing mode (Arrange's Use this case) ends
       // with the case, and an Arrange left open puts nothing into the next one.
       // PR 2: with the reading dock, the reader's hanging presets are read for
-      // the case (its re-hang applies theirs for its study type).
+      // the case (its re-hang applies theirs for its study type). PR 3: its
+      // interaction latch starts clear, watching the viewer's hanging.
       arrangeCaseChanged();
       endCaseBrowsingMode();
-      hangingCaseEntered(readingDockEnabled());
+      hangingCaseEntered(readingDockEnabled(), args.servicesManager?.services);
       base.onModeEnter.call(this, args);
       // The gear menu's session studies (a narrow window) re-hang through these.
       sessionCommands = (args as { commandsManager?: SessionCommands }).commandsManager ?? null;

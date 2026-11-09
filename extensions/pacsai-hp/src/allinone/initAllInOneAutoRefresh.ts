@@ -1,6 +1,7 @@
 import syncAllInOneDisplaySets from './buildAllInOneDisplaySet';
-import { rehangForMode } from './rehang';
+import { rehangCase } from './rehang';
 import { getBrowsingMode } from './browsingMode';
+import { holdOrRun, newImagesSinceHang } from '../arrange/lateArrivals';
 
 /**
  * Keep the all-in-one composites in sync with late-streaming series.
@@ -46,8 +47,17 @@ export function initAllInOneAutoRefresh({
         // all-in-one (append/current/allinone). In 'manual' the active protocol has no
         // all-in-one stage, so a re-hang would gain nothing and only reset the
         // reader's hand-arranged layout.
+        // Milestone 7, PR 3: in the reading window, once the reader has worked the
+        // images, the re-hang waits for them (lateArrivals.ts), and it is the
+        // case's plan (rehangCase), the reader's preset kept.
         if (created > 0 && getBrowsingMode() !== 'manual') {
-          rehangForMode(servicesManager);
+          holdOrRun({
+            kind: () =>
+              newImagesSinceHang(displaySetService.getActiveDisplaySets?.() ?? [])
+                ? { kind: 'images', label: null }
+                : null,
+            run: () => rehangCase(servicesManager),
+          });
         }
       } catch (error) {
         console.warn('[pacsai-hp] all-in-one auto-refresh failed', error);

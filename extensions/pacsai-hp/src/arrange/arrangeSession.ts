@@ -126,6 +126,14 @@ export interface ArrangeDeps {
   };
   /** PR 2: the reader's hanging presets (presetStore.ts); none, no study-type group. */
   presets?: ArrangePresets;
+  /**
+   * PR 3 (lateArrivals.ts): the reader chose the case's images here (Use this
+   * case with other images, Reset): later arrivals wait for them, and an
+   * update held before, the case being hung again over everything loaded, goes.
+   */
+  interaction?: () => void;
+  /** PR 3: Arrange closed by the reader (Cancel, Use this case): a re-hang held only for it may run. */
+  closed?: () => void;
 }
 
 /** The reader's hanging presets, as Arrange uses them (presetStore.ts). */
@@ -412,8 +420,9 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     presetUi = { ...presetUi, busy: false };
     if (answer.ok) {
       if (!pending) {
-        // Reset: the case shows the site's layout again.
+        // Reset: the case shows the site's layout again, the reader's choice for it.
         showSiteHanging();
+        deps.interaction?.();
       }
       // Deliberate: what was saved, or reset to, is not put back by Cancel.
       if (held) {
@@ -683,6 +692,7 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     const now = imagesNow();
     if (now && !sameImages(now, held.images)) {
       deps.presets?.markCaseChoice();
+      deps.interaction?.();
     }
     deps.dock()?.endLayoutPreview(true);
     held = null;
@@ -690,6 +700,7 @@ export function createArrange(deps: ArrangeDeps): Arrange {
     clearPresetUi();
     tally.uses++;
     notify();
+    deps.closed?.();
   };
 
   const cancel = async (): Promise<void> => {
@@ -732,6 +743,8 @@ export function createArrange(deps: ArrangeDeps): Arrange {
       }
     }
     notify();
+    // Everything held is back: a re-hang held only for the open panel may run now.
+    deps.closed?.();
   };
 
   const layoutAction = (action: 'save' | 'reset' | 'own-on' | 'own-off'): boolean => {

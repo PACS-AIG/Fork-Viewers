@@ -3,6 +3,8 @@ import { READING_MODES, micLine } from './dockModel';
 import { currentReadingDock, onReadingDockChange } from './session';
 import type { ReadingDock, ReadingDockSnapshot } from './readingDock';
 import { ArrangeControl } from './ArrangeControl';
+import { lateView, subscribeLate, type HeldUpdate } from '../arrange/lateArrivals';
+import { applyLateUpdate } from '../arrange/arrangeHost';
 
 /**
  * Rev 11 milestone 6, approach C, phase 1: the reading dock's controls in the
@@ -260,6 +262,75 @@ export function ReadingPlace(): React.ReactElement | null {
   );
 }
 
+/** Milestone 7, PR 3: what a held update brings, as the header says it. */
+export function lateLine(held: HeldUpdate): string {
+  if (held.kind === 'images') {
+    return 'New images available';
+  }
+  return held.label ? `Your ${held.label} layout` : 'Your layout';
+}
+
+/**
+ * Milestone 7, PR 3 (docs/12 §4, B31, N06): images that arrived after the
+ * reader started working them wait for the reader, offered beside Arrange as
+ * "New images available · Update layout" (only the reader's preset waiting:
+ * "Your … layout · Update layout"). Update layout hangs the case again with
+ * them; nothing else moves the layout. In a narrow window the line moves to
+ * the button's title, still read out here, as Back's does.
+ */
+export function LateLayoutNotice(): React.ReactElement | null {
+  const { snap } = useReadingDock();
+  const late = useSyncExternalStore(subscribeLate, lateView, lateView);
+  if (!snap || !late.held) {
+    return null;
+  }
+  const line = lateLine(late.held);
+  const what =
+    late.held.kind === 'images'
+      ? 'Hang the case again with the images that arrived'
+      : 'Put up your layout for this study type';
+  return (
+    <div
+      data-cy="pacsai-late-layout"
+      data-late-kind={late.held.kind}
+      style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, marginLeft: 8 }}
+    >
+      <span
+        data-late-line=""
+        role="status"
+        aria-live="polite"
+        style={
+          snap.narrow
+            ? VISUALLY_HIDDEN
+            : { fontSize: 12, whiteSpace: 'nowrap', color: 'rgb(var(--pacs-text))' }
+        }
+      >
+        {line}
+      </span>
+      {!snap.narrow && (
+        <span
+          aria-hidden="true"
+          style={{ fontSize: 12, color: 'rgb(var(--pacs-text-muted, var(--pacs-text)))' }}
+        >
+          ·
+        </span>
+      )}
+      <button
+        type="button"
+        data-late-update=""
+        title={snap.narrow ? `${line}. ${what}.` : `${what}.`}
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => {
+          void applyLateUpdate();
+        }}
+        style={{ ...SEGMENT, borderRadius: 4 }}
+      >
+        Update layout
+      </button>
+    </div>
+  );
+}
+
 /**
  * 22 Oct: the controls as the section's one item, in one row: the layout's
  * buttons, then, while the report is hidden, its microphone beside them.
@@ -280,6 +351,8 @@ export function ReadingControls(): React.ReactElement | null {
       <ReadingModeControl />
       {/* Milestone 7: Arrange beside the three modes (docs/02 §5). */}
       <ArrangeControl />
+      {/* PR 3: a re-hang held for the reader, beside Arrange. */}
+      <LateLayoutNotice />
       <ReadingMicLine />
       <ReadingPlace />
     </div>

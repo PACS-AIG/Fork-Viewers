@@ -251,11 +251,17 @@ describe('the radcopilot mode', () => {
     entered.mockClear();
     left.mockClear();
     const m = radcopilot.modeFactory({});
-    m.onModeEnter.call(m, { servicesManager: services().servicesManager });
-    expect(entered.mock.calls).toEqual([[false]]);
+    const off = services();
+    m.onModeEnter.call(m, { servicesManager: off.servicesManager });
+    // PR 3: with the viewer's services, whose hanging the case's latch watches.
+    expect(entered.mock.calls).toEqual([[false, off.servicesManager.services]]);
     (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = '1';
-    m.onModeEnter.call(m, { servicesManager: services().servicesManager });
-    expect(entered.mock.calls).toEqual([[false], [true]]);
+    const on = services();
+    m.onModeEnter.call(m, { servicesManager: on.servicesManager });
+    expect(entered.mock.calls).toEqual([
+      [false, off.servicesManager.services],
+      [true, on.servicesManager.services],
+    ]);
     // Before longitudinal's own entry, whose first hang the prior loader re-hangs.
     expect(entered.mock.invocationCallOrder[1]).toBeLessThan(
       mockBase.onModeEnter.mock.invocationCallOrder.at(-1) as number
