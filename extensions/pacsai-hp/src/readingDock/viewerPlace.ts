@@ -15,6 +15,13 @@
  * keeps the viewport it has now (or none, when that position is new), and the
  * caller names it. The study's series, by number, say what arrived meanwhile.
  * No patient data is kept or named.
+ *
+ * Rev 11 milestone 25, PR 6 (15 Nov 2026; F61's selection message, F87): what
+ * the reader is looking at, for the report (`selection`): the active viewport's
+ * study, series and image, the measurement selected (OHIF's measurement
+ * service keeps it), and whether that study is the route's own or a prior.
+ * Identifiers only, never patient data; readingDock.ts tells it to the island,
+ * which takes it when the reader starts speaking and carries it with the words.
  */
 import { seriesLabel, type SeriesSeen } from './placeModel';
 
@@ -52,6 +59,8 @@ interface DisplaySetLike {
   displaySetInstanceUID: string;
   StudyInstanceUID?: string;
   SeriesNumber?: unknown;
+  SeriesInstanceUID?: unknown;
+  images?: ReadonlyArray<{ imageId?: unknown; SOPInstanceUID?: unknown } | null | undefined>;
 }
 export interface ViewerServices {
   viewportGridService: {
@@ -68,6 +77,46 @@ export interface ViewerServices {
     getDisplaySetByUID: (uid: string) => DisplaySetLike | undefined;
     getActiveDisplaySets: () => DisplaySetLike[];
   };
+  /** Milestone 25, PR 6: the measurement selected (OHIF keeps `isSelected` from cornerstone's selection). */
+  measurementService?: {
+    getMeasurements?: () => ReadonlyArray<
+      { uid?: unknown; isSelected?: unknown } | null | undefined
+    >;
+  };
+}
+
+/** Milestone 25, PR 6 (F61, F87): what the reader is looking at, as the island takes it (`setSelection`). */
+export interface ViewerSelection {
+  studyInstanceUid: string;
+  seriesInstanceUid: string | null;
+  sopInstanceUid: string | null;
+  /** The measurement selected (its annotation's id), or null. */
+  measurement: string | null;
+  /** The route's own study, or a prior of the same patient. */
+  timepoint: 'current' | 'prior';
+}
+
+/** A DICOM UID as the island takes one (digits and dots, at most 64). */
+const DICOM_UID = /^[0-9]+(\.[0-9]+)*$/;
+const uidOf = (v: unknown): string | null =>
+  typeof v === 'string' && v.length >= 1 && v.length <= 64 && DICOM_UID.test(v) ? v : null;
+/** A measurement id as the island takes one (an annotation's UUID). */
+const MEASUREMENT_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/** The image's SOP instance: the display set's image with this imageId, else
+ *  the instance a DICOMweb (wadors) or WADO-URI imageId names; null otherwise. */
+export function sopInstanceOf(imageId: unknown, images?: DisplaySetLike['images']): string | null {
+  if (typeof imageId !== 'string' || !imageId) {
+    return null;
+  }
+  const image = images?.find(i => i?.imageId === imageId);
+  const own = uidOf(image?.SOPInstanceUID);
+  if (own) {
+    return own;
+  }
+  const m =
+    imageId.match(/\/instances\/([0-9.]+)(?:\/|$)/) ?? imageId.match(/[?&]objectUID=([0-9.]+)/);
+  return m ? uidOf(m[1]) : null;
 }
 
 export interface HeldViewport {
@@ -91,6 +140,9 @@ export interface HeldView {
 
 export interface ViewerPlace {
   capture: () => HeldView | null;
+  /** Milestone 25, PR 6: what the reader is looking at now (null: no image on
+   *  screen, or no route study to say today's from a prior by). */
+  selection: (routeStudyInstanceUid: string | null) => ViewerSelection | null;
   /** Puts the held images back; the series that could not be (no longer in the study). */
   restore: (held: HeldView) => Promise<{ missing: string[] }>;
   /** The study's series now (all studies' when none is named). */
@@ -428,5 +480,53 @@ export function createViewerPlace(services: () => ViewerServices | null, win: Wi
     }
   };
 
-  return { capture, restore, series };
+  const selection = (routeStudyInstanceUid: string | null): ViewerSelection | null => {
+    const s = services();
+    if (!s || !routeStudyInstanceUid) {
+      return null;
+    }
+    try {
+      const state = s.viewportGridService.getState();
+      const id = state?.activeViewportId;
+      const vp = id ? state.viewports?.get(id) : undefined;
+      const uid = vp?.displaySetInstanceUIDs?.[0];
+      if (!id || !uid) {
+        return null;
+      }
+      const ds = s.displaySetService.getDisplaySetByUID(uid);
+      const study = uidOf(ds?.StudyInstanceUID);
+      if (!ds || !study) {
+        return null;
+      }
+      let imageId: unknown = null;
+      try {
+        imageId = csOf(s, id)?.getCurrentImageId?.() ?? null;
+      } catch (_) {
+        imageId = null;
+      }
+      let measurement: string | null = null;
+      try {
+        const selected = s.measurementService
+          ?.getMeasurements?.()
+          ?.find(m => m?.isSelected === true);
+        measurement =
+          typeof selected?.uid === 'string' && MEASUREMENT_ID.test(selected.uid)
+            ? selected.uid
+            : null;
+      } catch (_) {
+        measurement = null;
+      }
+      return {
+        studyInstanceUid: study,
+        seriesInstanceUid: uidOf(ds.SeriesInstanceUID),
+        sopInstanceUid: sopInstanceOf(imageId, ds.images),
+        measurement,
+        timepoint: study === routeStudyInstanceUid ? 'current' : 'prior',
+      };
+    } catch (_) {
+      return null;
+    }
+  };
+
+  return { capture, restore, series, selection };
 }

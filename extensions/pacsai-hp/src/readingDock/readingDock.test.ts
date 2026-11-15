@@ -1247,3 +1247,146 @@ describe('F58: Hold / Back (29 Oct)', () => {
     expect(d.getSnapshot().place.held).toBe(true);
   });
 });
+
+/**
+ * Rev 11 milestone 25, PR 6 (F61's selection message, F87; F05): the dock tells
+ * the island what the reader is looking at (identifiers only) and the viewer's
+ * own hotkeys, and reads its own keys from the report's command list.
+ */
+import { SELECTION_EVERY_MS } from './readingDock';
+
+describe('milestone 25, PR 6: the selection and the keys', () => {
+  type Sel = {
+    studyInstanceUid: string;
+    seriesInstanceUid: string | null;
+    sopInstanceUid: string | null;
+    measurement: string | null;
+    timepoint: 'current' | 'prior';
+  };
+  function withPlace(
+    isl: ReturnType<typeof fakeIsland>,
+    start: Sel | null,
+    extra: Record<string, unknown> = {}
+  ) {
+    const at = { current: start };
+    const viewerPlace = {
+      capture: () => null,
+      restore: async () => ({ missing: [] }),
+      series: () => [],
+      selection: jest.fn(() => at.current),
+    };
+    dock = createReadingDock({
+      win: window,
+      load: async () => ({ ok: true, module: isl.module as never, build: 'test' }),
+      isReadingPath,
+      isErrorPath,
+      viewerPlace: viewerPlace as never,
+      ...extra,
+    });
+    return { d: dock, at, viewerPlace };
+  }
+  const today: Sel = {
+    studyInstanceUid: A,
+    seriesInstanceUid: '1.2.840.1.1.4',
+    sopInstanceUid: '1.2.840.1.1.4.1',
+    measurement: null,
+    timepoint: 'current',
+  };
+
+  it('tells the selection once the report is up, again only when it changed, at most once a SELECTION_EVERY_MS', async () => {
+    const isl = fakeIsland();
+    const told: unknown[] = [];
+    Object.assign(isl.handle, { setSelection: jest.fn((s: unknown) => (told.push(s), true)) });
+    const { d, at, viewerPlace } = withPlace(isl, today);
+    d.selectionChanged();
+    // no report up yet: nothing to tell
+    expect(told).toEqual([]);
+    jest.advanceTimersByTime(SELECTION_EVERY_MS);
+    d.enter(A);
+    await flush();
+    expect(told).toEqual([today]);
+    expect(viewerPlace.selection).toHaveBeenLastCalledWith(A);
+    d.selectionChanged();
+    jest.advanceTimersByTime(SELECTION_EVERY_MS);
+    expect(told).toHaveLength(1);
+    // a stack scrolled: the first change at once, the last one after the window
+    for (const n of [2, 3, 4]) {
+      at.current = { ...today, sopInstanceUid: `1.2.840.1.1.4.${n}` };
+      d.selectionChanged();
+    }
+    expect(told).toHaveLength(2);
+    jest.advanceTimersByTime(SELECTION_EVERY_MS);
+    expect(told).toHaveLength(3);
+    expect((told[2] as Sel).sopInstanceUid).toBe('1.2.840.1.1.4.4');
+    at.current = null;
+    d.selectionChanged();
+    jest.advanceTimersByTime(SELECTION_EVERY_MS);
+    expect(told).toHaveLength(4);
+    expect(told[3]).toBeNull();
+  });
+
+  it('a selection the island refused is told again at the next change; an island without setSelection is told nothing', async () => {
+    const isl = fakeIsland();
+    let take = false;
+    const setSelection = jest.fn(() => take);
+    Object.assign(isl.handle, { setSelection });
+    const { d } = withPlace(isl, today);
+    d.enter(A);
+    await flush();
+    expect(setSelection).toHaveBeenCalledTimes(1);
+    take = true;
+    jest.advanceTimersByTime(SELECTION_EVERY_MS);
+    d.selectionChanged();
+    expect(setSelection).toHaveBeenCalledTimes(2);
+    await d.destroy();
+    const old = fakeIsland();
+    const { d: d2 } = withPlace(old, today);
+    d2.enter(A);
+    await flush();
+    expect(() => d2.selectionChanged()).not.toThrow();
+  });
+
+  it("tells the viewer's own hotkeys at the mount", async () => {
+    const isl = fakeIsland();
+    const setViewerKeys = jest.fn(() => true);
+    Object.assign(isl.handle, { setViewerKeys });
+    const hotkeys = [
+      { label: 'Zoom', keys: ['z'] },
+      { label: 'Reading layout: Images', keys: ['alt+1'] },
+    ];
+    const { d } = withPlace(isl, today, { viewerHotkeys: () => hotkeys });
+    d.enter(A);
+    await flush();
+    expect(setViewerKeys).toHaveBeenCalledWith(hotkeys);
+  });
+
+  it("reads its own keys from the report's list: Hold on the key the list gives it", async () => {
+    const isl = fakeIsland();
+    Object.assign(isl.handle, {
+      commands: () => [{ id: 'hold', label: 'Hold', by: 'viewer', keys: ['alt+j'], spoken: true }],
+      holdPlace: jest.fn(() => true),
+    });
+    const { d } = withPlace(isl, today);
+    d.enter(A);
+    await flush();
+    const before = d.getSnapshot().place.holds;
+    const listed = new KeyboardEvent('keydown', {
+      code: 'KeyJ',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(listed);
+    expect(listed.defaultPrevented).toBe(true);
+    expect(d.getSnapshot().place.holds).toBe(before + 1);
+    const old = new KeyboardEvent('keydown', {
+      code: 'KeyH',
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(old);
+    expect(old.defaultPrevented).toBe(false);
+    expect(d.getSnapshot().place.holds).toBe(before + 1);
+  });
+});

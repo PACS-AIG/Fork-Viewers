@@ -46,6 +46,97 @@ export const isMicKey = (
 ): boolean =>
   e.code === READING_MIC_KEY.code && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
 
+/**
+ * Rev 11 milestone 25, PR 6 (F05: one definition per command). The dock's own
+ * commands, by the ids of the report's command list (the app's
+ * commandCatalog.ts), which the island hands over (`commands()`): the dock
+ * reads its keys from that list once the report is up. Until then, or from an
+ * island without the list, these, which are the same keys.
+ */
+export type DockCommandId =
+  | 'mode-images'
+  | 'mode-both'
+  | 'mode-report'
+  | 'hold'
+  | 'back'
+  | 'microphone';
+const DOCK_COMMAND_IDS: readonly DockCommandId[] = [
+  'mode-images',
+  'mode-both',
+  'mode-report',
+  'hold',
+  'back',
+  'microphone',
+];
+export const DOCK_KEYS: Readonly<Record<DockCommandId, readonly string[]>> = Object.freeze({
+  'mode-images': READING_MODES[0].keys,
+  'mode-both': READING_MODES[1].keys,
+  'mode-report': READING_MODES[2].keys,
+  // F58: Hold and Back
+  hold: ['alt+h'],
+  back: ['alt+b'],
+  microphone: READING_MIC_KEY.keys,
+});
+
+/** A key in the list's form ("alt+h", "f4"): modifiers in one order, then the key. */
+const LIST_KEY = /^(?:(?:ctrl|alt|shift|meta)\+)*(?:[a-z0-9]|f[0-9]{1,2})$/;
+
+/** The dock's keys from the island's command list: each of the dock's commands
+ *  that the list gives to the viewer, with keys in the list's form; any other
+ *  keeps its own. */
+export function dockKeysOf(commands: unknown): Record<DockCommandId, readonly string[]> {
+  const out: Record<DockCommandId, readonly string[]> = { ...DOCK_KEYS };
+  if (!Array.isArray(commands)) {
+    return out;
+  }
+  for (const c of commands) {
+    const o = c as { id?: unknown; by?: unknown; keys?: unknown } | null;
+    if (!o || o.by !== 'viewer' || !DOCK_COMMAND_IDS.includes(o.id as DockCommandId)) {
+      continue;
+    }
+    const keys = Array.isArray(o.keys)
+      ? o.keys.filter((k): k is string => typeof k === 'string' && LIST_KEY.test(k))
+      : [];
+    if (keys.length) {
+      out[o.id as DockCommandId] = keys;
+    }
+  }
+  return out;
+}
+
+/** A keydown as the list writes keys: its physical key (the event's `code`, so
+ *  Option+H on a Mac is "alt+h"), letters, digits of the main row and function
+ *  keys only; null for anything else. */
+export function keyOfEvent(
+  e: Pick<KeyboardEvent, 'code' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>
+): string | null {
+  const code = String(e.code ?? '');
+  const m =
+    code.match(/^Key([A-Z])$/) ?? code.match(/^Digit([0-9])$/) ?? code.match(/^(F[0-9]{1,2})$/);
+  if (!m) {
+    return null;
+  }
+  const mods = [
+    e.ctrlKey && 'ctrl',
+    e.altKey && 'alt',
+    e.shiftKey && 'shift',
+    e.metaKey && 'meta',
+  ].filter(Boolean);
+  return [...mods, m[1].toLowerCase()].join('+');
+}
+
+/** Which of the dock's commands this keydown is, by these keys; null: none. */
+export function dockCommandOf(
+  e: Pick<KeyboardEvent, 'code' | 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>,
+  keys: Readonly<Record<DockCommandId, readonly string[]>>
+): DockCommandId | null {
+  const key = keyOfEvent(e);
+  if (!key) {
+    return null;
+  }
+  return DOCK_COMMAND_IDS.find(id => keys[id]?.includes(key)) ?? null;
+}
+
 export interface DockInput {
   /** The mode the reader chose. */
   requested: WorkspaceMode;

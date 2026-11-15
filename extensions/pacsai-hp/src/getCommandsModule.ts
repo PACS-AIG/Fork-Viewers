@@ -6,7 +6,7 @@ import { rehangForMode } from './allinone/rehang';
 import { toggleClinicalContextVisibility } from './clinicalContext/clinicalContextStore';
 import activeViewportHasCT from './utils/activeViewportHasCT';
 import HotkeysHelp from './components/HotkeysHelp';
-import { currentReadingDock } from './readingDock/session';
+import { currentReadingDock, setReadingHotkeys } from './readingDock/session';
 // Rev 11 milestone 7, PR 2: the toolbar's browsing mode is the reader's choice for
 // the case (no preset overrides it); another study focused starts its own.
 import { markCaseChoice, startHangingCase } from './arrange/presetStore';
@@ -18,6 +18,9 @@ const getCommandsModule = ({
   commandsManager,
   hotkeysManager,
 }: Types.Extensions.ExtensionParams): Types.Extensions.CommandsModule => {
+  // Rev 11 milestone 25, PR 6 (F05): the viewer's own hotkeys, for the report's
+  // sign-key clash refusal (the reading dock tells them to the island).
+  setReadingHotkeys(hotkeysManager);
   const actions = {
     /**
      * Finds, loads, and hangs the most relevant prior study/studies for the

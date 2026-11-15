@@ -120,3 +120,66 @@ describe('the microphone key', () => {
     expect(isMicKey(key({ code: 'Digit4' }))).toBe(false);
   });
 });
+
+/**
+ * Rev 11 milestone 25, PR 6 (F05: one definition per command): the dock's keys
+ * from the report's command list, its own until the list answers.
+ */
+import { DOCK_KEYS, dockCommandOf, dockKeysOf, keyOfEvent } from './dockModel';
+
+describe("the dock's keys from the report's command list (milestone 25, PR 6)", () => {
+  const press = (
+    code: string,
+    mods: Partial<Record<'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey', boolean>> = {}
+  ) => ({
+    code,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    ...mods,
+  });
+
+  it('its own keys are the ones it had: Alt+1/2/3, Alt+H, Alt+B and plain F4, nothing else', () => {
+    expect(dockCommandOf(press('Digit1', { altKey: true }), DOCK_KEYS)).toBe('mode-images');
+    expect(dockCommandOf(press('Digit3', { altKey: true }), DOCK_KEYS)).toBe('mode-report');
+    expect(dockCommandOf(press('KeyH', { altKey: true }), DOCK_KEYS)).toBe('hold');
+    expect(dockCommandOf(press('KeyB', { altKey: true }), DOCK_KEYS)).toBe('back');
+    expect(dockCommandOf(press('F4'), DOCK_KEYS)).toBe('microphone');
+    for (const p of [
+      press('F4', { altKey: true }),
+      press('F4', { ctrlKey: true }),
+      press('KeyH', { altKey: true, shiftKey: true }),
+      press('Digit1', { altKey: true, ctrlKey: true }),
+      press('Digit1'),
+      press('Numpad1', { altKey: true }),
+      press('KeyH'),
+    ]) {
+      expect(dockCommandOf(p, DOCK_KEYS)).toBeNull();
+    }
+  });
+
+  it('the physical key, as the list writes it (Option+H on a Mac is alt+h)', () => {
+    expect(keyOfEvent(press('KeyH', { altKey: true }))).toBe('alt+h');
+    expect(keyOfEvent(press('Digit2', { ctrlKey: true, altKey: true }))).toBe('ctrl+alt+2');
+    expect(keyOfEvent(press('F12', { shiftKey: true, metaKey: true }))).toBe('shift+meta+f12');
+    expect(keyOfEvent(press('ShiftLeft', { shiftKey: true }))).toBeNull();
+    expect(keyOfEvent(press('Enter'))).toBeNull();
+  });
+
+  it("takes the list's keys for its own commands, the viewer's only; keeps its own for anything else", () => {
+    const keys = dockKeysOf([
+      { id: 'hold', label: 'Hold', by: 'viewer', keys: ['alt+j'], spoken: true },
+      { id: 'sign', label: 'Sign', by: 'report', keys: ['alt+s'], spoken: false },
+      { id: 'back', label: 'Back', by: 'report', keys: ['alt+k'], spoken: true },
+      { id: 'microphone', label: 'Microphone', by: 'viewer', keys: ['not a key!'], spoken: false },
+    ]);
+    expect(keys.hold).toEqual(['alt+j']);
+    expect(dockCommandOf(press('KeyJ', { altKey: true }), keys)).toBe('hold');
+    expect(dockCommandOf(press('KeyH', { altKey: true }), keys)).toBeNull();
+    expect(keys.back).toEqual(DOCK_KEYS.back);
+    expect(keys.microphone).toEqual(DOCK_KEYS.microphone);
+    expect(dockKeysOf(undefined)).toEqual(DOCK_KEYS);
+    expect(dockKeysOf({})).toEqual(DOCK_KEYS);
+  });
+});
