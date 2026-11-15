@@ -69,14 +69,17 @@ import {
   type WorkspaceMode,
 } from './readingLayout';
 import {
+  DOCK_KEYS,
   IMAGES_GONE_LINE_PX,
   READING_MODES,
   afterShown,
+  dockCommandOf,
+  dockKeysOf,
   dockView,
   isDictationState,
-  isMicKey,
   noticeText,
   type DictationState,
+  type DockCommandId,
   type DockView,
   type NoticeLevel,
 } from './dockModel';
@@ -256,8 +259,12 @@ export interface ReadingDockDeps {
   viewerUserIsApp?: () => boolean;
   /** 21 Oct: the app's sign-out (./appSignOut); true once it answered. */
   signOutOfApp?: () => Promise<boolean>;
-  /** F58: the viewer's half of a held place (./viewerPlace); none: the images are not held. */
+  /** F58: the viewer's half of a held place (./viewerPlace); none: the images are not held.
+   *  Milestone 25, PR 6: also what the reader is looking at (its `selection`), told to the island. */
   viewerPlace?: ViewerPlace;
+  /** Milestone 25, PR 6 (F05): the viewer's own hotkeys as OHIF has them now (label and
+   *  keys), told to the island for the report's sign-key clash refusal. */
+  viewerHotkeys?: () => ReadonlyArray<{ label: string; keys: readonly string[] }>;
   /**
    * 21 Oct: after Logout. Signed out: the window closes, else the app's sign-in
    * page; not signed out (no answer): the app's own sign-out page, which asks.
@@ -291,6 +298,10 @@ export interface ReadingDock {
   backToPlace: () => Promise<boolean>;
   /** The header's toggle: start or stop the report's recognizer. */
   toggleDictation: () => boolean;
+  /** Milestone 25, PR 6 (F61, F87): what the reader is looking at may have changed
+   *  (the active viewport, its image, the measurement selected): told to the
+   *  island when it did, at most once a SELECTION_EVERY_MS. */
+  selectionChanged: () => void;
   /** The caret back to the report (after a viewer control). */
   focusReport: () => boolean;
   /** The viewer's gear menu: the report's settings and its quiet_workspace
@@ -351,7 +362,14 @@ export function onParkedChange(listener: (state: ParkedState) => void): () => vo
   return () => parkedListeners.delete(listener);
 }
 
-const MODE_BY_CODE: Record<string, WorkspaceMode> = { Digit1: 'images', Digit2: 'both', Digit3: 'report' };
+const MODE_BY_COMMAND: Partial<Record<DockCommandId, WorkspaceMode>> = {
+  'mode-images': 'images',
+  'mode-both': 'both',
+  'mode-report': 'report',
+};
+/** Milestone 25, PR 6: the viewer's selection is told at most once this often
+ *  (a stack scrolled tells on every image), and once more after the last change. */
+export const SELECTION_EVERY_MS = 100;
 
 const COVER_LOADING = 'Opening the report…';
 const COVER_SWITCHING = 'Opening the report for this study…';
@@ -416,6 +434,12 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
   let reportOnlyOpens = 0;
   // Phase 2 (PR 4): what the island was last told the viewer shows.
   let toldIdentity: { study: string | null; user: string | null } | null = null;
+  // Milestone 25, PR 6: the selection last told to the island, and the throttle's timer.
+  let toldSelection: string | null = null;
+  let selectionTimer: ReturnType<Window['setTimeout']> | null = null;
+  let selectionPending = false;
+  // Milestone 25, PR 6 (F05): the dock's own keys, as the report's command list gives them.
+  let dockKeys: Readonly<Record<DockCommandId, readonly string[]>> = DOCK_KEYS;
   let identityTold = 0;
   const channelCounts = {
     adverts: 0,
@@ -1093,6 +1117,12 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       requestCase();
     }
     tellIdentity();
+    // Milestone 25, PR 6: the dock's keys from the report's list, the viewer's own
+    // keys, and what the reader is looking at, for this island.
+    readDockKeys();
+    tellViewerKeys();
+    toldSelection = null;
+    tellSelection();
   };
 
   // ---- phase 2 (PR 4): what the viewer shows, for the island's identity gate -------------
@@ -1121,6 +1151,71 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       }
     } catch (_) {
       /* the island keeps the last identity it took */
+    }
+  }
+
+  // ---- milestone 25, PR 6: what the reader is looking at, and the keys -------------------
+  /** F61's selection message (F87): the active viewport's study, series and image,
+   *  the measurement selected, today's study or a prior (identifiers only), told
+   *  to the island when it changed; the report takes it when the reader starts
+   *  speaking and carries it with the words. Not a reason to re-render the dock. */
+  function tellSelection(): void {
+    if (!handle || gone || typeof handle.setSelection !== 'function') {
+      return;
+    }
+    let next: ReturnType<ViewerPlace['selection']> = null;
+    try {
+      next = deps.viewerPlace?.selection?.(routeStudy) ?? null;
+    } catch (_) {
+      next = null;
+    }
+    const key = next ? JSON.stringify(next) : 'none';
+    if (key === toldSelection) {
+      return;
+    }
+    try {
+      if (handle.setSelection(next)) {
+        toldSelection = key;
+      }
+    } catch (_) {
+      /* the island keeps the last selection it took */
+    }
+  }
+  const selectionChanged = (): void => {
+    if (gone) {
+      return;
+    }
+    if (selectionTimer !== null) {
+      selectionPending = true;
+      return;
+    }
+    tellSelection();
+    selectionTimer = win.setTimeout(() => {
+      selectionTimer = null;
+      if (selectionPending) {
+        selectionPending = false;
+        selectionChanged();
+      }
+    }, SELECTION_EVERY_MS);
+  };
+  /** F05: the viewer's own hotkeys, so the report refuses a sign key one of them has. */
+  function tellViewerKeys(): void {
+    if (!handle || gone || typeof handle.setViewerKeys !== 'function') {
+      return;
+    }
+    try {
+      handle.setViewerKeys(deps.viewerHotkeys?.() ?? []);
+    } catch (_) {
+      /* the island keeps the keys it had */
+    }
+  }
+  /** F05: the dock's own keys from the report's command list (one definition), else its own. */
+  function readDockKeys(): void {
+    try {
+      dockKeys =
+        handle && typeof handle.commands === 'function' ? dockKeysOf(handle.commands()) : DOCK_KEYS;
+    } catch (_) {
+      dockKeys = DOCK_KEYS;
     }
   }
 
@@ -1906,19 +2001,15 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       !!(target as Element).closest?.('[data-pacs-island-portal-host]') ||
       !!(target.parentElement?.closest?.('[data-pacs-island-portal-host]')));
   const onKeyDown = (e: KeyboardEvent) => {
+    // Milestone 25, PR 6 (F05): the keys as the report's command list gives them.
+    const command = dockCommandOf(e, dockKeys);
     // F58: Alt+H holds the reader's place and Alt+B goes back to it, on the
     // whole page (a held key once).
-    if (
-      e.altKey &&
-      !e.ctrlKey &&
-      !e.metaKey &&
-      !e.shiftKey &&
-      (e.code === 'KeyH' || e.code === 'KeyB')
-    ) {
+    if (command === 'hold' || command === 'back') {
       e.preventDefault();
       e.stopPropagation();
       if (!e.repeat) {
-        if (e.code === 'KeyH') {
+        if (command === 'hold') {
           holdPlace();
         } else {
           void backToPlace();
@@ -1928,7 +2019,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     }
     // The microphone key (F4) on the whole page and in every mode, as the
     // header's microphone toggle; a held key toggles once.
-    if (isMicKey(e)) {
+    if (command === 'microphone') {
       e.preventDefault();
       e.stopPropagation();
       if (!e.repeat) {
@@ -1938,11 +2029,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       }
       return;
     }
-    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !inReport(e.target)) {
-      return;
-    }
-    const mode = MODE_BY_CODE[e.code];
-    if (!mode) {
+    const mode = command ? MODE_BY_COMMAND[command] : undefined;
+    if (!mode || !inReport(e.target)) {
       return;
     }
     e.preventDefault();
@@ -2004,6 +2092,8 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
       // PR 4: once the island took the case (or refused it while a Submit
       // ends: then its gate holds the old case's microphone and Sign).
       tellIdentity();
+      // Milestone 25, PR 6: today's study changed, so what is a prior did too.
+      tellSelection();
       // The worklist's channel: this document now shows the new case's launch.
       advertise();
       return;
@@ -2051,6 +2141,10 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     stopRouteWatch();
     if (placeLineTimer) {
       win.clearTimeout(placeLineTimer);
+    }
+    if (selectionTimer !== null) {
+      win.clearTimeout(selectionTimer);
+      selectionTimer = null;
     }
     win.removeEventListener('resize', onResize);
     win.removeEventListener('keydown', onKeyDown, true);
@@ -2213,6 +2307,7 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     holdPlace,
     backToPlace,
     toggleDictation,
+    selectionChanged,
     focusReport,
     menuOptions,
     layoutNow,

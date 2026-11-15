@@ -155,6 +155,101 @@ export function setReadingViewerServices(services: unknown): void {
     s && s.viewportGridService && s.cornerstoneViewportService && s.displaySetService
       ? (s as ViewerServices)
       : null;
+  watchSelection(viewerServices);
+}
+
+/**
+ * Rev 11 milestone 25, PR 6 (F61's selection message, F87): what the reader is
+ * looking at changes when the active viewport or the grid does (OHIF's grid
+ * events), when a viewport shows another image (cornerstone's new-image events,
+ * fired on the viewport's element: taken at the document as they pass, every
+ * viewport's) and when a measurement is selected or let go (OHIF's measurement
+ * events). Each tells the dock, which tells the island at most once a
+ * SELECTION_EVERY_MS. One watch per services object.
+ */
+const NEW_IMAGE_EVENTS = ['CORNERSTONE_STACK_NEW_IMAGE', 'CORNERSTONE_VOLUME_NEW_IMAGE'] as const;
+type PubSubLike = {
+  subscribe?: (event: string, callback: () => void) => { unsubscribe?: () => void } | undefined;
+  EVENTS?: Record<string, string>;
+};
+let watchedServices: ViewerServices | null = null;
+let stopWatching: (() => void) | null = null;
+function watchSelection(services: ViewerServices | null): void {
+  if (services === watchedServices) {
+    return;
+  }
+  stopWatching?.();
+  stopWatching = null;
+  watchedServices = services;
+  if (!services) {
+    return;
+  }
+  const changed = () => currentReadingDock()?.selectionChanged();
+  const stops: Array<() => void> = [];
+  const listen = (service: unknown, names: readonly string[]) => {
+    const pubSub = service as PubSubLike | null | undefined;
+    for (const name of names) {
+      const event = pubSub?.EVENTS?.[name];
+      if (!event || typeof pubSub?.subscribe !== 'function') {
+        continue;
+      }
+      try {
+        const sub = pubSub.subscribe(event, changed);
+        if (typeof sub?.unsubscribe === 'function') {
+          stops.push(() => sub.unsubscribe?.());
+        }
+      } catch (_) {
+        /* that event is not watched */
+      }
+    }
+  };
+  listen(services.viewportGridService, [
+    'ACTIVE_VIEWPORT_ID_CHANGED',
+    'GRID_STATE_CHANGED',
+    'VIEWPORTS_READY',
+  ]);
+  listen(services.measurementService, [
+    'MEASUREMENT_UPDATED',
+    'MEASUREMENT_REMOVED',
+    'MEASUREMENTS_CLEARED',
+  ]);
+  for (const type of NEW_IMAGE_EVENTS) {
+    document.addEventListener(type, changed, true);
+    stops.push(() => document.removeEventListener(type, changed, true));
+  }
+  stopWatching = () => stops.forEach(stop => stop());
+}
+
+/**
+ * Milestone 25, PR 6 (F05): OHIF's hotkeys (the commands module hands the
+ * manager in at registration), told to the island as the viewer's own keys so
+ * the report refuses a sign key one of them has. Read at the moment: a reader's
+ * own remapping in OHIF's preferences counts.
+ */
+type HotkeysManagerLike = {
+  hotkeyDefinitions?: Record<string, { label?: unknown; keys?: unknown } | null | undefined>;
+};
+let readingHotkeys: HotkeysManagerLike | null = null;
+export function setReadingHotkeys(manager: unknown): void {
+  readingHotkeys = manager && typeof manager === 'object' ? (manager as HotkeysManagerLike) : null;
+}
+export function readingViewerHotkeys(): Array<{ label: string; keys: string[] }> {
+  const definitions = readingHotkeys?.hotkeyDefinitions;
+  if (!definitions || typeof definitions !== 'object') {
+    return [];
+  }
+  const out: Array<{ label: string; keys: string[] }> = [];
+  for (const d of Object.values(definitions)) {
+    const keys = Array.isArray(d?.keys)
+      ? d.keys.filter((k): k is string => typeof k === 'string' && k.length > 0)
+      : typeof d?.keys === 'string' && d.keys
+        ? [d.keys]
+        : [];
+    if (keys.length) {
+      out.push({ label: typeof d?.label === 'string' ? d.label : '', keys });
+    }
+  }
+  return out;
 }
 
 /** Milestone 7 (Arrange): the same services, as the mode handed them in (null before). */
@@ -240,6 +335,7 @@ export function ensureReadingDock(): ReadingDock {
         reportWindowFeatures(window.screen)
       ),
     viewerPlace: createViewerPlace(() => viewerServices, window),
+    viewerHotkeys: readingViewerHotkeys,
   });
   installHarnessHook();
   changeListeners.forEach(listener => listener());

@@ -132,3 +132,109 @@ describe('F58: putting the held view back (zoom and pan, milestone 7)', () => {
     expect(f.view.zoom).toBe(2.0);
   });
 });
+
+/**
+ * Rev 11 milestone 25, PR 6 (F61's selection message, F87): what the reader is
+ * looking at, for the report: the active viewport's study, series and image,
+ * the measurement selected, today's study or a prior. Identifiers only.
+ */
+import { sopInstanceOf } from './viewerPlace';
+
+describe("the reader's selection (milestone 25, PR 6)", () => {
+  const ROUTE = '1.2.840.9.1';
+  const PRIOR = '1.2.840.9.2';
+  function fakeServices() {
+    const state = {
+      layout: { numRows: 1, numCols: 2 },
+      viewports: new Map([
+        ['vp-a', { viewportId: 'vp-a', displaySetInstanceUIDs: ['ds-a'] }],
+        ['vp-b', { viewportId: 'vp-b', displaySetInstanceUIDs: ['ds-b'] }],
+      ]),
+      activeViewportId: 'vp-a' as string | null,
+    };
+    const imageIds: Record<string, string> = {
+      'vp-a':
+        'wadors:https://pacs.example/dicom-web/studies/1.2.840.9.1/series/1.2.840.9.1.4/instances/1.2.840.9.1.4.7/frames/1',
+      'vp-b':
+        'wadouri:https://pacs.example/wado?requestType=WADO&studyUID=1.2.840.9.2&objectUID=1.2.840.9.2.3.5',
+    };
+    const measurements: Array<{ uid: string; isSelected: boolean }> = [
+      { uid: 'm-1', isSelected: false },
+      { uid: '5e1c-a2', isSelected: false },
+    ];
+    const displaySets: Record<string, Record<string, unknown>> = {
+      'ds-a': {
+        displaySetInstanceUID: 'ds-a',
+        StudyInstanceUID: ROUTE,
+        SeriesInstanceUID: '1.2.840.9.1.4',
+        PatientName: 'never told',
+      },
+      'ds-b': {
+        displaySetInstanceUID: 'ds-b',
+        StudyInstanceUID: PRIOR,
+        SeriesInstanceUID: '1.2.840.9.2.3',
+      },
+    };
+    const services = {
+      viewportGridService: {
+        getState: () => state,
+        setLayout: () => undefined,
+        getLayoutOptionsFromState: () => ({}),
+        setActiveViewportId: (id: string) => {
+          state.activeViewportId = id;
+        },
+      },
+      cornerstoneViewportService: {
+        getCornerstoneViewport: (id: string) => ({ getCurrentImageId: () => imageIds[id] }),
+      },
+      displaySetService: {
+        getDisplaySetByUID: (uid: string) => displaySets[uid] as never,
+        getActiveDisplaySets: () => [],
+      },
+      measurementService: { getMeasurements: () => measurements },
+    };
+    return { services, state, imageIds, measurements };
+  }
+
+  it("names today's image by its UIDs, then a prior's, with the measurement selected", () => {
+    const f = fakeServices();
+    const place = createViewerPlace(() => f.services as never, window);
+    expect(place.selection(ROUTE)).toEqual({
+      studyInstanceUid: ROUTE,
+      seriesInstanceUid: '1.2.840.9.1.4',
+      sopInstanceUid: '1.2.840.9.1.4.7',
+      measurement: null,
+      timepoint: 'current',
+    });
+    f.state.activeViewportId = 'vp-b';
+    f.measurements[1].isSelected = true;
+    expect(place.selection(ROUTE)).toEqual({
+      studyInstanceUid: PRIOR,
+      seriesInstanceUid: '1.2.840.9.2.3',
+      sopInstanceUid: '1.2.840.9.2.3.5',
+      measurement: '5e1c-a2',
+      timepoint: 'prior',
+    });
+    expect(JSON.stringify(place.selection(ROUTE))).not.toContain('never told');
+  });
+
+  it('none without a route study, an active viewport, a series in it, or services; an unreadable image is null', () => {
+    const f = fakeServices();
+    const place = createViewerPlace(() => f.services as never, window);
+    expect(place.selection(null)).toBeNull();
+    f.state.activeViewportId = null;
+    expect(place.selection(ROUTE)).toBeNull();
+    f.state.activeViewportId = 'vp-a';
+    f.imageIds['vp-a'] = 'blob:not-dicom';
+    expect(place.selection(ROUTE)?.sopInstanceUid).toBeNull();
+    expect(createViewerPlace(() => null, window).selection(ROUTE)).toBeNull();
+  });
+
+  it("an image's SOP instance: the display set's own entry first, else the one its imageId names", () => {
+    expect(sopInstanceOf('x:1', [{ imageId: 'x:1', SOPInstanceUID: '1.2.3' }])).toBe('1.2.3');
+    expect(sopInstanceOf('wadors:/studies/1/series/2/instances/1.2.4/frames/1')).toBe('1.2.4');
+    expect(sopInstanceOf('wadouri:/wado?objectUID=1.2.5&x=1')).toBe('1.2.5');
+    expect(sopInstanceOf('wadors:/instances/1.2.x/frames/1')).toBeNull();
+    expect(sopInstanceOf(null)).toBeNull();
+  });
+});

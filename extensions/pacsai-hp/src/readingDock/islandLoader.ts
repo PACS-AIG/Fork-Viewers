@@ -15,6 +15,8 @@
  * outcome is unit-tested (islandLoader.test.ts).
  */
 
+import type { ViewerSelection } from './viewerPlace';
+
 export const ISLAND_API = 'pacsai.reportIsland';
 export const ISLAND_API_VERSION = 1;
 export const FLAGS_PATH = '/api/workspace/flags';
@@ -79,6 +81,16 @@ export interface IslandHandleLike {
   holdPlace?: () => boolean;
   /** Optional in v1 (F58): back to it; what it did (readingDock checks it), or null. */
   returnToPlace?: () => unknown;
+  /** Optional in v1 (milestone 25, PR 5, 14 Nov): the report's command list with
+   *  the keys in use now (the dock reads its own keys from it: dockModel.dockKeysOf). */
+  commands?: () => unknown;
+  /** Optional in v1 (milestone 25, PR 5): the viewer's own hotkeys, for the
+   *  report's sign-key clash refusal (false: not such a list). */
+  setViewerKeys?: (keys: ReadonlyArray<{ label: string; keys: readonly string[] }>) => boolean;
+  /** Optional in v1 (milestone 25, PR 6, 15 Nov): what the reader is looking at
+   *  (identifiers only; null: no image), taken by the report when the reader
+   *  starts speaking (false: not one). */
+  setSelection?: (selection: ViewerSelection | null) => boolean;
 }
 
 export interface IslandModuleLike {
