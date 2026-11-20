@@ -246,7 +246,7 @@ describe('the reading-system pane state (RS-36)', () => {
     expect((t.controller.harnessState().counts as Record<string, number>).conflicts).toBe(1);
   });
 
-  it('says why a refused event was refused', async () => {
+  it('undoes the revision named, against the revision shown, and says why a refused event was refused', async () => {
     const t = setup();
     t.set({ versions: makeVersions({ opened: true }) });
     t.controller.enter(STUDY);
@@ -260,6 +260,9 @@ describe('the reading-system pane state (RS-36)', () => {
     }));
     await t.controller.undo('rev-x');
     await flush();
+    const undo = t.client.postEvent.mock.calls[0][0] as RsIntakeEvent;
+    expect(undo.event).toEqual({ type: 'undo', revisionId: 'rev-x' });
+    expect(undo.baseRevision).toBe(4);
     expect(t.controller.getSnapshot().notice).toEqual({
       level: 'error',
       text: 'Not applied: no such revision',
