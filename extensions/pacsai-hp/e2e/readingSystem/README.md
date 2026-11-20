@@ -68,9 +68,9 @@ The harness (`harness.mjs`) is started by the Playwright config, or reused if
 it already runs on `RS_E2E_PORT` (default 3036). It serves the built viewer
 and its own viewer config; it forwards `/rs-api/*` to `RS_API_URL` with the
 bearer token, as the app's proxy route will on dev. With `HTTP(S)_PROXY` set,
-the browser goes through the proxy except for loopback and the DICOM archives
-(`arc-dev.pacsai.net`, `arc.pacsai.net`), and so does a non-loopback
-`RS_API_URL`.
+the browser goes through the proxy except for loopback (`NO_PROXY`) and any hosts
+`RS_E2E_PROXY_BYPASS` lists, and so does a non-loopback `RS_API_URL`. The tests
+reach no image archive: the harness's DICOMweb has no studies.
 
 ## Locally
 

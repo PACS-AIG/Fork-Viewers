@@ -13,8 +13,8 @@
  * result into the served record; `{fixture}` is replaced by the fixture key)
  * and RS_E2E_CHANNEL (`chrome` to drive an installed Google Chrome instead of
  * Playwright's own Chromium). With a proxy in the environment the browser goes
- * through it, except loopback and the DICOM archives (arc-dev.pacsai.net,
- * arc.pacsai.net), which go direct.
+ * through it, except loopback (NO_PROXY) and any hosts RS_E2E_PROXY_BYPASS
+ * lists (comma-separated), which go direct.
  */
 import path from 'node:path';
 import { defineConfig } from '@playwright/test';
@@ -25,10 +25,9 @@ const proxyServer =
   process.env.https_proxy ||
   process.env.HTTP_PROXY ||
   process.env.http_proxy;
-const DIRECT_HOSTS = ['arc-dev.pacsai.net', 'arc.pacsai.net'];
 const bypass = [
   ...(process.env.NO_PROXY || process.env.no_proxy || 'localhost,127.0.0.1,::1').split(','),
-  ...DIRECT_HOSTS,
+  ...(process.env.RS_E2E_PROXY_BYPASS || '').split(','),
 ]
   .map(s => s.trim())
   .filter(Boolean)
