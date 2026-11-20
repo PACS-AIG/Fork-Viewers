@@ -46,6 +46,8 @@ jest.mock('@ohif/extension-measurement-tracking', () => ({
 }));
 jest.mock('@ohif/extension-pacsai-hp', () => ({
   ...jest.requireActual('./session'),
+  // RS-36: the CT reading system's pane (off here: no PACSAI_READING_SYSTEM_API).
+  ...jest.requireActual('../readingSystem/session'),
   ...jest.requireActual('./islandLoader'),
   READING_MODES: jest.requireActual('./dockModel').READING_MODES,
   READING_MIC_KEY: jest.requireActual('./dockModel').READING_MIC_KEY,

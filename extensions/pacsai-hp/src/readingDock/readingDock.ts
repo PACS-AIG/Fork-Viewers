@@ -339,6 +339,10 @@ export interface ReadingDock {
   isGone: () => boolean;
   /** Leave now: settle, unmount, take the dock away. */
   destroy: () => Promise<void>;
+  /** RS-36: the report column, for the CT reading system's pane at its top (readingSystem/rsHost.tsx). */
+  reportColumn: () => HTMLElement;
+  /** RS-36: that pane's height: the island and its cover start this far below the column's top. */
+  setReadingSystemInset: (px: number) => void;
 }
 
 // ---- the parked state, relayed across docks ----------------------------------
@@ -493,16 +497,19 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     overflow: 'hidden',
     background: '#050B14',
   });
+  // RS-36: the island and the cover start below the CT reading system's pane
+  // when the column holds one (setReadingSystemInset; 0 without it).
+  const belowReadingSystem = { top: '0px', right: '0px', bottom: '0px', left: '0px' };
   const islandElement = doc.createElement('div');
   islandElement.setAttribute('data-pacsai-reading-island', '');
-  Object.assign(islandElement.style, { position: 'absolute', inset: '0' });
+  Object.assign(islandElement.style, { position: 'absolute', ...belowReadingSystem });
   const cover = doc.createElement('div');
   cover.setAttribute('data-pacsai-reading-cover', '');
   cover.setAttribute('role', 'status');
   cover.setAttribute('aria-live', 'polite');
   Object.assign(cover.style, {
     position: 'absolute',
-    inset: '0',
+    ...belowReadingSystem,
     zIndex: '1',
     display: 'flex',
     flexDirection: 'column',
@@ -2324,6 +2331,12 @@ export function createReadingDock(deps: ReadingDockDeps): ReadingDock {
     getSnapshot: () => snapshot,
     isGone: () => gone,
     destroy,
+    reportColumn: () => column,
+    setReadingSystemInset: (px: number) => {
+      const top = `${Number.isFinite(px) && px > 0 ? Math.round(px) : 0}px`;
+      islandElement.style.top = top;
+      cover.style.top = top;
+    },
   };
 }
 
