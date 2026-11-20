@@ -17,13 +17,17 @@ describe('the contract rules a consumer keeps (RS-36)', () => {
   });
 
   it('refuses another major, another mode or another artifact, saying why', () => {
-    expect(() => checkDocument({ ...makeReport(), contractVersion: 'pacsai.reading/2.0' }, 'report', 'fixture')).toThrow(
-      /publishes contract pacsai\.reading\/2\.0; this viewer reads pacsai\.reading\/1\.x/
-    );
+    expect(() =>
+      checkDocument({ ...makeReport(), contractVersion: 'pacsai.reading/2.0' }, 'report', 'fixture')
+    ).toThrow(/publishes contract pacsai\.reading\/2\.0; this viewer reads pacsai\.reading\/1\.x/);
     // A clinical viewer never shows a fixture document, and the other way round.
     expect(() => checkDocument(makeReport(), 'report', 'clinical')).toThrow(RsRefused);
-    expect(() => checkDocument(makeReport(), 'report', 'clinical')).toThrow(/fixture documents; this viewer reads clinical/);
-    expect(() => checkDocument(makeReport(), 'inbox', 'fixture')).toThrow(/Expected a inbox document, received report/);
+    expect(() => checkDocument(makeReport(), 'report', 'clinical')).toThrow(
+      /fixture documents; this viewer reads clinical/
+    );
+    expect(() => checkDocument(makeReport(), 'inbox', 'fixture')).toThrow(
+      /Expected a inbox document, received report/
+    );
     expect(() => checkDocument('text', 'report', 'fixture')).toThrow(RsRefused);
   });
 });
@@ -87,27 +91,36 @@ describe('typed reader events (POST /events)', () => {
   });
 
   it('never writes a draft-changing event without its base revision', () => {
-    expect(() => buildIntakeEvent(ctx, { type: 'undo', revisionId: 'r-1' }, { eventId: 'e', now })).toThrow(
-      /names the published revision/
-    );
     expect(() =>
-      buildIntakeEvent(ctx, { type: 'undo', revisionId: 'r-1' }, { eventId: 'e', now, baseRevision: -1 })
+      buildIntakeEvent(ctx, { type: 'undo', revisionId: 'r-1' }, { eventId: 'e', now })
+    ).toThrow(/names the published revision/);
+    expect(() =>
+      buildIntakeEvent(
+        ctx,
+        { type: 'undo', revisionId: 'r-1' },
+        { eventId: 'e', now, baseRevision: -1 }
+      )
     ).toThrow();
   });
 
   it('writes the events in the minor of the documents read, and in 1.12 before any was read', () => {
     const { contractVersion: _unused, ...noVersion } = ctx;
-    expect(buildIntakeEvent(noVersion, { type: 'opened' }, { eventId: 'e', now }).contractVersion).toBe(
-      'pacsai.reading/1.12'
-    );
     expect(
-      buildIntakeEvent({ ...ctx, contractVersion: 'pacsai.reading/1.13' }, { type: 'opened' }, { eventId: 'e', now })
-        .contractVersion
+      buildIntakeEvent(noVersion, { type: 'opened' }, { eventId: 'e', now }).contractVersion
+    ).toBe('pacsai.reading/1.12');
+    expect(
+      buildIntakeEvent(
+        { ...ctx, contractVersion: 'pacsai.reading/1.13' },
+        { type: 'opened' },
+        { eventId: 'e', now }
+      ).contractVersion
     ).toBe('pacsai.reading/1.13');
   });
 
   it('mints ids from the platform UUID, or a UUID-shaped one without it', () => {
     expect(freshId({ randomUUID: () => 'fixed-id' })).toBe('fixed-id');
-    expect(freshId({})).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(freshId({})).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
   });
 });

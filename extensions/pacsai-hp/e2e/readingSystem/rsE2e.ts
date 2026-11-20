@@ -8,15 +8,17 @@
 import { execFileSync } from 'node:child_process';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
-export type Doc = Record<string, any>;
-
 /** The study's document as the served API gives it (`route`: report?version=published, inbox, versions, ...). */
-export async function doc(request: APIRequestContext, fixture: string, route: string): Promise<Doc> {
+export async function doc<T>(
+  request: APIRequestContext,
+  fixture: string,
+  route: string
+): Promise<T> {
   const res = await request.get(
     `/rs-e2e/doc?fixture=${encodeURIComponent(fixture)}&route=${encodeURIComponent(route)}`
   );
   expect(res.status(), `GET ${route} for ${fixture}`).toBe(200);
-  return res.json();
+  return (await res.json()) as T;
 }
 
 export const pane = (page: Page) => page.locator('[data-pacsai-rs-pane]');
@@ -28,8 +30,12 @@ export async function openStudy(page: Page, fixture: string): Promise<void> {
 }
 
 /** The pane's harness state (studies by reference, never by UID). */
-export const paneState = (page: Page) =>
-  page.evaluate(() => (window as any).__pacsaiReadingSystem?.getState() ?? null);
+export type PaneState = { counts?: Record<string, number> } & Record<string, unknown>;
+type HarnessWindow = { __pacsaiReadingSystem?: { getState: () => PaneState | null } };
+export const paneState = (page: Page): Promise<PaneState | null> =>
+  page.evaluate(
+    () => (window as unknown as HarnessWindow).__pacsaiReadingSystem?.getState() ?? null
+  );
 
 /**
  * Commit the fixture's late result into the served record, as a model result
@@ -47,12 +53,19 @@ export function playLateResult(fixture: string): void {
   if (!/^[a-z0-9_]+$/.test(fixture)) {
     throw new Error(`not a fixture key: ${fixture}`);
   }
-  execFileSync('sh', ['-c', template.split('{fixture}').join(fixture)], { stdio: 'pipe', timeout: 60_000 });
+  execFileSync('sh', ['-c', template.split('{fixture}').join(fixture)], {
+    stdio: 'pipe',
+    timeout: 60_000,
+  });
 }
 
 /** Wait until the API says the pane opened the study (it posts `opened` on its first read). */
 export async function expectOpened(request: APIRequestContext, fixture: string): Promise<void> {
-  await expect.poll(async () => (await doc(request, fixture, 'versions')).opened, { timeout: 20_000 }).toBe(true);
+  await expect
+    .poll(async () => (await doc<{ opened: boolean }>(request, fixture, 'versions')).opened, {
+      timeout: 20_000,
+    })
+    .toBe(true);
 }
 
 export const inboxCount = (page: Page) => pane(page).locator('[data-rs-inbox-count]');

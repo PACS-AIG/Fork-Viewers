@@ -29,7 +29,11 @@ describe('the draft (RS-36)', () => {
     const view = draftView(makeReport());
     expect(view.selectable.map(p => p.id)).toEqual(['p-liver', 'p-kidney', 'p-imp']);
     expect(view.sections[0].passages[0].selectable).toBe(false);
-    expect(selectionOf(view.selectable[0])).toEqual({ entryId: 'F1', passageId: 'p-liver', sentenceId: 's-liver' });
+    expect(selectionOf(view.selectable[0])).toEqual({
+      entryId: 'F1',
+      passageId: 'p-liver',
+      sentenceId: 's-liver',
+    });
   });
 
   it('shows an empty Impression as a section with no passage', () => {
@@ -48,10 +52,19 @@ describe('the chrome: pending work and verdicts beside the prose, never in it', 
   it('names pending tasks (a bare string is pending), the sections waiting and what is held back', () => {
     const report = makeReport();
     report.chrome.pending = {
-      tasks: ['segment.mask', { task: 'detect.pe', status: 'running' }, { task: 'anatomy.total', status: 'failed' }],
+      tasks: [
+        'segment.mask',
+        { task: 'detect.pe', status: 'running' },
+        { task: 'anatomy.total', status: 'failed' },
+      ],
       sections: ['liver_and_biliary'],
       withheld: [
-        { entryId: 'F9', code: 'pending_work', reason: 'waits on segment.mask', status: 'withheld' },
+        {
+          entryId: 'F9',
+          code: 'pending_work',
+          reason: 'waits on segment.mask',
+          status: 'withheld',
+        },
         { entryId: 'F8', code: 'grouped', reason: 'grouped', status: 'grouped' },
       ],
     };
@@ -74,7 +87,9 @@ describe('the chrome: pending work and verdicts beside the prose, never in it', 
       sound: false,
       style: 'unavailable',
       failures: [{ code: 'x', detail: 'unsupported claim', where: 'n1' }],
-      withheld: [{ nodeId: 'n2', entryId: 'F2', code: 'c', reason: 'by the reader', critical: true }],
+      withheld: [
+        { nodeId: 'n2', entryId: 'F2', code: 'c', reason: 'by the reader', critical: true },
+      ],
     };
     expect(chromeLines(report).map(l => l.text)).toEqual([
       'Comparison pending',
@@ -88,7 +103,9 @@ describe('the chrome: pending work and verdicts beside the prose, never in it', 
 
   it('names a flagged series by its phase, never by its UID', () => {
     const report = makeReport();
-    report.chrome.phase = { flagged: [{ phase: 'portal_venous', flags: ['contrast_mismatch'], seriesUID: '1.2.3.4.5' }] };
+    report.chrome.phase = {
+      flagged: [{ phase: 'portal_venous', flags: ['contrast_mismatch'], seriesUID: '1.2.3.4.5' }],
+    };
     const lines = chromeLines(report);
     expect(lines.map(l => l.text)).toEqual(['Check the portal venous series: contrast mismatch']);
     expect(JSON.stringify(lines)).not.toContain('1.2.3.4.5');
@@ -108,18 +125,29 @@ describe('the inbox and the change list', () => {
         before: '12 mm low-attenuation lesion in the liver.',
         after: '14 mm low-attenuation lesion in the liver.',
       },
-      { passageId: 'p-imp', sectionTitle: 'Impression', before: '12 mm liver lesion.', after: '14 mm liver lesion.' },
+      {
+        passageId: 'p-imp',
+        sectionTitle: 'Impression',
+        before: '12 mm liver lesion.',
+        after: '14 mm liver lesion.',
+      },
     ]);
     expect(entry.acceptable).toBe(true);
   });
 
-  it('keeps a patch of the reader\'s own wording apart, and an unacceptable entry with its reason', () => {
+  it("keeps a patch of the reader's own wording apart, and an unacceptable entry with its reason", () => {
     const entry = {
       ...UPDATE_ENTRY,
       kind: 'alternative_evidence' as const,
       preview: [],
       patches: [
-        { target: 'F2', passageId: 'p-kidney', status: 'review' as const, ours: 'Small cyst.', theirs: '9 mm cyst.' },
+        {
+          target: 'F2',
+          passageId: 'p-kidney',
+          status: 'review' as const,
+          ours: 'Small cyst.',
+          theirs: '9 mm cyst.',
+        },
       ],
       acceptable: false,
       reason: 'waits on another update',
@@ -127,7 +155,13 @@ describe('the inbox and the change list', () => {
     const [view] = inboxView(makeInbox({ entries: [entry] }), makeReport());
     expect(view.kindLabel).toBe('Alternative evidence');
     expect(view.patches).toEqual([
-      { passageId: 'p-kidney', sectionTitle: 'Kidneys and ureters', status: 'review', ours: 'Small cyst.', theirs: '9 mm cyst.' },
+      {
+        passageId: 'p-kidney',
+        sectionTitle: 'Kidneys and ureters',
+        status: 'review',
+        ours: 'Small cyst.',
+        theirs: '9 mm cyst.',
+      },
     ]);
     expect(view.acceptable).toBe(false);
     expect(view.reason).toBe('waits on another update');
@@ -138,7 +172,9 @@ describe('the inbox and the change list', () => {
     expect(claimValue(null)).toBe('none');
     expect(claimValue('left_side')).toBe('left side');
     expect(claimValue({ organ: 'liver', side: null })).toBe('organ liver, side none');
-    expect(claimText({ property: 'class', before: null, after: 'Class II' })).toBe('Class: none → Class II');
+    expect(claimText({ property: 'class', before: null, after: 'Class II' })).toBe(
+      'Class: none → Class II'
+    );
   });
 
   it('groups the change list and leaves out empty groups', () => {
@@ -165,17 +201,61 @@ describe('the revisions, each with Undo', () => {
   it('lists them newest first, offers Undo on an intention not undone, never on an Undo', () => {
     const versions = makeVersions({
       revisions: [
-        { revision: 5, revisionId: 'rev-a', origin: 'inbox', readerId: 'r', operation: { op: 'accept_entry' }, undoneBy: 'rev-b' },
-        { revision: 6, revisionId: 'rev-b', origin: 'undo', readerId: 'r', operation: { op: 'undo' }, undoes: 'rev-a' },
-        { revision: 7, revisionId: 'rev-c', origin: 'inbox', readerId: 'r', operation: { op: 'reject_entry' } },
-        { revision: 8, revisionId: 'rev-d', origin: 'reader', readerId: 'r', operation: { op: 'set_value' } },
+        {
+          revision: 5,
+          revisionId: 'rev-a',
+          origin: 'inbox',
+          readerId: 'r',
+          operation: { op: 'accept_entry' },
+          undoneBy: 'rev-b',
+        },
+        {
+          revision: 6,
+          revisionId: 'rev-b',
+          origin: 'undo',
+          readerId: 'r',
+          operation: { op: 'undo' },
+          undoes: 'rev-a',
+        },
+        {
+          revision: 7,
+          revisionId: 'rev-c',
+          origin: 'inbox',
+          readerId: 'r',
+          operation: { op: 'reject_entry' },
+        },
+        {
+          revision: 8,
+          revisionId: 'rev-d',
+          origin: 'reader',
+          readerId: 'r',
+          operation: { op: 'set_value' },
+        },
       ],
     });
     expect(revisionsView(versions)).toEqual([
       { revisionId: 'rev-d', revision: 8, label: 'Set value', undone: false, undoable: true },
-      { revisionId: 'rev-c', revision: 7, label: 'Rejected an inbox update', undone: false, undoable: true },
-      { revisionId: 'rev-b', revision: 6, label: 'Undid revision 5', undone: false, undoable: false },
-      { revisionId: 'rev-a', revision: 5, label: 'Accepted an inbox update', undone: true, undoable: false },
+      {
+        revisionId: 'rev-c',
+        revision: 7,
+        label: 'Rejected an inbox update',
+        undone: false,
+        undoable: true,
+      },
+      {
+        revisionId: 'rev-b',
+        revision: 6,
+        label: 'Undid revision 5',
+        undone: false,
+        undoable: false,
+      },
+      {
+        revisionId: 'rev-a',
+        revision: 5,
+        label: 'Accepted an inbox update',
+        undone: true,
+        undoable: false,
+      },
     ]);
   });
 });
@@ -190,7 +270,8 @@ describe('the Copilot card', () => {
       { label: 'Class', value: 'none (unresolved)' },
       {
         label: 'Measurement',
-        value: '12 mm · ROI median 18 HU · portal venous phase · mask from stress policy base · range 11.8–12.6 mm',
+        value:
+          '12 mm · ROI median 18 HU · portal venous phase · mask from stress policy base · range 11.8–12.6 mm',
       },
       { label: 'Recipe', value: 'segmenter@test' },
     ]);
@@ -210,8 +291,13 @@ describe('the Copilot card', () => {
     const view = copilotView(makeEvidence(), 'F1')!;
     expect(view.comparison).toBe('Paired measurements · 10 mm on 2025-01-02 · 12 mm on this study');
     expect(view.comparison).not.toMatch(/\b(stable|new|growth)\b/i);
-    expect(view.alternatives).toEqual([{ proposalId: 'cmd-1', text: 'Class II (reportable, model@test, score 0.6)' }]);
-    expect(view.questions).toEqual(['Unresolved predicate: well defined', 'Unresolved predicate: thin wall']);
+    expect(view.alternatives).toEqual([
+      { proposalId: 'cmd-1', text: 'Class II (reportable, model@test, score 0.6)' },
+    ]);
+    expect(view.questions).toEqual([
+      'Unresolved predicate: well defined',
+      'Unresolved predicate: thin wall',
+    ]);
     expect(view.signing).toEqual(['Needs an acknowledgement against the displayed revision']);
     expect(view.processing).toEqual(['peritoneal cavity assessed']);
   });
@@ -222,7 +308,9 @@ describe('the Copilot card', () => {
   });
 
   it('words a canonical block with no single value by what it has', () => {
-    expect(canonicalLine({ units: 'HU', statistic: 'ROI median', phase: 'unenhanced' })).toBe('ROI median · unenhanced phase');
+    expect(canonicalLine({ units: 'HU', statistic: 'ROI median', phase: 'unenhanced' })).toBe(
+      'ROI median · unenhanced phase'
+    );
     expect(canonicalLine({})).toBeNull();
   });
 });

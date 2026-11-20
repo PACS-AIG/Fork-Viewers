@@ -19,9 +19,20 @@
  * The harness reads `harnessState()`, which names the study by reference,
  * never by UID.
  */
-import { RsRefused, type RsEvidenceView, type RsInbox, type RsReport, type RsVersions } from './rsContract';
+import {
+  RsRefused,
+  type RsEvidenceView,
+  type RsInbox,
+  type RsReport,
+  type RsVersions,
+} from './rsContract';
 import { RsHttpError, type RsClient } from './rsClient';
-import { buildIntakeEvent, type RsEventBody, type RsIntakeEvent, type RsSelection } from './rsEvents';
+import {
+  buildIntakeEvent,
+  type RsEventBody,
+  type RsIntakeEvent,
+  type RsSelection,
+} from './rsEvents';
 import { draftView, selectionOf, type DraftPassage } from './rsModel';
 
 export type RsPhase = 'idle' | 'loading' | 'ready' | 'not_served' | 'refused' | 'failed';
@@ -188,7 +199,11 @@ export function createRsController(deps: RsControllerDeps): RsController {
     return same ? selectionOf(same) : null;
   };
 
-  async function readAll(uid: string, gen: number, versions?: RsVersions): Promise<RsDocuments | null> {
+  async function readAll(
+    uid: string,
+    gen: number,
+    versions?: RsVersions
+  ): Promise<RsDocuments | null> {
     counts.reads++;
     const report = await client.report(uid, 'published');
     const [v, inbox, evidence] = await Promise.all([
@@ -374,7 +389,10 @@ export function createRsController(deps: RsControllerDeps): RsController {
       };
     } else if (answer.status === 'rejected') {
       counts.rejected++;
-      notice = { level: 'error', text: `Not applied: ${answer.reason ?? 'the service refused it.'}` };
+      notice = {
+        level: 'error',
+        text: `Not applied: ${answer.reason ?? 'the service refused it.'}`,
+      };
     } else {
       notice = { level: 'info', text: `${label}: ${answer.status}.` };
     }
@@ -407,7 +425,8 @@ export function createRsController(deps: RsControllerDeps): RsController {
     return post(doc, label);
   }
 
-  const selectable = (): DraftPassage[] => (state.docs ? draftView(state.docs.report).selectable : []);
+  const selectable = (): DraftPassage[] =>
+    state.docs ? draftView(state.docs.report).selectable : [];
 
   function openCopilot(): boolean {
     if (state.phase !== 'ready') {
@@ -415,7 +434,10 @@ export function createRsController(deps: RsControllerDeps): RsController {
     }
     if (!state.selection?.entryId) {
       set({
-        notice: { level: 'info', text: 'Select a sentence first: the Copilot opens on the selected finding.' },
+        notice: {
+          level: 'info',
+          text: 'Select a sentence first: the Copilot opens on the selected finding.',
+        },
       });
       return false;
     }
@@ -475,7 +497,12 @@ export function createRsController(deps: RsControllerDeps): RsController {
         return;
       }
       const at = list.findIndex(p => p.id === state.selection?.passageId);
-      const next = at < 0 ? (delta > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, at + delta));
+      const next =
+        at < 0
+          ? delta > 0
+            ? 0
+            : list.length - 1
+          : Math.min(list.length - 1, Math.max(0, at + delta));
       select(list[next].id);
     },
     openCopilot,

@@ -107,8 +107,13 @@ export function createRsClient({
     versions: uid => read<RsVersions>(`${study(uid)}/versions`, 'versions', 'version list'),
     inbox: uid => read<RsInbox>(`${study(uid)}/inbox`, 'inbox', 'inbox'),
     evidenceView: (uid, version = 'published') =>
-      read<RsEvidenceView>(`${study(uid)}/evidence_view?version=${version}`, 'evidence_view', 'evidence view'),
-    snapshot: id => read<RsSnapshotDocument>(`/snapshots/${encodeURIComponent(id)}`, 'snapshot', 'snapshot'),
+      read<RsEvidenceView>(
+        `${study(uid)}/evidence_view?version=${version}`,
+        'evidence_view',
+        'evidence view'
+      ),
+    snapshot: id =>
+      read<RsSnapshotDocument>(`/snapshots/${encodeURIComponent(id)}`, 'snapshot', 'snapshot'),
     async postEvent(doc) {
       const res = await fetchFn(`${root}/events`, {
         method: 'POST',
@@ -122,7 +127,9 @@ export function createRsClient({
       }
       const answer = (await res.json().catch(() => null)) as RsIntakeResponse | null;
       if (!answer || answer.artifact !== 'intake_response' || typeof answer.status !== 'string') {
-        throw new RsRefused('The CT analysis service answered the event with something that is not an intake response.');
+        throw new RsRefused(
+          'The CT analysis service answered the event with something that is not an intake response.'
+        );
       }
       return answer;
     },

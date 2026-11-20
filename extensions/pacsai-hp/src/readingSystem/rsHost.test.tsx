@@ -1,6 +1,14 @@
 import { act, fireEvent } from '@testing-library/react';
 import type { RsController, RsSnapshot } from './rsController';
-import { BAR_PX, ISLAND_MIN_PX, PANE_MIN_PX, createRsHost, inReportEditor, isTyping, paneHeightPx } from './rsHost';
+import {
+  BAR_PX,
+  ISLAND_MIN_PX,
+  PANE_MIN_PX,
+  createRsHost,
+  inReportEditor,
+  isTyping,
+  paneHeightPx,
+} from './rsHost';
 import { makeEvidence, makeInbox, makeReport, makeVersions } from './testDocs';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -9,7 +17,12 @@ function fakeController(initial: Partial<RsSnapshot> = {}) {
   let state: RsSnapshot = {
     phase: 'ready',
     reason: null,
-    docs: { report: makeReport(), versions: makeVersions(), inbox: makeInbox(), evidence: makeEvidence() },
+    docs: {
+      report: makeReport(),
+      versions: makeVersions(),
+      inbox: makeInbox(),
+      evidence: makeEvidence(),
+    },
     selection: null,
     copilotOpen: false,
     tab: 'draft',
@@ -39,7 +52,9 @@ function fakeController(initial: Partial<RsSnapshot> = {}) {
       return true;
     }),
     closeCopilot: jest.fn(() => set({ copilotOpen: false })),
-    select: jest.fn((id: string) => set({ selection: { entryId: 'F1', passageId: id, sentenceId: 's-liver' } })),
+    select: jest.fn((id: string) =>
+      set({ selection: { entryId: 'F1', passageId: id, sentenceId: 's-liver' } })
+    ),
     moveSelection: jest.fn(),
     setTab: jest.fn((tab: RsSnapshot['tab']) => set({ tab })),
     setCollapsed: jest.fn((collapsed: boolean) => set({ collapsed })),
@@ -66,7 +81,17 @@ function column() {
   island.append(editor, islandButton);
   col.append(island);
   document.body.append(col);
-  col.getBoundingClientRect = () => ({ height: 1000, width: 600, top: 0, left: 0, right: 600, bottom: 1000, x: 0, y: 0, toJSON() {} });
+  col.getBoundingClientRect = () => ({
+    height: 1000,
+    width: 600,
+    top: 0,
+    left: 0,
+    right: 600,
+    bottom: 1000,
+    x: 0,
+    y: 0,
+    toJSON() {},
+  });
   return { col, island, editor, islandButton };
 }
 
@@ -104,7 +129,7 @@ describe('the pane in the report column (RS-36)', () => {
     expect(inReportEditor(inPortal)).toBe(true);
   });
 
-  it('mounts the pane as the column\'s first child and tells the dock its height, for the island to start below', () => {
+  it("mounts the pane as the column's first child and tells the dock its height, for the island to start below", () => {
     const { col } = column();
     const { controller } = fakeController();
     const setInset = jest.fn();
@@ -182,13 +207,22 @@ describe('the pane in the report column (RS-36)', () => {
           updates: ['u-1'],
           claims: [],
           summary: 'diameter 12 -> 14 mm',
-          preview: [{ passageId: 'p-liver', section: 'liver_and_biliary', before: 'old line', after: 'changed line' }],
+          preview: [
+            {
+              passageId: 'p-liver',
+              section: 'liver_and_biliary',
+              before: 'old line',
+              after: 'changed line',
+            },
+          ],
           acceptable: true,
         },
       ],
     });
     const { controller, set } = fakeController();
-    set({ docs: { report: makeReport(), versions: makeVersions(), inbox, evidence: makeEvidence() } });
+    set({
+      docs: { report: makeReport(), versions: makeVersions(), inbox, evidence: makeEvidence() },
+    });
     let host: ReturnType<typeof createRsHost>;
     act(() => {
       host = createRsHost({ win: window, column: col, controller, setInset: () => {} });
@@ -199,7 +233,9 @@ describe('the pane in the report column (RS-36)', () => {
     });
     expect(controller.select).toHaveBeenCalledWith('p-liver');
     expect(col.querySelector('[data-rs-copilot]')).toBeNull();
-    expect(col.querySelector('[data-rs-inbox-count]')?.getAttribute('data-rs-inbox-count')).toBe('1');
+    expect(col.querySelector('[data-rs-inbox-count]')?.getAttribute('data-rs-inbox-count')).toBe(
+      '1'
+    );
     act(() => {
       fireEvent.keyDown(sentence, { key: 'Enter' });
     });
@@ -208,7 +244,9 @@ describe('the pane in the report column (RS-36)', () => {
     act(() => {
       controller.setTab('inbox');
     });
-    expect(col.querySelector('[data-rs-change="p-liver"] [data-rs-after]')?.textContent).toBe('changed line');
+    expect(col.querySelector('[data-rs-change="p-liver"] [data-rs-after]')?.textContent).toBe(
+      'changed line'
+    );
     act(() => {
       fireEvent.click(col.querySelector('[data-rs-accept="inbox-1"]') as HTMLElement);
       fireEvent.click(col.querySelector('[data-rs-reject="inbox-1"]') as HTMLElement);

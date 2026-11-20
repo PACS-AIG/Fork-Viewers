@@ -46,7 +46,9 @@ const PORT = Number(process.env.RS_E2E_PORT || 3036);
 const POLL_MS = Number(process.env.RS_E2E_POLL_MS || 1000);
 const API = new URL(process.env.RS_API_URL || 'http://127.0.0.1:8300');
 if (API.protocol !== 'http:') {
-  console.error('rs-e2e harness: RS_API_URL must be an http:// URL (a loopback server or a tunnel to one)');
+  console.error(
+    'rs-e2e harness: RS_API_URL must be an http:// URL (a loopback server or a tunnel to one)'
+  );
   process.exit(2);
 }
 const tokenFile = process.env.RS_API_TOKEN_FILE;
@@ -177,7 +179,9 @@ function forward(req, res, rest) {
       });
       up.pipe(res);
     });
-    upstream.on('error', () => send(res, 502, 'application/json', '{"detail":"the reading system API did not answer"}'));
+    upstream.on('error', () =>
+      send(res, 502, 'application/json', '{"detail":"the reading system API did not answer"}')
+    );
     upstream.end(body);
   });
 }
@@ -186,10 +190,19 @@ function forward(req, res, rest) {
 function apiGet(rest) {
   return new Promise((resolve, reject) => {
     const target = new URL(rest, API);
-    const headers = { Authorization: `Bearer ${TOKEN}`, Accept: 'application/json', Host: target.host };
+    const headers = {
+      Authorization: `Bearer ${TOKEN}`,
+      Accept: 'application/json',
+      Host: target.host,
+    };
     const options = PROXY
       ? { host: PROXY.hostname, port: Number(PROXY.port || 80), path: target.href, headers }
-      : { host: target.hostname, port: Number(target.port || 80), path: `${target.pathname}${target.search}`, headers };
+      : {
+          host: target.hostname,
+          port: Number(target.port || 80),
+          path: `${target.pathname}${target.search}`,
+          headers,
+        };
     http
       .get(options, up => {
         const chunks = [];

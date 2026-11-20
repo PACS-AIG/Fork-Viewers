@@ -21,7 +21,10 @@ import { defineConfig } from '@playwright/test';
 
 const PORT = Number(process.env.RS_E2E_PORT || 3036);
 const proxyServer =
-  process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+  process.env.HTTPS_PROXY ||
+  process.env.https_proxy ||
+  process.env.HTTP_PROXY ||
+  process.env.http_proxy;
 const DIRECT_HOSTS = ['arc-dev.pacsai.net', 'arc.pacsai.net'];
 const bypass = [
   ...(process.env.NO_PROXY || process.env.no_proxy || 'localhost,127.0.0.1,::1').split(','),
@@ -43,7 +46,13 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   reporter: [
     ['list'],
-    ['json', { outputFile: process.env.RS_E2E_REPORT || path.join(__dirname, 'test-results', 'rs-editor-ui.json') }],
+    [
+      'json',
+      {
+        outputFile:
+          process.env.RS_E2E_REPORT || path.join(__dirname, 'test-results', 'rs-editor-ui.json'),
+      },
+    ],
   ],
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,

@@ -55,7 +55,9 @@ export interface RsSection {
 }
 
 /** One entry of the chrome's pending tasks: a bare string names a pending task. */
-export type RsPendingTask = string | { task: string; status?: 'pending' | 'running' | 'failed' | 'unavailable' };
+export type RsPendingTask =
+  | string
+  | { task: string; status?: 'pending' | 'running' | 'failed' | 'unavailable' };
 
 export interface RsUnrenderedEntry {
   entryId: string;
@@ -127,7 +129,14 @@ export interface RsSideChange {
 
 export interface RsClaimDelta {
   entryId?: string | null;
-  property: 'presence' | 'measurement' | 'class' | 'location' | 'sentence' | 'required' | 'impression';
+  property:
+    | 'presence'
+    | 'measurement'
+    | 'class'
+    | 'location'
+    | 'sentence'
+    | 'required'
+    | 'impression';
   before?: unknown;
   after?: unknown;
 }
@@ -281,7 +290,12 @@ export interface RsEvidenceView extends RsEnvelope {
   artifact: 'evidence_view';
   findings: RsFindingEvidence[];
   study: {
-    processingPanel: Array<{ region: string; methodFamily: string; adequate: boolean; text: string }>;
+    processingPanel: Array<{
+      region: string;
+      methodFamily: string;
+      adequate: boolean;
+      text: string;
+    }>;
     questions?: unknown;
   };
 }
@@ -342,9 +356,15 @@ export function contractMajor(version: unknown): number | null {
  * The document, checked against the contract's rules for a consumer: this
  * major, this viewer's mode and the expected artifact. Throws RsRefused.
  */
-export function checkDocument<T extends RsEnvelope>(doc: unknown, artifact: string, mode: RsMode): T {
+export function checkDocument<T extends RsEnvelope>(
+  doc: unknown,
+  artifact: string,
+  mode: RsMode
+): T {
   if (!doc || typeof doc !== 'object') {
-    throw new RsRefused(`The CT analysis service sent something that is not a ${artifact} document.`);
+    throw new RsRefused(
+      `The CT analysis service sent something that is not a ${artifact} document.`
+    );
   }
   const d = doc as Partial<RsEnvelope>;
   const major = contractMajor(d.contractVersion);

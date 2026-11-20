@@ -43,9 +43,19 @@ describe('the reading system client (RS-36)', () => {
   });
 
   it('says a study is not served by its status, and refuses a document of another mode', async () => {
-    const notServed = createRsClient({ base: '/rs-api', mode: 'fixture', fetchFn: fakeFetch(() => ({ status: 404, body: {} })).fetchFn });
-    await expect(notServed.report('s')).rejects.toEqual(expect.objectContaining({ name: 'RsHttpError', status: 404 }));
-    const clinical = createRsClient({ base: '/rs-api', mode: 'clinical', fetchFn: fakeFetch(() => ({ status: 200, body: makeReport() })).fetchFn });
+    const notServed = createRsClient({
+      base: '/rs-api',
+      mode: 'fixture',
+      fetchFn: fakeFetch(() => ({ status: 404, body: {} })).fetchFn,
+    });
+    await expect(notServed.report('s')).rejects.toEqual(
+      expect.objectContaining({ name: 'RsHttpError', status: 404 })
+    );
+    const clinical = createRsClient({
+      base: '/rs-api',
+      mode: 'clinical',
+      fetchFn: fakeFetch(() => ({ status: 200, body: makeReport() })).fetchFn,
+    });
     await expect(clinical.report('s')).rejects.toBeInstanceOf(RsRefused);
   });
 
@@ -65,9 +75,17 @@ describe('the reading system client (RS-36)', () => {
   });
 
   it('throws on any other status or an answer that is not an intake response', async () => {
-    const down = createRsClient({ base: '/rs-api', mode: 'fixture', fetchFn: fakeFetch(() => ({ status: 502, body: {} })).fetchFn });
+    const down = createRsClient({
+      base: '/rs-api',
+      mode: 'fixture',
+      fetchFn: fakeFetch(() => ({ status: 502, body: {} })).fetchFn,
+    });
     await expect(down.postEvent({} as never)).rejects.toBeInstanceOf(RsHttpError);
-    const odd = createRsClient({ base: '/rs-api', mode: 'fixture', fetchFn: fakeFetch(() => ({ status: 200, body: { hello: 1 } })).fetchFn });
+    const odd = createRsClient({
+      base: '/rs-api',
+      mode: 'fixture',
+      fetchFn: fakeFetch(() => ({ status: 200, body: { hello: 1 } })).fetchFn,
+    });
     await expect(odd.postEvent({} as never)).rejects.toBeInstanceOf(RsRefused);
   });
 

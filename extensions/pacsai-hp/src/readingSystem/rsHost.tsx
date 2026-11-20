@@ -28,7 +28,10 @@ export const ISLAND_MIN_PX = 200;
 export const COPILOT_KEYS = ['k', 'K'];
 
 /** The pane's height for this state in a column this tall (pure). */
-export function paneHeightPx(snap: Pick<RsSnapshot, 'phase' | 'collapsed'>, columnPx: number): number {
+export function paneHeightPx(
+  snap: Pick<RsSnapshot, 'phase' | 'collapsed'>,
+  columnPx: number
+): number {
   if (snap.phase === 'idle' || snap.phase === 'not_served') {
     return 0;
   }

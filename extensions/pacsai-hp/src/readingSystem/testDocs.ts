@@ -45,8 +45,22 @@ export function makeReport(over: Partial<RsReport> = {}): RsReport {
       impression: { id: 'impression', title: 'Impression', passageIds: ['p-imp'] },
     },
     passages: [
-      { id: 'p-ind', section: 'indication', owner: 'machine', text: 'Abdominal pain.', sentenceIds: [], boundEntries: [] },
-      { id: 'p-comp', section: 'comparison', owner: 'machine', text: 'None.', sentenceIds: [], boundEntries: [] },
+      {
+        id: 'p-ind',
+        section: 'indication',
+        owner: 'machine',
+        text: 'Abdominal pain.',
+        sentenceIds: [],
+        boundEntries: [],
+      },
+      {
+        id: 'p-comp',
+        section: 'comparison',
+        owner: 'machine',
+        text: 'None.',
+        sentenceIds: [],
+        boundEntries: [],
+      },
       {
         id: 'p-liver',
         section: 'liver_and_biliary',
@@ -160,7 +174,12 @@ export function makeEvidence(over: Partial<RsEvidenceView> = {}): RsEvidenceView
         critical: false,
         sources: [
           { type: 'lesion_task', producer: 'test:lesions', classHypothesis: 'hypodense_lesion' },
-          { type: 'detector', producer: 'test:detector', classHypothesis: 'solid mass', score: 0.7 },
+          {
+            type: 'detector',
+            producer: 'test:detector',
+            classHypothesis: 'solid mass',
+            score: 0.7,
+          },
         ],
         disagreement: [{ source: 'test:detector', classHypothesis: 'solid mass' }],
         canonical: {
@@ -177,21 +196,47 @@ export function makeEvidence(over: Partial<RsEvidenceView> = {}): RsEvidenceView
         },
         classState: 'unresolved',
         className: null,
-        branches: { pathway_a: { state: 'unresolved', unresolved: ['well_defined'] }, pathway_b: { state: 'unresolved', reason: 'threshold_null' } },
+        branches: {
+          pathway_a: { state: 'unresolved', unresolved: ['well_defined'] },
+          pathway_b: { state: 'unresolved', reason: 'threshold_null' },
+        },
         unresolvedPredicates: ['well_defined'],
-        comparison: { form: 'paired_measurements', rendered: true, priorValue_mm: 10, priorDate: '2025-01-02', currentValue_mm: 12 },
+        comparison: {
+          form: 'paired_measurements',
+          rendered: true,
+          priorValue_mm: 10,
+          priorDate: '2025-01-02',
+          currentValue_mm: 12,
+        },
         classAlternatives: [
-          { className: 'Class II', detectorClass: 'c2', proposalId: 'cmd-1', reportedAs: 'reportable', model: 'model@test', score: 0.6 },
+          {
+            className: 'Class II',
+            detectorClass: 'c2',
+            proposalId: 'cmd-1',
+            reportedAs: 'reportable',
+            model: 'model@test',
+            score: 0.6,
+          },
         ],
         questions: [
           { order: 2, kind: 'unresolved_predicate', predicate: 'thin_wall' },
           { order: 1, kind: 'unresolved_predicate', predicate: 'well_defined' },
         ],
-        signing: { requiresAcknowledgementAgainstDisplayedRevision: true, requiresDisposition: false },
+        signing: {
+          requiresAcknowledgementAgainstDisplayedRevision: true,
+          requiresDisposition: false,
+        },
       },
     ],
     study: {
-      processingPanel: [{ region: 'peritoneal_cavity', methodFamily: 'physics', adequate: true, text: 'peritoneal cavity assessed' }],
+      processingPanel: [
+        {
+          region: 'peritoneal_cavity',
+          methodFamily: 'physics',
+          adequate: true,
+          text: 'peritoneal cavity assessed',
+        },
+      ],
     },
     ...over,
   };

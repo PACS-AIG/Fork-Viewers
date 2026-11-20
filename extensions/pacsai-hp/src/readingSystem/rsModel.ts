@@ -35,7 +35,10 @@ import type {
 import type { RsSelection } from './rsEvents';
 
 /** snake_case ids as words ('portal_venous' -> 'portal venous'). */
-export const words = (id: unknown): string => String(id ?? '').replace(/_/g, ' ').trim();
+export const words = (id: unknown): string =>
+  String(id ?? '')
+    .replace(/_/g, ' ')
+    .trim();
 /** As words, the first letter capitalized, for a label. */
 export const label = (id: unknown): string => {
   const w = words(id);
@@ -120,7 +123,11 @@ export function sectionTitles(report: RsReport | null): Map<string, string> {
   if (!report) {
     return titles;
   }
-  for (const s of [...report.sections.meta, ...report.sections.findings, report.sections.impression]) {
+  for (const s of [
+    ...report.sections.meta,
+    ...report.sections.findings,
+    report.sections.impression,
+  ]) {
     titles.set(s.id, s.title);
   }
   return titles;
@@ -167,7 +174,11 @@ export function chromeLines(report: RsReport): ChromeLine[] {
     });
   }
   if (comparison.state && comparison.state !== 'complete') {
-    lines.push({ key: 'comparison', text: `Comparison ${words(comparison.state)}`, tone: 'pending' });
+    lines.push({
+      key: 'comparison',
+      text: `Comparison ${words(comparison.state)}`,
+      tone: 'pending',
+    });
   }
   if (comparison.unlinked?.length) {
     lines.push({
@@ -284,7 +295,8 @@ export function inboxView(inbox: RsInbox, report: RsReport | null): InboxEntryVi
     preview: (e.preview ?? []).map(c => changeLine(c, titles)),
     patches: (e.patches ?? []).map(p => ({
       passageId: p.passageId,
-      sectionTitle: titles.get(report?.passages.find(x => x.id === p.passageId)?.section ?? '') ?? '',
+      sectionTitle:
+        titles.get(report?.passages.find(x => x.id === p.passageId)?.section ?? '') ?? '',
       status: p.status,
       ours: p.ours,
       theirs: p.theirs,
@@ -304,8 +316,16 @@ export function changeListView(cl: RsChangeList, report: RsReport | null): Chang
   const titles = sectionTitles(report);
   const groups: ChangeGroup[] = [
     { key: 'added', label: 'Lines added', lines: (cl.added ?? []).map(c => changeLine(c, titles)) },
-    { key: 'changed', label: 'Lines changed', lines: (cl.changed ?? []).map(c => changeLine(c, titles)) },
-    { key: 'deleted', label: 'Lines deleted', lines: (cl.deleted ?? []).map(c => changeLine(c, titles)) },
+    {
+      key: 'changed',
+      label: 'Lines changed',
+      lines: (cl.changed ?? []).map(c => changeLine(c, titles)),
+    },
+    {
+      key: 'deleted',
+      label: 'Lines deleted',
+      lines: (cl.deleted ?? []).map(c => changeLine(c, titles)),
+    },
     {
       key: 'sides',
       label: 'Sides changed',
@@ -396,7 +416,9 @@ export function canonicalLine(c: RsCanonical): string | null {
     parts.push(words(c.kind));
   }
   if (Array.isArray(c.range) && c.range.length === 2) {
-    parts.push(`range ${fmtNumber(c.range[0])}–${fmtNumber(c.range[1])}${c.units ? ` ${c.units}` : ''}`);
+    parts.push(
+      `range ${fmtNumber(c.range[0])}–${fmtNumber(c.range[1])}${c.units ? ` ${c.units}` : ''}`
+    );
   }
   return parts.length ? parts.join(' · ') : null;
 }
@@ -446,7 +468,9 @@ export function copilotView(ev: RsEvidenceView, entryId: string | null): Copilot
   }
   return {
     entryId: f.entryId,
-    heading: [label(f.kind), words(f.tier), f.critical ? 'critical' : null].filter(Boolean).join(' · '),
+    heading: [label(f.kind), words(f.tier), f.critical ? 'critical' : null]
+      .filter(Boolean)
+      .join(' · '),
     facts,
     sources: (f.sources ?? []).map(s =>
       [

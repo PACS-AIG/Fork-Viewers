@@ -65,7 +65,8 @@ export function readingSystemConfig(win: Window = window): ReadingSystemConfig |
   };
 }
 
-export const readingSystemEnabled = (win: Window = window): boolean => readingSystemConfig(win) !== null;
+export const readingSystemEnabled = (win: Window = window): boolean =>
+  readingSystemConfig(win) !== null;
 
 // The viewer's signed-in user, for the events' reader (the mode hands in OHIF's
 // user authentication service, as it does for the dock).
@@ -162,7 +163,12 @@ export function enterReadingSystem(
   if (!host || host.column !== column) {
     host?.destroy();
     offDock?.();
-    host = createRsHost({ win, column, controller: c, setInset: px => dock.setReadingSystemInset(px) });
+    host = createRsHost({
+      win,
+      column,
+      controller: c,
+      setInset: px => dock.setReadingSystemInset(px),
+    });
     offDock = dock.subscribe(() => {
       if (dock.isGone()) {
         leaveReadingSystem();

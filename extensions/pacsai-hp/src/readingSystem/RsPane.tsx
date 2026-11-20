@@ -181,7 +181,13 @@ function Draft({ snap, controller }: { snap: RsSnapshot; controller: RsControlle
                 key={p.id}
                 className="prs-passage"
                 role="option"
-                tabIndex={p.selectable ? (p.id === selected || (!selected && p === view.selectable[0]) ? 0 : -1) : undefined}
+                tabIndex={
+                  p.selectable
+                    ? p.id === selected || (!selected && p === view.selectable[0])
+                      ? 0
+                      : -1
+                    : undefined
+                }
                 aria-selected={p.id === selected}
                 aria-disabled={!p.selectable}
                 data-selectable={p.selectable}
@@ -203,7 +209,9 @@ function Draft({ snap, controller }: { snap: RsSnapshot; controller: RsControlle
 function Inbox({ snap, controller }: { snap: RsSnapshot; controller: RsController }) {
   const entries = inboxView(snap.docs!.inbox, snap.docs!.report);
   if (!entries.length) {
-    return <div className="prs-empty">Nothing waiting: no update since the draft was published.</div>;
+    return (
+      <div className="prs-empty">Nothing waiting: no update since the draft was published.</div>
+    );
   }
   return (
     <div data-rs-inbox="">
@@ -324,7 +332,9 @@ function Changes({ snap, controller }: { snap: RsSnapshot; controller: RsControl
               style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '3px 0' }}
             >
               <span className="prs-meta">r{r.revision}</span>
-              <span style={r.undone ? { textDecoration: 'line-through', color: '#7F8EA0' } : undefined}>
+              <span
+                style={r.undone ? { textDecoration: 'line-through', color: '#7F8EA0' } : undefined}
+              >
                 {r.label}
               </span>
               {r.undoable ? (
@@ -347,7 +357,9 @@ function Changes({ snap, controller }: { snap: RsSnapshot; controller: RsControl
 }
 
 function Copilot({ snap, controller }: { snap: RsSnapshot; controller: RsController }) {
-  const view = snap.docs?.evidence ? copilotView(snap.docs.evidence, snap.selection?.entryId ?? null) : null;
+  const view = snap.docs?.evidence
+    ? copilotView(snap.docs.evidence, snap.selection?.entryId ?? null)
+    : null;
   const closeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     closeRef.current?.focus();
@@ -437,10 +449,16 @@ function CSS_ESCAPE(value: string): string {
 
 export function RsPane({ controller, doc }: { controller: RsController; doc?: Document }) {
   useInjectedStyle(doc ?? (typeof document !== 'undefined' ? document : undefined));
-  const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+  const snap = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot
+  );
   const docs = snap.docs;
   const inboxCount = docs?.inbox.entries.length ?? 0;
-  const changeCount = docs ? changeListView(docs.inbox.changeList, docs.report).reduce((n, g) => n + g.lines.length, 0) : 0;
+  const changeCount = docs
+    ? changeListView(docs.inbox.changeList, docs.report).reduce((n, g) => n + g.lines.length, 0)
+    : 0;
   const lines = docs ? chromeLines(docs.report) : [];
   const ready = snap.phase === 'ready' && docs;
   const status =
@@ -448,7 +466,7 @@ export function RsPane({ controller, doc }: { controller: RsController; doc?: Do
       ? 'Loading…'
       : snap.phase === 'refused' || snap.phase === 'failed'
         ? (snap.reason ?? 'Unavailable')
-        : lines[0]?.text ?? '';
+        : (lines[0]?.text ?? '');
 
   return (
     <div
@@ -548,7 +566,11 @@ export function RsPane({ controller, doc }: { controller: RsController; doc?: Do
                 onClick={() => controller.setTab(t.id)}
               >
                 {t.label}
-                {t.id === 'inbox' ? ` (${inboxCount})` : t.id === 'changes' ? ` (${changeCount})` : ''}
+                {t.id === 'inbox'
+                  ? ` (${inboxCount})`
+                  : t.id === 'changes'
+                    ? ` (${changeCount})`
+                    : ''}
               </button>
             ))}
           </div>

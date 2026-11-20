@@ -59,10 +59,18 @@ describe('the reading system switches (RS-36)', () => {
     expect(readingSystemConfig()).toBeNull();
     expect(readingSystemEnabled()).toBe(false);
     window.PACSAI_READING_SYSTEM_API = '/api/reading-system/';
-    expect(readingSystemConfig()).toEqual({ base: '/api/reading-system', mode: 'clinical', pollMs: DEFAULT_POLL_MS });
+    expect(readingSystemConfig()).toEqual({
+      base: '/api/reading-system',
+      mode: 'clinical',
+      pollMs: DEFAULT_POLL_MS,
+    });
     window.PACSAI_READING_SYSTEM_MODE = ' Fixture ';
     window.PACSAI_READING_SYSTEM_POLL_MS = '10';
-    expect(readingSystemConfig()).toEqual({ base: '/api/reading-system', mode: 'fixture', pollMs: MIN_POLL_MS });
+    expect(readingSystemConfig()).toEqual({
+      base: '/api/reading-system',
+      mode: 'fixture',
+      pollMs: MIN_POLL_MS,
+    });
     window.PACSAI_READING_SYSTEM_API = '   ';
     expect(readingSystemEnabled()).toBe(false);
   });
@@ -76,10 +84,10 @@ describe('the reading system switches (RS-36)', () => {
     expect(document.querySelector('[data-pacsai-rs-pane]')).toBeNull();
   });
 
-  it('mounts the pane in the dock\'s column, reads the study, names the viewer\'s user, and goes with the dock', async () => {
+  it("mounts the pane in the dock's column, reads the study, names the viewer's user, and goes with the dock", async () => {
     window.PACSAI_READING_SYSTEM_API = '/rs-api';
     window.PACSAI_READING_SYSTEM_MODE = 'fixture';
-    const posted: Array<Record<string, any>> = [];
+    const posted: Array<Record<string, unknown>> = [];
     const answers: Record<string, unknown> = {
       report: makeReport(),
       versions: makeVersions(),
@@ -90,7 +98,16 @@ describe('the reading system switches (RS-36)', () => {
     const fetchMock = jest.fn(async (url: string, init?: { method?: string; body?: string }) => {
       if (init?.method === 'POST') {
         posted.push(JSON.parse(init.body ?? '{}'));
-        return { status: 200, ok: true, json: async () => ({ artifact: 'intake_response', status: 'recorded', httpStatus: 200, revision: 4 }) };
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({
+            artifact: 'intake_response',
+            status: 'recorded',
+            httpStatus: 200,
+            revision: 4,
+          }),
+        };
       }
       const key = Object.keys(answers).find(k => url.includes(`/${k}`)) ?? '';
       return { status: 200, ok: true, json: async () => answers[key] };
@@ -110,7 +127,9 @@ describe('the reading system switches (RS-36)', () => {
     expect(posted[0]?.event).toEqual({ type: 'opened' });
     expect(posted[0]?.reader).toEqual({ id: 'dr.reader', role: 'radiologist' });
     // The harness's view names the study by reference, never by UID.
-    const state = (window as unknown as { __pacsaiReadingSystem: { getState: () => Record<string, unknown> } }).__pacsaiReadingSystem.getState();
+    const state = (
+      window as unknown as { __pacsaiReadingSystem: { getState: () => Record<string, unknown> } }
+    ).__pacsaiReadingSystem.getState();
     expect(state.phase).toBe('ready');
     expect(String(state.study)).toMatch(/^fnv1a64:/);
     // Entering again keeps the one pane.

@@ -119,7 +119,9 @@ export function buildIntakeEvent(
 }
 
 /** A fresh id for an event or a session: the platform's UUID where there is one. */
-export function freshId(cryptoLike: { randomUUID?: () => string } | undefined = globalThis.crypto): string {
+export function freshId(
+  cryptoLike: { randomUUID?: () => string } | undefined = globalThis.crypto
+): string {
   if (cryptoLike && typeof cryptoLike.randomUUID === 'function') {
     return cryptoLike.randomUUID();
   }
