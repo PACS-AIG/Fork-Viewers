@@ -4,9 +4,10 @@
  * (ct-analysis-system's gate rs-editor-ui; its BP-14b and the system's
  * invariants 1, 4, 5 and 16). Each test names the clause it checks.
  *
- * The tests share one server and run in order: the inbox tests change the
- * records of the two fixture studies that have a late result. Run them on a
- * fresh record store.
+ * The tests share one server and run in file order (one worker): the inbox
+ * tests change the records of the two fixture studies that have a late
+ * result, so run them on a fresh record store. Only the three tests on one
+ * study depend on each other; they run as one serial chain.
  */
 import { expect, test } from '@playwright/test';
 import type {
@@ -26,8 +27,6 @@ import {
   playLateResult,
   publishedShown,
 } from './rsE2e';
-
-test.describe.configure({ mode: 'serial' });
 
 const RICH = 'renal';
 const UPDATE = 'machine_measurement_update';
@@ -136,147 +135,160 @@ test('clicking a sentence selects it and opens nothing; one key opens the Copilo
   await expect(copilot).toHaveCount(0);
 });
 
-test('a result that completes after opening lands in the inbox with its preview, and the published draft is unchanged', async ({
-  page,
-  request,
-}) => {
-  await openStudy(page, UPDATE);
-  await expectOpened(request, UPDATE);
-  const before = await doc<RsReport>(request, UPDATE, 'report?version=published');
-  await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '0');
+// The late result on one study, in order: the inbox, Accept and Undo, then a stale action against the
+// entry the Undo put back. A failure there skips the rest of this chain only.
+test.describe.serial('a late result on one study', () => {
+  test('a result that completes after opening lands in the inbox with its preview, and the published draft is unchanged', async ({
+    page,
+    request,
+  }) => {
+    await openStudy(page, UPDATE);
+    await expectOpened(request, UPDATE);
+    const before = await doc<RsReport>(request, UPDATE, 'report?version=published');
+    await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '0');
 
-  playLateResult(UPDATE);
+    playLateResult(UPDATE);
 
-  await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '1');
-  const inbox = await doc<RsInbox>(request, UPDATE, 'inbox');
-  expect(inbox.entries).toHaveLength(1);
-  const entry = inbox.entries[0];
+    await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '1');
+    const inbox = await doc<RsInbox>(request, UPDATE, 'inbox');
+    expect(inbox.entries).toHaveLength(1);
+    const entry = inbox.entries[0];
 
-  // Invariant 5: the published draft did not move, in the API or on screen.
-  const after = await doc<RsReport>(request, UPDATE, 'report?version=published');
-  expect(after.revision).toBe(before.revision);
-  expect(after.text).toBe(before.text);
-  await expect(publishedShown(page)).toHaveAttribute('data-rs-published', String(before.revision));
-  for (const p of before.passages) {
-    await expect(pane(page).locator(`[data-rs-passage="${p.id}"]`)).toHaveText(p.text);
-  }
-
-  // The entry, with its exact consequence preview.
-  await pane(page).locator('[data-rs-tab="inbox"]').click();
-  const card = pane(page).locator(`[data-rs-inbox-entry="${entry.id}"]`);
-  await expect(card).toContainText(entry.summary);
-  const preview = entry.preview ?? [];
-  expect(preview.length).toBeGreaterThan(0);
-  for (const change of preview) {
-    const line = card.locator(`[data-rs-change="${change.passageId}"]`);
-    await expect(line.locator('[data-rs-before]')).toHaveText(String(change.before));
-    await expect(line.locator('[data-rs-after]')).toHaveText(String(change.after));
-  }
-
-  // The change list: the latest evidence against the published draft.
-  await pane(page).locator('[data-rs-tab="changes"]').click();
-  const changed = inbox.changeList.changed ?? [];
-  expect(changed.length).toBeGreaterThan(0);
-  for (const change of changed) {
-    const line = pane(page).locator(
-      `[data-rs-change-group="changed"] [data-rs-change="${change.passageId}"]`
+    // Invariant 5: the published draft did not move, in the API or on screen.
+    const after = await doc<RsReport>(request, UPDATE, 'report?version=published');
+    expect(after.revision).toBe(before.revision);
+    expect(after.text).toBe(before.text);
+    await expect(publishedShown(page)).toHaveAttribute(
+      'data-rs-published',
+      String(before.revision)
     );
-    await expect(line.locator('[data-rs-after]')).toHaveText(String(change.after));
-  }
-});
-
-test('accepting the entry publishes its Findings and Impression change at one revision, and one Undo restores the draft', async ({
-  page,
-  request,
-}) => {
-  await openStudy(page, UPDATE);
-  const before = await doc<RsReport>(request, UPDATE, 'report?version=published');
-  const inbox = await doc<RsInbox>(request, UPDATE, 'inbox');
-  expect(inbox.entries).toHaveLength(1);
-  const entry = inbox.entries[0];
-
-  await pane(page).locator('[data-rs-tab="inbox"]').click();
-  await pane(page).locator(`[data-rs-accept="${entry.id}"]`).click();
-
-  // One revision carries the whole change: every line of the preview, whichever section it is in.
-  await expect(publishedShown(page)).toHaveAttribute(
-    'data-rs-published',
-    String(before.revision + 1)
-  );
-  const accepted = await doc<RsReport>(request, UPDATE, 'report?version=published');
-  expect(accepted.revision).toBe(before.revision + 1);
-  for (const change of entry.preview ?? []) {
-    expect(accepted.text).toContain(String(change.after));
-    expect(accepted.text).not.toContain(String(change.before));
-  }
-  const versions = await doc<RsVersions>(request, UPDATE, 'versions');
-  const revision = versions.revisions.find(r => r.revision === before.revision + 1);
-  if (!revision) {
-    throw new Error('no revision for the acceptance');
-  }
-  expect(revision.operation?.inboxEntryId).toBe(entry.id);
-  await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '0');
-  await pane(page).locator('[data-rs-tab="draft"]').click();
-  for (const change of entry.preview ?? []) {
-    await expect(pane(page).locator('[data-rs-draft]')).toContainText(String(change.after));
-  }
-
-  // Nothing left between the latest evidence and the published draft.
-  await pane(page).locator('[data-rs-tab="changes"]').click();
-  await expect(pane(page).locator('[data-rs-changelist-empty]')).toBeVisible();
-
-  // One Undo of that intention restores the draft and puts the update back in the inbox.
-  await pane(page).locator(`[data-rs-undo="${revision.revisionId}"]`).click();
-  await expect(publishedShown(page)).toHaveAttribute(
-    'data-rs-published',
-    String(before.revision + 2)
-  );
-  const undone = await doc<RsReport>(request, UPDATE, 'report?version=published');
-  expect(texts(undone.passages)).toEqual(texts(before.passages));
-  await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '1');
-});
-
-test('an action against a revision another reader moved is answered 409, and the pane shows the current draft', async ({
-  browser,
-  request,
-}) => {
-  // Reader A's pane, with its version polls held at what it first read.
-  const a = await browser.newPage();
-  let held: string | null = null;
-  await a.route('**/rs-api/studies/*/versions', async route => {
-    if (held === null) {
-      const res = await route.fetch();
-      held = await res.text();
+    for (const p of before.passages) {
+      await expect(pane(page).locator(`[data-rs-passage="${p.id}"]`)).toHaveText(p.text);
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: held });
+
+    // The entry, with its exact consequence preview.
+    await pane(page).locator('[data-rs-tab="inbox"]').click();
+    const card = pane(page).locator(`[data-rs-inbox-entry="${entry.id}"]`);
+    await expect(card).toContainText(entry.summary);
+    const preview = entry.preview ?? [];
+    expect(preview.length).toBeGreaterThan(0);
+    for (const change of preview) {
+      const line = card.locator(`[data-rs-change="${change.passageId}"]`);
+      await expect(line.locator('[data-rs-before]')).toHaveText(String(change.before));
+      await expect(line.locator('[data-rs-after]')).toHaveText(String(change.after));
+    }
+
+    // The change list: the latest evidence against the published draft.
+    await pane(page).locator('[data-rs-tab="changes"]').click();
+    const changed = inbox.changeList.changed ?? [];
+    expect(changed.length).toBeGreaterThan(0);
+    for (const change of changed) {
+      const line = pane(page).locator(
+        `[data-rs-change-group="changed"] [data-rs-change="${change.passageId}"]`
+      );
+      await expect(line.locator('[data-rs-after]')).toHaveText(String(change.after));
+    }
   });
-  await openStudy(a, UPDATE);
-  const shown = await doc<RsReport>(request, UPDATE, 'report?version=published');
-  const entry = (await doc<RsInbox>(request, UPDATE, 'inbox')).entries[0];
-  expect(entry, 'the update is back in the inbox after the Undo').toBeTruthy();
 
-  // Reader B accepts it first.
-  const b = await browser.newPage();
-  await openStudy(b, UPDATE);
-  await pane(b).locator('[data-rs-tab="inbox"]').click();
-  await pane(b).locator(`[data-rs-accept="${entry.id}"]`).click();
-  await expect(publishedShown(b)).toHaveAttribute('data-rs-published', String(shown.revision + 1));
+  test('accepting the entry publishes its Findings and Impression change at one revision, and one Undo restores the draft', async ({
+    page,
+    request,
+  }) => {
+    await openStudy(page, UPDATE);
+    const before = await doc<RsReport>(request, UPDATE, 'report?version=published');
+    const inbox = await doc<RsInbox>(request, UPDATE, 'inbox');
+    expect(inbox.entries).toHaveLength(1);
+    const entry = inbox.entries[0];
 
-  // Reader A still shows the old revision and the entry; their Accept is refused as stale.
-  await expect(publishedShown(a)).toHaveAttribute('data-rs-published', String(shown.revision));
-  await pane(a).locator('[data-rs-tab="inbox"]').click();
-  await pane(a).locator(`[data-rs-accept="${entry.id}"]`).click();
-  await expect(pane(a).locator('[data-rs-notice="warn"]')).toContainText(
-    `revision ${shown.revision + 1}`
-  );
-  await expect(publishedShown(a)).toHaveAttribute('data-rs-published', String(shown.revision + 1));
-  expect((await paneState(a))?.counts?.conflicts).toBe(1);
+    await pane(page).locator('[data-rs-tab="inbox"]').click();
+    await pane(page).locator(`[data-rs-accept="${entry.id}"]`).click();
 
-  // Applied once: the record holds B's acceptance and nothing from A.
-  const versions = await doc<RsVersions>(request, UPDATE, 'versions');
-  expect(versions.published.revision).toBe(shown.revision + 1);
-  await a.close();
-  await b.close();
+    // One revision carries the whole change: every line of the preview, whichever section it is in.
+    await expect(publishedShown(page)).toHaveAttribute(
+      'data-rs-published',
+      String(before.revision + 1)
+    );
+    const accepted = await doc<RsReport>(request, UPDATE, 'report?version=published');
+    expect(accepted.revision).toBe(before.revision + 1);
+    for (const change of entry.preview ?? []) {
+      expect(accepted.text).toContain(String(change.after));
+      expect(accepted.text).not.toContain(String(change.before));
+    }
+    const versions = await doc<RsVersions>(request, UPDATE, 'versions');
+    const revision = versions.revisions.find(r => r.revision === before.revision + 1);
+    if (!revision) {
+      throw new Error('no revision for the acceptance');
+    }
+    expect(revision.operation?.inboxEntryId).toBe(entry.id);
+    await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '0');
+    await pane(page).locator('[data-rs-tab="draft"]').click();
+    for (const change of entry.preview ?? []) {
+      await expect(pane(page).locator('[data-rs-draft]')).toContainText(String(change.after));
+    }
+
+    // Nothing left between the latest evidence and the published draft.
+    await pane(page).locator('[data-rs-tab="changes"]').click();
+    await expect(pane(page).locator('[data-rs-changelist-empty]')).toBeVisible();
+
+    // One Undo of that intention restores the draft and puts the update back in the inbox.
+    await pane(page).locator(`[data-rs-undo="${revision.revisionId}"]`).click();
+    await expect(publishedShown(page)).toHaveAttribute(
+      'data-rs-published',
+      String(before.revision + 2)
+    );
+    const undone = await doc<RsReport>(request, UPDATE, 'report?version=published');
+    expect(texts(undone.passages)).toEqual(texts(before.passages));
+    await expect(inboxCount(page)).toHaveAttribute('data-rs-inbox-count', '1');
+  });
+
+  test('an action against a revision another reader moved is answered 409, and the pane shows the current draft', async ({
+    browser,
+    request,
+  }) => {
+    // Reader A's pane, with its version polls held at what it first read.
+    const a = await browser.newPage();
+    let held: string | null = null;
+    await a.route('**/rs-api/studies/*/versions', async route => {
+      if (held === null) {
+        const res = await route.fetch();
+        held = await res.text();
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: held });
+    });
+    await openStudy(a, UPDATE);
+    const shown = await doc<RsReport>(request, UPDATE, 'report?version=published');
+    const entry = (await doc<RsInbox>(request, UPDATE, 'inbox')).entries[0];
+    expect(entry, 'the update is back in the inbox after the Undo').toBeTruthy();
+
+    // Reader B accepts it first.
+    const b = await browser.newPage();
+    await openStudy(b, UPDATE);
+    await pane(b).locator('[data-rs-tab="inbox"]').click();
+    await pane(b).locator(`[data-rs-accept="${entry.id}"]`).click();
+    await expect(publishedShown(b)).toHaveAttribute(
+      'data-rs-published',
+      String(shown.revision + 1)
+    );
+
+    // Reader A still shows the old revision and the entry; their Accept is refused as stale.
+    await expect(publishedShown(a)).toHaveAttribute('data-rs-published', String(shown.revision));
+    await pane(a).locator('[data-rs-tab="inbox"]').click();
+    await pane(a).locator(`[data-rs-accept="${entry.id}"]`).click();
+    await expect(pane(a).locator('[data-rs-notice="warn"]')).toContainText(
+      `revision ${shown.revision + 1}`
+    );
+    await expect(publishedShown(a)).toHaveAttribute(
+      'data-rs-published',
+      String(shown.revision + 1)
+    );
+    expect((await paneState(a))?.counts?.conflicts).toBe(1);
+
+    // Applied once: the record holds B's acceptance and nothing from A.
+    const versions = await doc<RsVersions>(request, UPDATE, 'versions');
+    expect(versions.published.revision).toBe(shown.revision + 1);
+    await a.close();
+    await b.close();
+  });
 });
 
 test("rejecting an entry leaves the draft as it was, and a patch of the reader's own wording is shown, never applied", async ({
