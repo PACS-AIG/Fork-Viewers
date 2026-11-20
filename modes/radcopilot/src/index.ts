@@ -22,7 +22,10 @@
  *     and the series rail on the left (the study browser as one narrow,
  *     fixed-width column, readingDock/seriesRail.ts); and the header's mark is
  *     the report's product, RadCopilot™, in place of the config's PACS AI,
- *     and its patient line gives way where the row is too narrow for it.
+ *     and its patient line gives way where the row is too narrow for it;
+ *   - RS-36, with PACSAI_READING_SYSTEM_API set as well: the CT reading
+ *     system's pane at the top of the report column, above the island
+ *     (@ohif/extension-pacsai-hp readingSystem/).
  * With READING_DOCK off it is the longitudinal viewer under another route.
  * The longitudinal mode's own files are not changed.
  */
@@ -49,6 +52,8 @@ import {
   setReadingViewerUser,
   setReadingViewerServices,
   subscribeSessionStudies,
+  enterReadingSystem,
+  setReadingSystemUser,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 
@@ -88,6 +93,8 @@ function enterReadingRoute(servicesManager?: unknown): void {
     ?.userAuthenticationService as { getUser?: () => unknown } | undefined;
   if (auth && typeof auth.getUser === 'function') {
     setReadingViewerUser(() => auth.getUser?.());
+    // RS-36: the reader the CT reading system's events name.
+    setReadingSystemUser(() => auth.getUser?.());
   }
   // F58: the grid, viewports and series, for Hold / Back.
   const services = (servicesManager as { services?: Record<string, unknown> } | undefined)
@@ -98,7 +105,13 @@ function enterReadingRoute(servicesManager?: unknown): void {
   const search = window.location.search;
   const study = routeStudyOf(search);
   const launch = launchFromQuery(search);
-  queueMicrotask(() => ensureReadingDock().enter(study, launch));
+  queueMicrotask(() => {
+    const dock = ensureReadingDock();
+    dock.enter(study, launch);
+    // RS-36: the CT reading system's pane at the top of the report column
+    // (with PACSAI_READING_SYSTEM_API set; nothing otherwise).
+    enterReadingSystem(study, dock);
+  });
 }
 
 // 30 Oct (the acceptance, pass 2): in a window too narrow for Images + Report

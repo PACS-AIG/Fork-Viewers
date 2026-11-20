@@ -44,6 +44,13 @@ import {
 import { launchFromQuery, routeStudyOf } from './readingDock/islandLoader';
 import { READING_MIC_KEY, READING_MODES } from './readingDock/dockModel';
 import { railLayoutProps } from './readingDock/seriesRail';
+import {
+  enterReadingSystem,
+  setReadingSystemUser,
+  currentReadingSystem,
+  onReadingSystemSelection,
+  readingSystemEnabled,
+} from './readingSystem/session';
 import { READING_MODES_UITYPE } from './getToolbarModule';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
@@ -208,4 +215,10 @@ export {
   // PR 2: the reader's hanging presets, read at the reading window's case entry.
   hangingCaseEntered,
   hangingCaseLeft,
+  // RS-36: the CT reading system's pane in the report column.
+  enterReadingSystem,
+  setReadingSystemUser,
+  currentReadingSystem,
+  onReadingSystemSelection,
+  readingSystemEnabled,
 };
