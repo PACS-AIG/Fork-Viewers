@@ -302,6 +302,27 @@ describe('the reading dock', () => {
     expect(document.documentElement.style.getPropertyValue(IMAGES_WIDTH_VAR)).toBe(`${1912 - Math.round(1912 * 0.4)}px`);
   });
 
+  it('starts the island and the cover below the CT reading system pane, and gives its column to that pane (RS-36)', async () => {
+    const isl = fakeIsland();
+    const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
+    d.enter(A);
+    await flush();
+    expect(d.reportColumn()).toBe(column());
+    const island = document.querySelector('[data-pacsai-reading-island]') as HTMLElement;
+    const cover = document.querySelector('[data-pacsai-reading-cover]') as HTMLElement;
+    // Without the pane, the whole column, as before.
+    for (const el of [island, cover]) {
+      expect([el.style.top, el.style.right, el.style.bottom, el.style.left]).toEqual(['0px', '0px', '0px', '0px']);
+    }
+    d.setReadingSystemInset(450.4);
+    expect([island.style.top, cover.style.top]).toEqual(['450px', '450px']);
+    expect([island.style.bottom, cover.style.bottom]).toEqual(['0px', '0px']);
+    d.setReadingSystemInset(0);
+    expect([island.style.top, cover.style.top]).toEqual(['0px', '0px']);
+    d.setReadingSystemInset(Number.NaN);
+    expect(island.style.top).toBe('0px');
+  });
+
   it("holds the cover until the island is ready on the route's study", async () => {
     const isl = fakeIsland();
     const d = makeDock(async () => ({ ok: true, module: isl.module as never, build: 'test' }));
