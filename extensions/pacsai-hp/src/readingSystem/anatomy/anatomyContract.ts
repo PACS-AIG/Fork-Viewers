@@ -76,7 +76,8 @@ export interface RsAnatomyLabel {
   checks: RsAnatomyChecks | null;
 }
 
-export type RelationStatus = 'consistent' | 'inconsistent' | 'unevaluable';
+/** consistent, inconsistent or unevaluable (the contract types it as text: another status is kept, never shown). */
+export type RelationStatus = string;
 
 export interface RsAnatomyChecks {
   degraded: boolean;
@@ -84,11 +85,10 @@ export interface RsAnatomyChecks {
   /** Whether its volume lies in the record's band; null without a band or with only a lower bound. */
   volumeInBand: boolean | null;
   /** E.g. vertebral_level, laterality, adjacency; `reason` is a sentence fit for display. */
-  relations: Array<{ kind: string; status: RelationStatus; reason: string }>;
+  relations: Array<{ kind: string; status: RelationStatus; reason: string | null }>;
 }
 
 const EDGES = ['first_slice', 'last_slice', 'first_row', 'last_row', 'first_column', 'last_column'];
-const STATUSES: RelationStatus[] = ['consistent', 'inconsistent', 'unevaluable'];
 
 const shortText = (v: unknown, most = 300): string | null =>
   typeof v === 'string' && v.trim() ? v.trim().slice(0, most) : null;
@@ -122,9 +122,10 @@ function readChecks(v: unknown): RsAnatomyChecks | null {
         continue;
       }
       const kind = shortText(r.kind, 64);
-      const status = STATUSES.find(s => s === r.status);
+      const status = shortText(r.status, 32);
+      // The contract's reason defaults to an empty string.
       const reason = shortText(r.reason);
-      if (kind && status && reason) {
+      if (kind && status) {
         relations.push({ kind, status, reason });
       }
     }

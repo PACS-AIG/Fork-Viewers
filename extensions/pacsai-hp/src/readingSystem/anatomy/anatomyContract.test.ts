@@ -167,6 +167,7 @@ describe('the anatomy artifact as the pane reads it (RS-36, contract 1.10)', () 
                 volumeInBand: null,
                 relations: [
                   { kind: 'adjacency', status: 'consistent', reason: 'It touches the stomach.' },
+                  { kind: 'vertebral_level', status: 'inconsistent', reason: '' },
                 ],
               },
             },
@@ -211,7 +212,11 @@ describe('the anatomy artifact as the pane reads it (RS-36, contract 1.10)', () 
         degraded: false,
         degradedBy: [],
         volumeInBand: null,
-        relations: [{ kind: 'adjacency', status: 'consistent', reason: 'It touches the stomach.' }],
+        relations: [
+          { kind: 'adjacency', status: 'consistent', reason: 'It touches the stomach.' },
+          // The contract's reason defaults to an empty string: kept, without one.
+          { kind: 'vertebral_level', status: 'inconsistent', reason: null },
+        ],
       },
     });
     // Not measurement eligible: no volume, whatever the document says; malformed numbers left out.
@@ -223,7 +228,13 @@ describe('the anatomy artifact as the pane reads it (RS-36, contract 1.10)', () 
       indexBox: null,
       components: null,
       touchesVolumeEdge: [],
-      checks: { degraded: false, degradedBy: [], volumeInBand: null, relations: [] },
+      // The contract types a status as text: another one is kept (never shown); a non-object is left out.
+      checks: {
+        degraded: false,
+        degradedBy: [],
+        volumeInBand: null,
+        relations: [{ kind: 'x', status: 'odd', reason: 'r' }],
+      },
     });
     // A 1.10-shaped label: none of 1.13's numbers.
     expect(aorta).toMatchObject({

@@ -276,7 +276,11 @@ describe("the pane's Anatomy tab (RS-36)", () => {
           degradedBy: [],
           volumeInBand: false,
           relations: [
-            { kind: 'laterality', status: 'inconsistent', reason: 'It lies left of the midline.' },
+            {
+              kind: 'laterality_from_midline',
+              status: 'inconsistent',
+              reason: 'it lies left of the midline',
+            },
           ],
         },
       });
@@ -299,10 +303,10 @@ describe("the pane's Anatomy tab (RS-36)", () => {
       '29 slices, about 87 mm; it runs past the scan’s first or last slice; in 2 parts.'
     );
     expect(liver.querySelector('.prs-flag')?.getAttribute('title')).toBe(
-      'It lies left of the midline.'
+      'Laterality from midline: it lies left of the midline.'
     );
     expect(column.querySelector('[data-rs-structure-warnings="total/1"]')?.textContent).toBe(
-      'It lies left of the midline.'
+      'Laterality from midline: it lies left of the midline.'
     );
     // The spleen's volume comes from its voxels (no 1.13 number), within its band (no check).
     const spleen = column.querySelector(

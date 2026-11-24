@@ -33,11 +33,12 @@
 import { RsRefused } from '../rsContract';
 import { RsHttpError } from '../rsClient';
 import { isVertebra, labelColor, vertebraColor, type Rgb } from './anatomyColors';
-import type {
-  RsAnatomy,
-  RsAnatomyLabel,
-  RsAnatomyLabelmap,
-  RsAnatomySeries,
+import {
+  phraseOf,
+  type RsAnatomy,
+  type RsAnatomyLabel,
+  type RsAnatomyLabelmap,
+  type RsAnatomySeries,
 } from './anatomyContract';
 import {
   affineDifference,
@@ -104,7 +105,22 @@ export interface AnatomyVolume {
   from: 'document' | 'voxels';
 }
 
-/** What a label's checks say is wrong (1.13), each a sentence for display. */
+/** The checks a degraded mask can fail (the reading system's degradedBy ids), in words. */
+const DEGRADED_BY: Record<string, string> = {
+  volume_outside_band: 'its volume lies outside the expected band',
+  component_count_not_expected: 'its number of parts is not the expected one',
+  geometry_qc_failed: 'its geometry check failed',
+};
+
+const capitalized = (t: string): string => (t ? t[0].toUpperCase() + t.slice(1) : t);
+const sentence = (t: string): string => (/[.!?]$/.test(t) ? t : `${t}.`);
+
+/**
+ * What a label's checks say is wrong (1.13), each a sentence for display: a
+ * degraded mask with the checks it failed, and each relation found
+ * inconsistent ("Adjacency: none of ... lies within 30 mm."). Consistent and
+ * unevaluable relations are not shown.
+ */
 export function warningsOf(label: RsAnatomyLabel): string[] {
   const c = label.checks;
   if (!c) {
@@ -112,11 +128,15 @@ export function warningsOf(label: RsAnatomyLabel): string[] {
   }
   const out: string[] = [];
   if (c.degraded) {
-    out.push(c.degradedBy.length ? `Degraded: ${c.degradedBy.join(', ')}.` : 'Degraded.');
+    const why = c.degradedBy.map(id => DEGRADED_BY[id] ?? phraseOf(id)).filter(Boolean);
+    out.push(why.length ? `Degraded: ${why.join('; ')}.` : 'Degraded.');
   }
   for (const r of c.relations) {
     if (r.status === 'inconsistent') {
-      out.push(r.reason);
+      const kind = capitalized(phraseOf(r.kind) || r.kind);
+      out.push(
+        sentence(r.reason ? `${kind}: ${r.reason}` : `${kind}: inconsistent with its record`)
+      );
     }
   }
   return out;

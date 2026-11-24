@@ -251,14 +251,15 @@ describe('the anatomy layers’ state (RS-36)', () => {
           touchesVolumeEdge: ['last_slice', 'first_row', 'nonsense'],
           checks: {
             degraded: true,
-            degradedBy: ['motion'],
+            degradedBy: ['volume_outside_band', 'motion'],
             volumeInBand: false,
             relations: [
               {
-                kind: 'laterality',
+                kind: 'laterality_from_midline',
                 status: 'inconsistent',
-                reason: 'It lies left of the midline.',
+                reason: 'it lies left of the midline',
               },
+              { kind: 'adjacency', status: 'inconsistent', reason: '' },
               { kind: 'adjacency', status: 'consistent', reason: 'It touches the right kidney.' },
               {
                 kind: 'vertebral_level',
@@ -282,7 +283,11 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(liver.extent).toEqual({ slices: 3, atLeast: true, mm: 9 });
     expect(liver.components).toBe(2);
     expect(liver.outOfBand).toBe(true);
-    expect(liver.warnings).toEqual(['Degraded: motion.', 'It lies left of the midline.']);
+    expect(liver.warnings).toEqual([
+      'Degraded: its volume lies outside the expected band; motion.',
+      'Laterality from midline: it lies left of the midline.',
+      'Adjacency: inconsistent with its record.',
+    ]);
     expect(snap.structures[keyOf('vertebrae_pp', 1)].volume).toBeNull();
     // A structure without 1.13's extent takes its labelmap's.
     expect(snap.structures[keyOf('total', 2)].extent).toEqual({ slices: 1, atLeast: false, mm: 3 });
