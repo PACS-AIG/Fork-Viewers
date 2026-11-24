@@ -40,7 +40,8 @@ import {
 import { draftView, selectionOf, type DraftPassage } from './rsModel';
 
 export type RsPhase = 'idle' | 'loading' | 'ready' | 'not_served' | 'refused' | 'failed';
-export type RsTab = 'draft' | 'inbox' | 'changes';
+/** `anatomy`: the study's anatomy layers (anatomy/AnatomyTab), when it has them. */
+export type RsTab = 'anatomy' | 'draft' | 'inbox' | 'changes';
 
 export interface RsNotice {
   level: 'info' | 'warn' | 'error';
@@ -113,6 +114,8 @@ export interface RsController {
   closeCopilot(): void;
   toggleCopilot(): boolean;
   setTab(tab: RsTab): void;
+  /** Show this tab, unless the reader has picked one since the study opened. */
+  offerTab(tab: RsTab): void;
   setCollapsed(collapsed: boolean): void;
   accept(inboxEntryId: string): Promise<void>;
   reject(inboxEntryId: string): Promise<void>;
@@ -177,6 +180,8 @@ export function createRsController(deps: RsControllerDeps): RsController {
   /** The notice on screen is the poll's "not answering" one. */
   let pollNotice = false;
   let lastFailed: { doc: RsIntakeEvent; label: string } | null = null;
+  // The reader picked a tab since this study opened (offerTab then leaves it).
+  let tabChosen = false;
   /** The `opened` of each study this window posted it for. */
   const openedTries = new Map<string, OpenedTry>();
   const listeners = new Set<() => void>();
@@ -529,6 +534,7 @@ export function createRsController(deps: RsControllerDeps): RsController {
       pollFailures = 0;
       pollNotice = false;
       lastFailed = null;
+      tabChosen = false;
       state = { ...INITIAL, collapsed: state.collapsed, phase: 'loading' };
       listeners.forEach(l => l());
       void load(next, generation);
@@ -538,6 +544,7 @@ export function createRsController(deps: RsControllerDeps): RsController {
       stopPolling();
       study = null;
       patientKey = null;
+      tabChosen = false;
       state = { ...INITIAL, collapsed: state.collapsed };
       listeners.forEach(l => l());
     },
@@ -575,8 +582,14 @@ export function createRsController(deps: RsControllerDeps): RsController {
       return openCopilot();
     },
     setTab(tab) {
+      tabChosen = true;
       if (tab !== state.tab) {
         set({ tab, copilotOpen: false });
+      }
+    },
+    offerTab(tab) {
+      if (!tabChosen && tab !== state.tab && study !== null) {
+        set({ tab });
       }
     },
     setCollapsed(collapsed) {

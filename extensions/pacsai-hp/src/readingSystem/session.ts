@@ -18,8 +18,21 @@
  * dock's column (a dock made again after a leave has a column of its own).
  * The harness reads `window.__pacsaiReadingSystem.getState()`, which names
  * the study by reference, never by UID.
+ *
+ * The study's anatomy layers (anatomy/) follow the pane: they are read once
+ * the reading system serves the study (the pane is ready) and drawn on the
+ * viewports by one overlay per document, which the dock's services let bring
+ * a structure into view.
  */
 import { studyRefFor } from '@ohif/core/src/utils/attempt/attemptTrace';
+import {
+  createAnatomyOverlay,
+  type AnatomyOverlay,
+  type CornerstoneApi,
+  type OverlayServices,
+} from './anatomy/anatomyOverlay';
+import { createAnatomyStore, webDigest, type AnatomyStore } from './anatomy/anatomyStore';
+import { platformGunzip } from './anatomy/nifti';
 import type { RsMode } from './rsContract';
 import { createRsClient, normalizeBase } from './rsClient';
 import { createRsController, type RsController } from './rsController';
@@ -90,6 +103,27 @@ function readerId(): string {
   return 'viewer';
 }
 
+// The viewer's services (the mode hands them in, as it does for the dock): the
+// anatomy overlay brings a structure into a viewport with them.
+let viewerServices: OverlayServices | null = null;
+export function setReadingSystemServices(services: unknown): void {
+  viewerServices = services && typeof services === 'object' ? (services as OverlayServices) : null;
+}
+
+// Cornerstone, as the extension hands it over at its registration: without it
+// (a test, a page without viewports) the anatomy is listed but not drawn.
+let cornerstoneApi: CornerstoneApi | null = null;
+export function setReadingSystemCornerstone(api: CornerstoneApi | null): void {
+  const usable =
+    api &&
+    typeof api.eventTarget?.addEventListener === 'function' &&
+    typeof api.getEnabledElement === 'function' &&
+    typeof api.getRenderingEngines === 'function' &&
+    typeof api.metaData?.get === 'function' &&
+    typeof api.Enums?.Events?.IMAGE_RENDERED === 'string';
+  cornerstoneApi = usable ? api : null;
+}
+
 const selectionListeners = new Set<(s: RsSelection) => void>();
 /** RS-38's seam: told when the reader selects a finding in the pane. */
 export function onReadingSystemSelection(listener: (s: RsSelection) => void): () => void {
@@ -101,6 +135,14 @@ let controller: RsController | null = null;
 let controllerKey = '';
 let host: RsHost | null = null;
 let offDock: (() => void) | null = null;
+let anatomy: AnatomyStore | null = null;
+let overlay: AnatomyOverlay | null = null;
+let offAnatomyFollow: (() => void) | null = null;
+// The study the pane was entered for (the anatomy follows it once it is served).
+let enteredStudy: string | null = null;
+
+/** The reader's anatomy layer settings, in this browser. */
+export const ANATOMY_SETTINGS_KEY = 'pacsai.anatomyLayers';
 
 /** What the pane needs of the reading dock: its report column and its lifetime. */
 export interface DockForReadingSystem {
@@ -121,13 +163,39 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
     return controller;
   }
   controller?.leave();
+  offAnatomyFollow?.();
+  anatomy?.leave();
   controllerKey = key;
+  const client = createRsClient({
+    base: cfg.base,
+    mode: cfg.mode,
+    fetchFn: (url, init) => win.fetch(url, init as RequestInit),
+  });
+  anatomy = createAnatomyStore({
+    client,
+    digest: webDigest(win),
+    gunzip: platformGunzip(),
+    yieldNow: () => new Promise(resolve => win.setTimeout(resolve, 0)),
+    storage: {
+      get: () => {
+        try {
+          return win.localStorage.getItem(ANATOMY_SETTINGS_KEY);
+        } catch (_) {
+          return null;
+        }
+      },
+      set: value => {
+        try {
+          win.localStorage.setItem(ANATOMY_SETTINGS_KEY, value);
+        } catch (_) {
+          /* a private window */
+        }
+      },
+    },
+    studyRef: studyRefFor,
+  });
   controller = createRsController({
-    client: createRsClient({
-      base: cfg.base,
-      mode: cfg.mode,
-      fetchFn: (url, init) => win.fetch(url, init as RequestInit),
-    }),
+    client,
     reader: () => ({ id: readerId(), role: READER_ROLE }),
     sessionId: freshId(win.crypto),
     newId: () => freshId(win.crypto),
@@ -139,8 +207,38 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
     studyRef: studyRefFor,
     onSelect: s => selectionListeners.forEach(l => l(s)),
   });
+  // The anatomy belongs to a served study: read once the pane is ready for it,
+  // let go when the study is not served or the pane leaves.
+  const c = controller;
+  const a = anatomy;
+  offAnatomyFollow = c.subscribe(() => {
+    const phase = c.getSnapshot().phase;
+    if (phase === 'ready' && enteredStudy) {
+      a.enter(enteredStudy);
+    } else if (phase === 'not_served' || phase === 'idle') {
+      a.leave();
+    }
+  });
   installHarnessHook(win);
   return controller;
+}
+
+/** The overlay that draws the anatomy on the viewports (one per document). */
+function ensureOverlay(win: Window): void {
+  if (overlay || !anatomy || !cornerstoneApi) {
+    return;
+  }
+  overlay = createAnatomyOverlay({
+    store: anatomy,
+    services: viewerServices,
+    cornerstone: cornerstoneApi,
+    win,
+  });
+}
+
+/** This document's anatomy layers, while the reading system is configured and entered. */
+export function currentAnatomy(): AnatomyStore | null {
+  return anatomy;
 }
 
 /**
@@ -159,7 +257,13 @@ export function enterReadingSystem(
     return;
   }
   const column = dock.reportColumn();
+  if (study && study !== enteredStudy) {
+    // Another study: its anatomy is read once the pane is ready for it.
+    anatomy?.leave();
+    enteredStudy = study;
+  }
   const c = ensureController(win, cfg);
+  ensureOverlay(win);
   if (!host || host.column !== column) {
     host?.destroy();
     offDock?.();
@@ -167,6 +271,7 @@ export function enterReadingSystem(
       win,
       column,
       controller: c,
+      anatomy,
       setInset: px => dock.setReadingSystemInset(px),
     });
     offDock = dock.subscribe(() => {
@@ -186,7 +291,11 @@ export function leaveReadingSystem(): void {
   offDock = null;
   host?.destroy();
   host = null;
+  overlay?.destroy();
+  overlay = null;
+  enteredStudy = null;
   controller?.leave();
+  anatomy?.leave();
 }
 
 let hookInstalled = false;
@@ -198,7 +307,18 @@ function installHarnessHook(win: Window): void {
   try {
     // Read-only: the state names the study by reference, never by UID.
     Object.defineProperty(win, '__pacsaiReadingSystem', {
-      value: Object.freeze({ getState: () => controller?.harnessState() ?? null }),
+      value: Object.freeze({
+        getState: () => {
+          const s = controller?.harnessState();
+          return s
+            ? {
+                ...s,
+                anatomy: anatomy?.harnessState() ?? null,
+                anatomyOverlay: overlay?.harnessState() ?? null,
+              }
+            : null;
+        },
+      }),
       writable: false,
       enumerable: false,
       configurable: false,

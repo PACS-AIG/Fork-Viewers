@@ -1,6 +1,7 @@
 import { RsRefused } from './rsContract';
 import { RsHttpError, createRsClient, normalizeBase, type FetchLike } from './rsClient';
 import { makeInbox, makeReport, makeSnapshot, makeVersions } from './testDocs';
+import { makeAnatomyDoc } from './anatomy/anatomyTestData';
 
 type Call = { url: string; init?: Parameters<FetchLike>[1] };
 
@@ -93,5 +94,73 @@ describe('the reading system client (RS-36)', () => {
     expect(normalizeBase(' /api/reading-system// ')).toBe('/api/reading-system');
     expect(normalizeBase(undefined)).toBe('');
     expect(normalizeBase(42)).toBe('');
+  });
+
+  it("reads a study's anatomy and its labelmaps under the base, with the page credentials (contract 1.10)", async () => {
+    const calls: Call[] = [];
+    const gz = new Uint8Array([0x1f, 0x8b, 8, 0, 1, 2, 3]);
+    const fetchFn: FetchLike = async (url, init) => {
+      calls.push({ url, init });
+      return url.endsWith('/anatomy')
+        ? { status: 200, ok: true, json: async () => makeAnatomyDoc() }
+        : {
+            status: 200,
+            ok: true,
+            json: async () => null,
+            arrayBuffer: async () => gz.buffer.slice(0),
+          };
+    };
+    const client = createRsClient({ base: '/api/reading-system', mode: 'clinical', fetchFn });
+    const doc = await client.anatomy('a b');
+    expect(doc.series[0].labelmaps).toHaveLength(3);
+    const bytes = await client.anatomyFile('a b', '0.total.labels.nii.gz');
+    expect(Array.from(bytes)).toEqual(Array.from(gz));
+    expect(calls.map(c => c.url)).toEqual([
+      '/api/reading-system/studies/a%20b/anatomy',
+      '/api/reading-system/studies/a%20b/anatomy/0.total.labels.nii.gz',
+    ]);
+    calls.forEach(c => {
+      expect(c.init?.credentials).toBe('include');
+      expect(JSON.stringify(c.init?.headers ?? {})).not.toMatch(/authorization/i);
+    });
+    expect(calls[1].init?.headers?.Accept).toMatch(/application\/gzip/);
+  });
+
+  it("names only the contract's labelmap files, and says why an anatomy read failed", async () => {
+    const { calls, fetchFn } = fakeFetch(url =>
+      url.endsWith('/anatomy')
+        ? { status: 404, body: { status: 'not_found' } }
+        : { status: 502, body: null }
+    );
+    const client = createRsClient({ base: '/rs', mode: 'clinical', fetchFn });
+    await expect(client.anatomy('s')).rejects.toEqual(expect.objectContaining({ status: 404 }));
+    await expect(client.anatomyFile('s', '0.total.labels.nii.gz')).rejects.toBeInstanceOf(
+      RsHttpError
+    );
+    const bad = [
+      '../x.labels.nii.gz',
+      '0.total.labels.nii.gz/..',
+      '0.Total.labels.nii.gz',
+      'a.total.labels.nii.gz',
+      '',
+    ];
+    for (let n = 0; n < bad.length; n++) {
+      await expect(client.anatomyFile('s', bad[n])).rejects.toBeInstanceOf(RsRefused);
+    }
+    expect(calls).toHaveLength(2);
+    const noBytes = createRsClient({
+      base: '/rs',
+      mode: 'clinical',
+      fetchFn: async () => ({ status: 200, ok: true, json: async () => null }),
+    });
+    await expect(noBytes.anatomyFile('s', '0.total.labels.nii.gz')).rejects.toThrow(
+      /cannot read a labelmap/
+    );
+    const fixture = createRsClient({
+      base: '/rs',
+      mode: 'fixture',
+      fetchFn: async () => ({ status: 200, ok: true, json: async () => makeAnatomyDoc() }),
+    });
+    await expect(fixture.anatomy('s')).rejects.toThrow(/clinical documents/);
   });
 });

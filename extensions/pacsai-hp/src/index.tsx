@@ -47,10 +47,21 @@ import { railLayoutProps } from './readingDock/seriesRail';
 import {
   enterReadingSystem,
   setReadingSystemUser,
+  setReadingSystemServices,
+  setReadingSystemCornerstone,
   currentReadingSystem,
+  currentAnatomy,
   onReadingSystemSelection,
   readingSystemEnabled,
 } from './readingSystem/session';
+import type { CornerstoneApi } from './readingSystem/anatomy/anatomyOverlay';
+import {
+  Enums as CsEnums,
+  eventTarget as csEventTarget,
+  getEnabledElement as csGetEnabledElement,
+  getRenderingEngines as csGetRenderingEngines,
+  metaData as csMetaData,
+} from '@cornerstonejs/core';
 import { READING_MODES_UITYPE } from './getToolbarModule';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
@@ -103,6 +114,15 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     // items are handed `servicesManager` only, and a prior swap needs to create
     // display sets for the chosen study before re-hanging.
     configurePriorSwitching({ servicesManager, extensionManager });
+
+    // RS-36: the CT analysis pane's anatomy layers draw on cornerstone's viewports.
+    setReadingSystemCornerstone({
+      Enums: CsEnums,
+      eventTarget: csEventTarget,
+      getEnabledElement: csGetEnabledElement,
+      getRenderingEngines: csGetRenderingEngines,
+      metaData: csMetaData,
+    } as unknown as CornerstoneApi);
 
     // B01 (Rev 11 milestone 2): derive the display-set, first-pixels, matching-
     // render and tools-ready stages of the viewer attempt trace.
@@ -215,10 +235,12 @@ export {
   // PR 2: the reader's hanging presets, read at the reading window's case entry.
   hangingCaseEntered,
   hangingCaseLeft,
-  // RS-36: the CT reading system's pane in the report column.
+  // RS-36: the CT reading system's pane in the report column (and its anatomy layers).
   enterReadingSystem,
   setReadingSystemUser,
+  setReadingSystemServices,
   currentReadingSystem,
+  currentAnatomy,
   onReadingSystemSelection,
   readingSystemEnabled,
 };

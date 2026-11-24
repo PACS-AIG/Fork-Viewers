@@ -54,6 +54,7 @@ import {
   subscribeSessionStudies,
   enterReadingSystem,
   setReadingSystemUser,
+  setReadingSystemServices,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 
@@ -101,6 +102,8 @@ function enterReadingRoute(servicesManager?: unknown): void {
     ?.services;
   if (services) {
     setReadingViewerServices(services);
+    // RS-36: the anatomy layers bring a structure into a viewport with them.
+    setReadingSystemServices(services);
   }
   const search = window.location.search;
   const study = routeStudyOf(search);
