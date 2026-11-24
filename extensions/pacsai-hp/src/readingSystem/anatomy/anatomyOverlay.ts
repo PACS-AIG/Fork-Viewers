@@ -13,11 +13,19 @@
  *   - A series is drawn only after its images are checked against the
  *     labelmap's grid (gridFit); one that does not fit is reported and left
  *     alone.
+ *   - Another series of the same acquisition (the scanner's coronal and
+ *     sagittal reformats: anatomyRelated) is drawn too, resampled from the
+ *     labelmap, once the labelmap's own series (from its display set) fits
+ *     the grid. The study's display sets say which series those are; the
+ *     store hears how many, for the tab.
  *   - Hovering the image names the visible structures under the cursor
  *     (FINAL_SPEC §2.16: "hover names the structure").
  *   - The store's navigator: bring a selected structure's largest slice into
- *     the active viewport (or the first that shows its series; failing both,
- *     hang the series in the active viewport first).
+ *     every viewport showing its series (MPR's three views move their
+ *     cameras through it), and every viewport drawing it resampled to its
+ *     image through the same point (only when the point lies on one of its
+ *     images); with none of them on the screen, hang the series in the
+ *     active viewport first.
  *
  * Cornerstone comes in as an argument (the extension hands it over at its
  * registration), so the pane's modules load without it.
@@ -29,6 +37,7 @@ import {
   type ImageGeometry,
   type Vec3,
 } from './anatomyGeometry';
+import { relatedVerdict, seriesFacts, type RelatedVerdict } from './anatomyRelated';
 import { renderLabels } from './anatomyRender';
 import { displayName, type AnatomyStore, type AnatomyTarget } from './anatomyStore';
 
@@ -96,7 +105,10 @@ interface Attached {
   queued: boolean;
   hoverAt: [number, number] | null;
   hoverQueued: boolean;
-  seriesUID: string | null;
+  /** The series whose labelmap the last draw drew: the shown one's, or the one it was resampled from. */
+  anatomyUID: string | null;
+  /** Whether the last draw was resampled onto another series of the acquisition. */
+  resampled: boolean;
   /** The last draw's cpuPixelShift, for the hover. */
   shift: Vec3;
   /** The last draw's mapping (canvas size, index of pixel (0, 0), steps), for the harness. */
@@ -222,8 +234,15 @@ export function createAnatomyOverlay({
   const attached = new Map<HTMLElement, Attached>();
   // `<viewport>|<series>|<image count>|<first>|<last>` -> its verdict.
   const fitCache = new Map<string, GridFit>();
+  // A labelmap series' own images, from its display sets: `<series>|<image count>` -> their verdict.
+  const nativeFits = new Map<string, GridFit>();
+  // From the study's display sets: `<labelmap series>|<other series>` -> whether it is one acquisition.
+  const verdicts = new Map<string, RelatedVerdict>();
+  // Each series' instances, as the last scan of the display sets found them.
+  let instances = new Map<string, Array<Record<string, unknown>>>();
+  let scanned = '';
   let pendingJump: AnatomyTarget | null = null;
-  const counts = { draws: 0, clears: 0, hovers: 0, jumps: 0, hangs: 0 };
+  const counts = { draws: 0, clears: 0, hovers: 0, jumps: 0, hangs: 0, scans: 0 };
 
   const viewportOf = (element: HTMLElement): CsViewport | null => {
     try {
@@ -242,28 +261,66 @@ export function createAnatomyOverlay({
     }
     a.drawn = 0;
     a.key = '';
-    a.seriesUID = null;
+    a.anatomyUID = null;
+    a.resampled = false;
   }
 
-  /** Whether a world point lies on this image's plane (within half a millimetre). */
-  function onImagePlane(world: ArrayLike<number>, imageId: string | undefined): boolean {
+  /** An image's plane: its first pixel's position, row and column directions, normal, size and spacings. */
+  function planeOf(imageId: string | undefined): {
+    o: number[];
+    r: number[];
+    c: number[];
+    n: Vec3;
+    rows: number | null;
+    columns: number | null;
+    rowSpacing: number | null;
+    columnSpacing: number | null;
+  } | null {
     if (!imageId) {
-      return false;
+      return null;
     }
     const p = metaData.get('imagePlaneModule', imageId) as
-      | { imagePositionPatient?: number[]; rowCosines?: number[]; columnCosines?: number[] }
+      | {
+          imagePositionPatient?: number[];
+          rowCosines?: number[];
+          columnCosines?: number[];
+          rows?: number;
+          columns?: number;
+          rowPixelSpacing?: number;
+          columnPixelSpacing?: number;
+        }
       | undefined;
     const o = p?.imagePositionPatient;
     const r = p?.rowCosines;
     const c = p?.columnCosines;
     if (!o || !r || !c) {
-      return false;
+      return null;
     }
-    const n = [r[1] * c[2] - r[2] * c[1], r[2] * c[0] - r[0] * c[2], r[0] * c[1] - r[1] * c[0]];
-    return (
-      Math.abs((world[0] - o[0]) * n[0] + (world[1] - o[1]) * n[1] + (world[2] - o[2]) * n[2]) <=
-      0.5
-    );
+    const positive = (x: unknown) => (typeof x === 'number' && x > 0 ? x : null);
+    return {
+      o,
+      r,
+      c,
+      n: [r[1] * c[2] - r[2] * c[1], r[2] * c[0] - r[0] * c[2], r[0] * c[1] - r[1] * c[0]],
+      rows: positive(p.rows),
+      columns: positive(p.columns),
+      rowSpacing: positive(p.rowPixelSpacing),
+      columnSpacing: positive(p.columnPixelSpacing),
+    };
+  }
+
+  const dot = (a: ArrayLike<number>, b: ArrayLike<number>) =>
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const from = (p: ArrayLike<number>, o: ArrayLike<number>): Vec3 => [
+    p[0] - o[0],
+    p[1] - o[1],
+    p[2] - o[2],
+  ];
+
+  /** Whether a world point lies on this image's plane (within half a millimetre). */
+  function onImagePlane(world: ArrayLike<number>, imageId: string | undefined): boolean {
+    const p = planeOf(imageId);
+    return Boolean(p) && Math.abs(dot(from(world, p!.o), p!.n)) <= 0.5;
   }
 
   function fitFor(vp: CsViewport, imageIds: string[], seriesUID: string): GridFit | null {
@@ -284,6 +341,91 @@ export function createAnatomyOverlay({
     fitCache.set(sig, fit);
     store.reportFit(seriesUID, fit);
     return fit;
+  }
+
+  function displaySets(): Array<Record<string, unknown>> {
+    try {
+      return services?.displaySetService?.getActiveDisplaySets?.() ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  const instancesOf = (d: Record<string, unknown>): Array<Record<string, unknown>> =>
+    Array.isArray(d.instances) ? (d.instances as Array<Record<string, unknown>>) : [];
+
+  /**
+   * Which of the study's series are one acquisition with each labelmap series,
+   * from the display sets (read again whenever they or the labelmap series
+   * change), and how many, for the store.
+   */
+  function scanRelated(): void {
+    const anatomy = store.anatomySeries();
+    const sets = displaySets().filter(
+      d => !d.isAllInOne && typeof d.SeriesInstanceUID === 'string'
+    );
+    const signature = `${anatomy.join(',')}|${sets
+      .map(d => `${String(d.displaySetInstanceUID)}:${instancesOf(d).length}`)
+      .join(',')}`;
+    if (signature === scanned) {
+      return;
+    }
+    scanned = signature;
+    counts.scans++;
+    instances = new Map();
+    for (const d of sets) {
+      const uid = d.SeriesInstanceUID as string;
+      instances.set(uid, [...(instances.get(uid) ?? []), ...instancesOf(d)]);
+    }
+    verdicts.clear();
+    for (const own of anatomy) {
+      const mine = instances.get(own);
+      const facts = mine?.length ? seriesFacts(mine) : null;
+      let related = 0;
+      instances.forEach((list, uid) => {
+        if (!facts || anatomy.includes(uid)) {
+          return;
+        }
+        const verdict = relatedVerdict(facts, seriesFacts(list));
+        verdicts.set(`${own}|${uid}`, verdict);
+        related += verdict.related ? 1 : 0;
+      });
+      store.reportRelated(own, related);
+    }
+  }
+
+  /**
+   * The labelmap series' own images against its grid, from its display sets:
+   * a series is resampled from a labelmap only once its own series fits it.
+   */
+  function nativeFit(own: string): GridFit | null {
+    const list = instances.get(own) ?? [];
+    const sig = `${own}|${list.length}`;
+    const known = nativeFits.get(sig);
+    if (known) {
+      return known;
+    }
+    const rs = store.renderSetFor(own);
+    const ids = list.map(i => i.imageId).filter((id): id is string => typeof id === 'string');
+    const planes = rs && ids.length ? planesOf(metaData, ids, own) : null;
+    if (!rs || !planes?.length) {
+      return null;
+    }
+    const fit = gridFit(rs.indexFromLps, planes, rs.shape);
+    nativeFits.set(sig, fit);
+    store.reportFit(own, fit);
+    return fit;
+  }
+
+  /** The labelmap series a shown series is drawn from, resampled (null: none). */
+  function relatedSource(shownUID: string): string | null {
+    scanRelated();
+    for (const own of store.anatomySeries()) {
+      if (verdicts.get(`${own}|${shownUID}`)?.related && nativeFit(own)?.fits) {
+        return own;
+      }
+    }
+    return null;
   }
 
   function draw(a: Attached) {
@@ -308,22 +450,30 @@ export function createAnatomyOverlay({
     } catch (_) {
       return clear(a);
     }
-    const seriesUID = seriesOf(current);
-    if (!seriesUID || store.seriesOf(seriesUID) === null) {
+    const shownUID = seriesOf(current);
+    if (!shownUID) {
       return clear(a);
     }
-    const fit = fitFor(vp, imageIds, seriesUID);
-    if (!fit?.fits) {
+    // The shown series' own labelmap once its images fit the grid, else one of
+    // another series of its acquisition, resampled.
+    const anatomyUID =
+      store.seriesOf(shownUID) !== null
+        ? fitFor(vp, imageIds, shownUID)?.fits
+          ? shownUID
+          : null
+        : relatedSource(shownUID);
+    if (!anatomyUID) {
       return clear(a);
     }
-    const rs = store.renderSetFor(seriesUID);
+    const resampled = anatomyUID !== shownUID;
+    const rs = store.renderSetFor(anatomyUID);
     if (!rs || !rs.layers.length) {
       return clear(a);
     }
-    if (pendingJump && pendingJump.seriesUID === seriesUID) {
+    if (!resampled && pendingJump && pendingJump.seriesUID === anatomyUID) {
       const target = pendingJump;
       pendingJump = null;
-      if (bringTo(vp, target)) {
+      if (bringTo(vp, target.point, anatomyUID, false)) {
         return; // the jump renders again, and that render draws
       }
     }
@@ -376,7 +526,8 @@ export function createAnatomyOverlay({
     a.ctx.putImageData(a.image, 0, 0);
     a.key = key;
     a.drawn = out.drawn;
-    a.seriesUID = seriesUID;
+    a.anatomyUID = anatomyUID;
+    a.resampled = resampled;
     a.shift = shift;
     a.last = { size: [W, H], origin: o, stepX: sx, stepY: sy };
     counts.draws++;
@@ -399,7 +550,7 @@ export function createAnatomyOverlay({
     a.hoverQueued = false;
     const at = a.hoverAt;
     const vp = viewportOf(a.element);
-    if (!at || !vp || !a.seriesUID || !store.getSnapshot().settings.enabled) {
+    if (!at || !vp || !a.anatomyUID || !store.getSnapshot().settings.enabled) {
       return hideTip(a);
     }
     let world: ArrayLike<number> | undefined;
@@ -411,7 +562,7 @@ export function createAnatomyOverlay({
     if (!isPoint(world)) {
       return hideTip(a);
     }
-    const found = store.structuresAt(a.seriesUID, sub([world[0], world[1], world[2]], a.shift));
+    const found = store.structuresAt(a.anatomyUID, sub([world[0], world[1], world[2]], a.shift));
     if (!found.length) {
       return hideTip(a);
     }
@@ -484,7 +635,8 @@ export function createAnatomyOverlay({
       queued: false,
       hoverAt: null,
       hoverQueued: false,
-      seriesUID: null,
+      anatomyUID: null,
+      resampled: false,
       shift: NO_SHIFT,
       last: null,
       drawn: 0,
@@ -538,54 +690,66 @@ export function createAnatomyOverlay({
   }
 
   /**
-   * Bring a target into a viewport showing its series. A stack goes to the
-   * image of that series whose plane lies nearest the point: cornerstone's own
+   * Whether a point lies on a stack's image `index`: within half the stack's
+   * spacing there (to its neighbours of the same series) of its plane, give
+   * or take half a millimetre, and inside its rows and columns.
+   */
+  function liesOn(ids: string[], index: number, point: Vec3, seriesUID: string): boolean {
+    const p = planeOf(ids[index]);
+    if (!p) {
+      return false;
+    }
+    let spacing = Infinity;
+    for (const k of [index - 1, index + 1]) {
+      const q = k >= 0 && k < ids.length && seriesOf(ids[k]) === seriesUID ? planeOf(ids[k]) : null;
+      if (q) {
+        spacing = Math.min(spacing, Math.abs(dot(from(q.o, p.o), p.n)));
+      }
+    }
+    const d = from(point, p.o);
+    if (Math.abs(dot(d, p.n)) > (Number.isFinite(spacing) ? spacing / 2 : 0) + 0.5) {
+      return false;
+    }
+    if (p.rows && p.columns && p.rowSpacing && p.columnSpacing) {
+      const u = dot(d, p.r) / p.columnSpacing;
+      const v = dot(d, p.c) / p.rowSpacing;
+      return u >= -0.5 && u <= p.columns - 0.5 && v >= -0.5 && v <= p.rows - 0.5;
+    }
+    return true;
+  }
+
+  /**
+   * Bring a world point into a viewport. A stack goes to its image of
+   * `seriesUID` whose plane lies nearest the point: cornerstone's own
    * jumpToWorld takes a stack image only within EPSILON of its plane (its
    * stack image data's slice spacing), which a point from the labelmap's
-   * affine can miss. A volume viewport moves its camera (jumpToWorld).
+   * affine can miss. With `onImage` (a series resampled from the labelmap,
+   * which may not reach the point), only when the point lies on that image.
+   * A volume viewport moves its camera (jumpToWorld).
    */
-  function bringTo(vp: CsViewport, target: AnatomyTarget): boolean {
-    stopCine(vp);
+  function bringTo(vp: CsViewport, point: Vec3, seriesUID: string, onImage: boolean): boolean {
     try {
       if (typeof vp.setImageIdIndex === 'function') {
         const ids = vp.getImageIds?.() ?? [];
         let best = -1;
         let bestDistance = Infinity;
         ids.forEach((id, i) => {
-          if (seriesOf(id) !== target.seriesUID) {
-            return;
-          }
-          const p = metaData.get('imagePlaneModule', id) as
-            | { imagePositionPatient?: number[]; rowCosines?: number[]; columnCosines?: number[] }
-            | undefined;
-          const o = p?.imagePositionPatient;
-          const r = p?.rowCosines;
-          const c = p?.columnCosines;
-          if (!o || !r || !c) {
-            return;
-          }
-          const n: Vec3 = [
-            r[1] * c[2] - r[2] * c[1],
-            r[2] * c[0] - r[0] * c[2],
-            r[0] * c[1] - r[1] * c[0],
-          ];
-          const d = Math.abs(
-            (target.point[0] - o[0]) * n[0] +
-              (target.point[1] - o[1]) * n[1] +
-              (target.point[2] - o[2]) * n[2]
-          );
+          const p = seriesOf(id) === seriesUID ? planeOf(id) : null;
+          const d = p ? Math.abs(dot(from(point, p.o), p.n)) : Infinity;
           if (d < bestDistance) {
             bestDistance = d;
             best = i;
           }
         });
-        if (best < 0) {
+        if (best < 0 || (onImage && !liesOn(ids, best, point, seriesUID))) {
           return false;
         }
+        stopCine(vp);
         void Promise.resolve(vp.setImageIdIndex(best)).catch(() => {});
         return true;
       }
-      return vp.jumpToWorld?.(target.point) === true;
+      stopCine(vp);
+      return vp.jumpToWorld?.(point) === true;
     } catch (_) {
       return false;
     }
@@ -599,27 +763,37 @@ export function createAnatomyOverlay({
     }
   }
 
-  /** The store's navigator. */
+  /**
+   * The store's navigator: every viewport showing the structure's series goes
+   * to its largest slice (a volume viewport, MPR's three included, moves its
+   * camera through the point), and every viewport drawing it resampled on
+   * another series of the acquisition to its image through that point.
+   */
   function navigate(target: AnatomyTarget): boolean {
     const active = activeViewportId();
     const list = [...attached.values()]
       .map(a => ({ a, vp: viewportOf(a.element) }))
       .filter((x): x is { a: Attached; vp: CsViewport } => Boolean(x.vp))
       .sort((x, y) => Number(y.vp.id === active) - Number(x.vp.id === active));
+    let moved = 0;
     for (const { vp } of list) {
       let ids: string[] = [];
+      let shown: string | null = null;
       try {
         ids = vp.getImageIds?.() ?? [];
+        shown = seriesOf(vp.getCurrentImageId?.() ?? ids[0]);
       } catch (_) {
         ids = [];
       }
-      if (!ids.some(id => seriesOf(id) === target.seriesUID)) {
-        continue;
+      if (ids.some(id => seriesOf(id) === target.seriesUID)) {
+        moved += bringTo(vp, target.point, target.seriesUID, false) ? 1 : 0;
+      } else if (shown && relatedSource(shown) === target.seriesUID) {
+        moved += bringTo(vp, target.point, shown, true) ? 1 : 0;
       }
-      if (bringTo(vp, target)) {
-        counts.jumps++;
-        return true;
-      }
+    }
+    if (moved > 0) {
+      counts.jumps += moved;
+      return true;
     }
     // No viewport shows the series: hang it in the active viewport, and jump once it draws.
     const grid = services?.viewportGridService;
@@ -668,6 +842,8 @@ export function createAnatomyOverlay({
   }
 
   const offStore = store.subscribe(() => {
+    // Labelmap series coming ready may have other series of their acquisition.
+    scanRelated();
     const enabled = store.getSnapshot().settings.enabled;
     attached.forEach(a => {
       if (!enabled) {
@@ -677,6 +853,7 @@ export function createAnatomyOverlay({
     });
   });
   store.setNavigator(navigate);
+  scanRelated();
 
   return {
     destroy() {
@@ -686,12 +863,27 @@ export function createAnatomyOverlay({
       eventTarget.removeEventListener(Enums.Events.ELEMENT_DISABLED, onDisabled);
       [...attached.keys()].forEach(detach);
       fitCache.clear();
+      nativeFits.clear();
+      verdicts.clear();
+      instances = new Map();
+      scanned = '';
       pendingJump = null;
     },
     harnessState() {
+      // Counts only: which series is which stays out of the harness.
+      const notRelated: Record<string, number> = {};
+      let related = 0;
+      verdicts.forEach(v => {
+        if (v.related) {
+          related++;
+        } else {
+          notRelated[v.reason] = (notRelated[v.reason] ?? 0) + 1;
+        }
+      });
       return {
         viewports: [...attached.values()].map(a => ({
           drawn: a.drawn,
+          resampled: a.resampled,
           last: a.last
             ? {
                 size: a.last.size,
@@ -700,9 +892,11 @@ export function createAnatomyOverlay({
                 stepY: a.last.stepY.map(x => Math.round(x * 1000) / 1000),
               }
             : null,
-          anatomy: a.seriesUID !== null,
+          anatomy: a.anatomyUID !== null,
           tip: a.tip.style.display === 'block' ? a.tip.textContent : null,
         })),
+        related,
+        notRelated,
         counts: { ...counts },
       };
     },

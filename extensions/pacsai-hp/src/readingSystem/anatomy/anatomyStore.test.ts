@@ -434,6 +434,30 @@ describe('the anatomy layers’ state (RS-36)', () => {
     ]);
   });
 
+  it('keeps the count of other series carrying a labelmap, none once its own series is off its grid', async () => {
+    const { store } = setup();
+    expect(store.anatomySeries()).toEqual([]);
+    store.enter(STUDY);
+    await flush();
+    expect(store.anatomySeries()).toEqual([SERIES]);
+    const view = () => store.getSnapshot().series[0];
+    // The test grid's slices are 3 mm apart, head to feet.
+    expect(view()).toMatchObject({ related: 0, sliceMm: 3, alongBody: true });
+    const revision = store.getSnapshot().revision;
+    store.reportRelated(SERIES, 2);
+    expect(view().related).toBe(2);
+    // Nothing drawn changes with it.
+    expect(store.getSnapshot().revision).toBe(revision);
+    expect(store.harnessState()).toMatchObject({ related: [2] });
+    // A series the anatomy does not have changes nothing.
+    store.reportRelated('2.25.9', 4);
+    expect(view().related).toBe(2);
+    store.reportFit(SERIES, { fits: false, worst: 0.5, reason: 'off' });
+    expect(view().related).toBe(0);
+    store.leave();
+    expect(store.anatomySeries()).toEqual([]);
+  });
+
   it('names the visible structures under a viewer point, topmost first', async () => {
     const { store } = setup();
     store.enter(STUDY);

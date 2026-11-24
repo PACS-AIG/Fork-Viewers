@@ -102,6 +102,7 @@ const CSS = `
 .prs-seg button[aria-pressed="true"] { background: #15263A; color: #E8EEF5; }
 .prs-seg button:disabled { opacity: 0.5; cursor: default; }
 .prs-anatomy-desc { margin: 2px 0 4px; font-size: 12px; color: #7F8EA0; }
+.prs-anatomy-resampled { margin: 0 0 6px; font-size: 11px; line-height: 15px; color: #7F8EA0; }
 .prs-anatomy-task { margin: 4px 0 8px; }
 .prs-anatomy-task header { display: flex; align-items: center; gap: 6px; }
 .prs-anatomy-task header label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
