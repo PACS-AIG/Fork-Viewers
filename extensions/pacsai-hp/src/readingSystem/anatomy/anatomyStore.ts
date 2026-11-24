@@ -35,6 +35,7 @@ import { RsHttpError } from '../rsClient';
 import { isVertebra, labelColor, vertebraColor, type Rgb } from './anatomyColors';
 import {
   phraseOf,
+  WHOLE_MASK_MEDIAN,
   type RsAnatomy,
   type RsAnatomyLabel,
   type RsAnatomyLabelmap,
@@ -91,10 +92,28 @@ export interface AnatomyStructure {
   warnings: string[];
   /** 1.13: its volume lies outside the record's band. */
   outOfBand: boolean;
+  /** 1.14: its whole-mask median and interquartile range (HU), for a measurement-eligible structure the run measured. */
+  attenuation: AnatomyAttenuation | null;
   /** Its centroid's height (patient superior, mm), once its labelmap is read. */
   superior: number | null;
   /** Its first and last slice (index), once its labelmap is read. */
   slices: [number, number] | null;
+}
+
+export interface AnatomyAttenuation {
+  median: number | null;
+  iqr: number | null;
+  supported: boolean;
+  reasons: string[];
+}
+
+/** A label's attenuation for the tab's whole-mask column; another statistic is never shown there (invariant 9). */
+export function attenuationOf(label: RsAnatomyLabel): AnatomyAttenuation | null {
+  const a = label.attenuation;
+  if (!a || a.statistic !== WHOLE_MASK_MEDIAN) {
+    return null;
+  }
+  return { median: a.medianHU, iqr: a.iqrHU, supported: a.supported, reasons: a.reasons };
 }
 
 export interface AnatomyVolume {
@@ -639,6 +658,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
                 components: label.components,
                 warnings: warningsOf(label),
                 outOfBand: label.checks?.volumeInBand === false,
+                attenuation: attenuationOf(label),
                 superior: null,
                 slices: null,
               };

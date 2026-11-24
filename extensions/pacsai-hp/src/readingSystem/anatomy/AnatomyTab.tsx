@@ -10,6 +10,9 @@
  *     its volume ("≥" when the document says it is only a lower bound). A
  *     click on a structure's name shows it and brings its largest slice into
  *     the viewport; pointing at a row brings the structure out on the images.
+ *   - When the document has it (contract 1.14), the whole-mask median and
+ *     interquartile range in HU, in a column named for that statistic so it is
+ *     never read as the report's ROI median (invariant 9).
  *   - What its concept record's checks found wrong (contract 1.13), under the
  *     structure's row; a volume outside the record's band in amber.
  *   - What was not drawn, and why.
@@ -55,6 +58,29 @@ export function volumeCell(s: AnatomyStructure): { text: string; title: string |
   return { text, title: `${parts.join('; ')}.` };
 }
 
+/** The attenuation column's header title (invariant 9: the statistic is named). */
+export const ATTENUATION_TITLE =
+  'The median and interquartile range of HU over every voxel of the mask, on the original CT: partial volume at its edge and its vessels included. Not the report’s ROI median.';
+
+/** The attenuation cell's text ("34 (18)": median and interquartile range, HU) and title. */
+export function attenuationCell(s: AnatomyStructure): { text: string; title: string | undefined } {
+  const a = s.attenuation;
+  if (!a) {
+    return { text: '', title: undefined };
+  }
+  if (!a.supported || a.median === null) {
+    return {
+      text: '—',
+      title: `Not measured${a.reasons.length ? `: ${a.reasons.join('; ')}` : ''}.`,
+    };
+  }
+  const iqr = a.iqr === null ? '' : ` (${Math.round(a.iqr)})`;
+  const title = `Whole-mask median ${a.median.toFixed(1)} HU${
+    a.iqr === null ? '' : `, interquartile range ${a.iqr.toFixed(1)} HU`
+  }: every voxel of the mask, partial volume and vessels included. Not the report’s ROI median.`;
+  return { text: `${Math.round(a.median)}${iqr}`, title };
+}
+
 /** The extent cell's text and title ("29 sl", "≥ 12 sl" when it runs past the scan's first or last slice). */
 export function extentCell(s: AnatomyStructure): { text: string; title: string | undefined } {
   const e = s.extent;
@@ -79,6 +105,8 @@ function Task({
   store: AnatomyStore;
 }) {
   const [open, setOpen] = useState(task.visible);
+  // The attenuation column is there once the document gives any (contract 1.14).
+  const withAttenuation = Object.values(snap.structures).some(x => x.attenuation);
   const loading = task.status === 'loading' || task.status === 'waiting';
   return (
     <section
@@ -124,6 +152,15 @@ function Task({
               <th colSpan={3} />
               <th className="prs-num">Extent</th>
               <th className="prs-num">Volume</th>
+              {withAttenuation ? (
+                <th
+                  className="prs-num"
+                  title={ATTENUATION_TITLE}
+                >
+                  Median (IQR)
+                  <span className="prs-th-sub">HU, whole mask</span>
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -197,6 +234,15 @@ function Task({
                     >
                       {volume.text}
                     </td>
+                    {withAttenuation ? (
+                      <td
+                        className="prs-num"
+                        data-rs-attenuation=""
+                        title={attenuationCell(s).title}
+                      >
+                        {attenuationCell(s).text}
+                      </td>
+                    ) : null}
                   </tr>
                   {s.warnings.length ? (
                     <tr
@@ -205,7 +251,7 @@ function Task({
                       {...rowProps}
                     >
                       <td colSpan={2} />
-                      <td colSpan={3}>{s.warnings.join(' ')}</td>
+                      <td colSpan={withAttenuation ? 4 : 3}>{s.warnings.join(' ')}</td>
                     </tr>
                   ) : null}
                 </React.Fragment>

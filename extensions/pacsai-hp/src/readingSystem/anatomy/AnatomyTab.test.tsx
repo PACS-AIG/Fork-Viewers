@@ -317,6 +317,48 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     destroy();
   });
 
+  it("shows 1.14's attenuation in a column named for its statistic, only once the document has any", async () => {
+    const { s } = await store(undefined, raw => {
+      const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+      total.labels[0].attenuation = {
+        statistic: 'whole-mask median',
+        medianHU: 57.4,
+        iqrHU: 12.6,
+        supported: true,
+        reasons: [],
+      };
+      total.labels[1].attenuation = {
+        statistic: 'whole-mask median',
+        medianHU: null,
+        iqrHU: null,
+        supported: false,
+        reasons: ['too few voxels'],
+      };
+    });
+    const { column, destroy } = mount(fakeController(), s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    const organs = column.querySelector('[data-rs-anatomy-task="total"]') as HTMLElement;
+    const headers = Array.from(organs.querySelectorAll('th')).map(th => th.textContent);
+    expect(headers).toEqual(['', 'Extent', 'Volume', 'Median (IQR)HU, whole mask']);
+    expect(organs.querySelectorAll('th')[3].getAttribute('title')).toMatch(
+      /Not the report’s ROI median/
+    );
+    const cell = (key: string) =>
+      column.querySelector(`[data-rs-structure="${key}"] [data-rs-attenuation]`) as HTMLElement;
+    expect(cell('total/1').textContent).toBe('57 (13)');
+    expect(cell('total/1').getAttribute('title')).toBe(
+      'Whole-mask median 57.4 HU, interquartile range 12.6 HU: every voxel of the mask, partial volume and vessels included. Not the report’s ROI median.'
+    );
+    expect(cell('total/2').textContent).toBe('—');
+    expect(cell('total/2').getAttribute('title')).toBe('Not measured: too few voxels.');
+    // Not measurement eligible: no attenuation, an empty cell.
+    expect(cell('vertebrae_pp/1').textContent).toBe('');
+    destroy();
+  });
+
   it('formats a volume for the table', () => {
     expect(formatVolume(1523.4)).toBe('1,523 mL');
     expect(formatVolume(62.44)).toBe('62.4 mL');

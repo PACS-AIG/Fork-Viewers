@@ -118,6 +118,7 @@ const CSS = `
 .prs-structure:disabled { cursor: default; }
 .prs-num { text-align: right; white-space: nowrap; color: #9AA8B8; font-variant-numeric: tabular-nums; }
 .prs-structures th { padding: 0 4px 2px; font-size: 11px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; color: #6B7A8C; }
+.prs-th-sub { display: block; font-size: 10px; letter-spacing: 0.02em; text-transform: none; color: #5D6B7C; }
 .prs-num[data-out-of-band="true"] { color: #F5C36B; }
 .prs-flag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #3A2E12; color: #F5C36B; font-size: 11px; line-height: 16px; font-weight: 700; cursor: help; }
 .prs-structure-warnings td { padding: 0 4px 3px; font-size: 12px; line-height: 16px; color: #F5C36B; }

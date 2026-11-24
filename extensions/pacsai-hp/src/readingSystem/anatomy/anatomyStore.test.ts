@@ -293,6 +293,39 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(snap.structures[keyOf('total', 2)].extent).toEqual({ slices: 1, atLeast: false, mm: 3 });
   });
 
+  it("keeps 1.14's whole-mask median for the tab, and never another statistic in its place", async () => {
+    const { store } = setup({
+      mutate: raw => {
+        const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+        total.labels[0].attenuation = {
+          statistic: 'whole-mask median',
+          medianHU: 57.4,
+          iqrHU: 12.6,
+          supported: true,
+          reasons: [],
+        };
+        total.labels[1].attenuation = {
+          statistic: 'ROI median',
+          medianHU: 50,
+          iqrHU: 5,
+          supported: true,
+          reasons: [],
+        };
+      },
+    });
+    store.enter(STUDY);
+    await flush();
+    const snap = store.getSnapshot();
+    expect(snap.structures[keyOf('total', 1)].attenuation).toEqual({
+      median: 57.4,
+      iqr: 12.6,
+      supported: true,
+      reasons: [],
+    });
+    expect(snap.structures[keyOf('total', 2)].attenuation).toBeNull();
+    expect(snap.structures[keyOf('vertebrae_pp', 1)].attenuation).toBeNull();
+  });
+
   it("keeps the reader's settings in the browser: on or off, opacity (10 to 100 %), fill or outline", async () => {
     const storage = { value: JSON.stringify({ enabled: false, opacity: 0.6, style: 'outline' }) };
     const { store } = setup({ storage });

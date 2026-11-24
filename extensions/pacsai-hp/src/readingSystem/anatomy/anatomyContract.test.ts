@@ -245,6 +245,64 @@ describe('the anatomy artifact as the pane reads it (RS-36, contract 1.10)', () 
     });
   });
 
+  it("reads contract 1.14's attenuation for a measurement-eligible label only, and never without its statistic", () => {
+    const lm = makeAnatomyDoc().series[0].labelmaps as Array<Record<string, unknown>>;
+    const att = {
+      statistic: 'whole-mask median',
+      medianHU: 57.4,
+      iqrHU: 12.6,
+      supported: true,
+      reasons: ['', 'ok'],
+    };
+    const labels = series({
+      labelmaps: [
+        {
+          ...lm[1],
+          labels: [
+            {
+              value: 1,
+              name: 'liver',
+              voxels: 1,
+              measurementEligible: true,
+              featureBundle: 'fb:' + 'a'.repeat(32),
+              attenuation: att,
+            },
+            { value: 2, name: 'spleen', voxels: 1, measurementEligible: false, attenuation: att },
+            {
+              value: 3,
+              name: 'aorta',
+              voxels: 1,
+              measurementEligible: true,
+              attenuation: { ...att, statistic: '' },
+            },
+            {
+              value: 4,
+              name: 'right kidney',
+              voxels: 1,
+              measurementEligible: true,
+              attenuation: {
+                statistic: 'whole-mask median',
+                medianHU: 'x',
+                iqrHU: -3,
+                supported: 'yes',
+              },
+            },
+          ],
+        },
+      ],
+    }).labelmaps[0].labels;
+    expect(labels[0].attenuation).toEqual({ ...att, reasons: ['ok'] });
+    expect(labels[1].attenuation).toBeNull(); // not measurement eligible
+    expect(labels[2].attenuation).toBeNull(); // no statistic: never shown unnamed
+    expect(labels[3].attenuation).toEqual({
+      statistic: 'whole-mask median',
+      medianHU: null,
+      iqrHU: null,
+      supported: false,
+      reasons: [],
+    });
+  });
+
   it('takes an affine only as a 4 x 4 whose last row is 0 0 0 1 and whose 3 x 3 is invertible', () => {
     expect(readAffine(AFFINE)).toEqual(AFFINE);
     expect(

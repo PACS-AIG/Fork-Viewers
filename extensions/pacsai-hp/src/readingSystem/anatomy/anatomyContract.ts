@@ -15,6 +15,11 @@
  * ignores fields it does not know. A series whose entry is malformed is kept
  * with the reason and draws nothing: a series never shows part of its set.
  *
+ * Contract 1.14 (D-341) adds, for a measurement-eligible label the run
+ * measured, its attenuation: the whole-mask median and interquartile range in
+ * HU, read on the original CT over every voxel of the mask (its feature
+ * bundle's id comes with it; the pane does not use it).
+ *
  * Contract 1.13 (the reading system's D-340) adds per-label numbers: the
  * volume of a measurement-eligible structure (and whether it is only a lower
  * bound), its slice extent, whether it reaches the scanned volume's edge, and
@@ -74,6 +79,43 @@ export interface RsAnatomyLabel {
   touchesVolumeEdge: string[];
   /** 1.13: its concept record's checks, for an organ the record checks. */
   checks: RsAnatomyChecks | null;
+  /** 1.14: its attenuation, for a measurement-eligible label the run measured. */
+  attenuation: RsAnatomyAttenuation | null;
+}
+
+export interface RsAnatomyAttenuation {
+  /** Which statistic ("whole-mask median"): never the report's ROI median (invariant 9). */
+  statistic: string;
+  medianHU: number | null;
+  /** The interquartile range. */
+  iqrHU: number | null;
+  supported: boolean;
+  reasons: string[];
+}
+
+/** The statistic the Anatomy tab's attenuation column shows, and only it. */
+export const WHOLE_MASK_MEDIAN = 'whole-mask median';
+
+/** 1.14's attenuation, read leniently; none without its statistic, so a value is never shown unnamed. */
+function readAttenuation(v: unknown): RsAnatomyAttenuation | null {
+  if (!isObject(v)) {
+    return null;
+  }
+  const statistic = shortText(v.statistic, 64);
+  if (!statistic) {
+    return null;
+  }
+  const hu = (x: unknown, least = -Infinity) =>
+    typeof x === 'number' && Number.isFinite(x) && x >= least ? x : null;
+  return {
+    statistic,
+    medianHU: hu(v.medianHU),
+    iqrHU: hu(v.iqrHU, 0),
+    supported: v.supported === true,
+    reasons: Array.isArray(v.reasons)
+      ? v.reasons.map(x => shortText(x, 200)).filter((x): x is string => Boolean(x))
+      : [],
+  };
 }
 
 /** consistent, inconsistent or unevaluable (the contract types it as text: another status is kept, never shown). */
@@ -308,6 +350,7 @@ function readLabels(v: unknown, datatype: LabelmapDatatype): RsAnatomyLabel[] | 
         ? EDGES.filter(e => (raw.touchesVolumeEdge as unknown[]).includes(e))
         : [],
       checks: readChecks(raw.checks),
+      attenuation: measurementEligible ? readAttenuation(raw.attenuation) : null,
     });
   }
   return labels;
