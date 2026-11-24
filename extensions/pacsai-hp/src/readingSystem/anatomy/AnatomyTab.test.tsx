@@ -71,7 +71,10 @@ function fakeController() {
   return c as unknown as RsController & typeof c;
 }
 
-async function store(anatomy?: () => Promise<unknown>) {
+async function store(
+  anatomy?: () => Promise<unknown>,
+  mutate?: (raw: ReturnType<typeof makeAnatomyDoc>) => void
+) {
   const base: Record<string, number[]> = {
     trunk_cavities: CAVITIES,
     total: ORGANS,
@@ -79,6 +82,7 @@ async function store(anatomy?: () => Promise<unknown>) {
   };
   const files: Record<string, Uint8Array> = {};
   const raw = makeAnatomyDoc();
+  mutate?.(raw);
   for (const lm of raw.series[0].labelmaps as Array<{ task: string; sha256: string }>) {
     const f = new Uint8Array(
       gzipSync(makeNifti({ dims: [GRID.nx, GRID.ny, GRID.nz], data: base[lm.task], sform: AFFINE }))
@@ -151,15 +155,24 @@ describe("the pane's Anatomy tab (RS-36)", () => {
       'vertebrae_pp',
       'trunk_cavities',
     ]);
-    const organs = Array.from(groups[0].querySelectorAll('tr')).map(r => [
-      r.getAttribute('data-rs-structure'),
-      r.querySelector('.prs-structure')?.textContent,
-      r.querySelector('.prs-num')?.textContent,
+    const rows = (g: Element) =>
+      Array.from(g.querySelectorAll('tr[data-rs-structure]')).map(r => [
+        r.getAttribute('data-rs-structure'),
+        r.querySelector('.prs-structure')?.textContent,
+        r.querySelector('[data-rs-extent]')?.textContent,
+        r.querySelector('[data-rs-volume]')?.textContent,
+      ]);
+    expect(Array.from(groups[0].querySelectorAll('th')).map(th => th.textContent)).toEqual([
+      '',
+      'Extent',
+      'Volume',
     ]);
-    expect(organs).toEqual([
-      ['total/2', 'Spleen', '0.11 mL'],
-      ['total/1', 'Liver', '0.32 mL'],
+    expect(rows(groups[0])).toEqual([
+      ['total/2', 'Spleen', '1 sl', '0.11 mL'],
+      ['total/1', 'Liver', '3 sl', '0.32 mL'],
     ]);
+    // §2.3: a structure that is not measurement eligible shows no volume.
+    expect(rows(groups[1])).toEqual([['vertebrae_pp/1', 'L1 vertebra', '≥ 2 sl', '']]);
     // The body cavities start hidden, folded.
     expect(groups[2].querySelectorAll('tr')).toHaveLength(0);
     expect(
@@ -247,6 +260,57 @@ describe("the pane's Anatomy tab (RS-36)", () => {
       'This viewer reads pacsai.reading/1.x.'
     );
     b.destroy();
+  });
+
+  it("shows contract 1.13's numbers: a bounded volume as at least, an out-of-band one in amber, and the record's findings under the row", async () => {
+    const { s } = await store(undefined, raw => {
+      const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+      Object.assign(total.labels[0], {
+        volumeMl: 1464.23,
+        volumeLowerBound: true,
+        slices: 29,
+        touchesVolumeEdge: ['first_slice'],
+        components: 2,
+        checks: {
+          degraded: false,
+          degradedBy: [],
+          volumeInBand: false,
+          relations: [
+            { kind: 'laterality', status: 'inconsistent', reason: 'It lies left of the midline.' },
+          ],
+        },
+      });
+    });
+    const { column, destroy } = mount(fakeController(), s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    const liver = column.querySelector('[data-rs-structure="total/1"]') as HTMLElement;
+    const volume = liver.querySelector('[data-rs-volume]') as HTMLElement;
+    expect(volume.textContent).toBe('≥ 1,464 mL');
+    expect(volume.getAttribute('data-out-of-band')).toBe('true');
+    expect(volume.getAttribute('title')).toBe(
+      'From the reading system; at least: the structure reaches the scan’s edge; outside the expected range for this organ.'
+    );
+    const extent = liver.querySelector('[data-rs-extent]') as HTMLElement;
+    expect(extent.textContent).toBe('≥ 29 sl');
+    expect(extent.getAttribute('title')).toBe(
+      '29 slices, about 87 mm; it runs past the scan’s first or last slice; in 2 parts.'
+    );
+    expect(liver.querySelector('.prs-flag')?.getAttribute('title')).toBe(
+      'It lies left of the midline.'
+    );
+    expect(column.querySelector('[data-rs-structure-warnings="total/1"]')?.textContent).toBe(
+      'It lies left of the midline.'
+    );
+    // The spleen's volume comes from its voxels (no 1.13 number), within its band (no check).
+    const spleen = column.querySelector(
+      '[data-rs-structure="total/2"] [data-rs-volume]'
+    ) as HTMLElement;
+    expect(spleen.getAttribute('title')).toBe('From 9 voxels.');
+    expect(spleen.hasAttribute('data-out-of-band')).toBe(false);
+    destroy();
   });
 
   it('formats a volume for the table', () => {

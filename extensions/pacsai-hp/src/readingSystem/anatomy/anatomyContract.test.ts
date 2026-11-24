@@ -140,6 +140,100 @@ describe('the anatomy artifact as the pane reads it (RS-36, contract 1.10)', () 
     expect(phraseOf(null)).toBe('');
   });
 
+  it("reads contract 1.13's per-label numbers leniently: what is malformed is left out, never the series", () => {
+    const lm = makeAnatomyDoc().series[0].labelmaps as Array<Record<string, unknown>>;
+    const labels = series({
+      labelmaps: [
+        {
+          ...lm[1],
+          labels: [
+            {
+              value: 1,
+              name: 'liver',
+              voxels: 1,
+              measurementEligible: true,
+              volumeMl: 12.5,
+              volumeLowerBound: true,
+              slices: 4,
+              indexBox: [
+                [2, 0, 0],
+                [6, 9, 9],
+              ],
+              components: 1,
+              touchesVolumeEdge: ['first_slice', 'elsewhere'],
+              checks: {
+                degraded: false,
+                degradedBy: [],
+                volumeInBand: null,
+                relations: [
+                  { kind: 'adjacency', status: 'consistent', reason: 'It touches the stomach.' },
+                ],
+              },
+            },
+            {
+              value: 2,
+              name: 'spleen',
+              voxels: 1,
+              measurementEligible: false,
+              volumeMl: 9,
+              volumeLowerBound: true,
+              slices: -1,
+              indexBox: [
+                [6, 0, 0],
+                [2, 9, 9],
+              ],
+              components: 'two',
+              touchesVolumeEdge: 'first_slice',
+              checks: {
+                degraded: 'yes',
+                relations: [{ kind: 'x', status: 'odd', reason: 'r' }, 'bad'],
+              },
+            },
+            { value: 3, name: 'aorta', voxels: 1 },
+          ],
+        },
+      ],
+    });
+    expect(labels.invalid).toBeNull();
+    const [liver, spleen, aorta] = labels.labelmaps[0].labels;
+    expect(liver).toMatchObject({
+      measurementEligible: true,
+      volumeMl: 12.5,
+      volumeLowerBound: true,
+      slices: 4,
+      indexBox: [
+        [2, 0, 0],
+        [6, 9, 9],
+      ],
+      components: 1,
+      touchesVolumeEdge: ['first_slice'],
+      checks: {
+        degraded: false,
+        degradedBy: [],
+        volumeInBand: null,
+        relations: [{ kind: 'adjacency', status: 'consistent', reason: 'It touches the stomach.' }],
+      },
+    });
+    // Not measurement eligible: no volume, whatever the document says; malformed numbers left out.
+    expect(spleen).toMatchObject({
+      measurementEligible: false,
+      volumeMl: null,
+      volumeLowerBound: false,
+      slices: null,
+      indexBox: null,
+      components: null,
+      touchesVolumeEdge: [],
+      checks: { degraded: false, degradedBy: [], volumeInBand: null, relations: [] },
+    });
+    // A 1.10-shaped label: none of 1.13's numbers.
+    expect(aorta).toMatchObject({
+      measurementEligible: false,
+      volumeMl: null,
+      slices: null,
+      checks: null,
+    });
+  });
+
   it('takes an affine only as a 4 x 4 whose last row is 0 0 0 1 and whose 3 x 3 is invertible', () => {
     expect(readAffine(AFFINE)).toEqual(AFFINE);
     expect(

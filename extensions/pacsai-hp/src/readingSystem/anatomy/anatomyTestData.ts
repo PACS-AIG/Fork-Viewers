@@ -206,6 +206,7 @@ export function makeAnatomyDoc(
                 name: 'spleen',
                 rawClass: 'spleen',
                 voxels: countOf(ORGANS, 2),
+                measurementEligible: true,
               },
             ],
           },

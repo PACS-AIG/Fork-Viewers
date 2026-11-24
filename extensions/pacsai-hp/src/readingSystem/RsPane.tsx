@@ -117,6 +117,10 @@ const CSS = `
 .prs-structure:hover:not(:disabled), .prs-structure:focus-visible { color: #8AB4F8; text-decoration: underline; outline: none; }
 .prs-structure:disabled { cursor: default; }
 .prs-num { text-align: right; white-space: nowrap; color: #9AA8B8; font-variant-numeric: tabular-nums; }
+.prs-structures th { padding: 0 4px 2px; font-size: 11px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; color: #6B7A8C; }
+.prs-num[data-out-of-band="true"] { color: #F5C36B; }
+.prs-flag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #3A2E12; color: #F5C36B; font-size: 11px; line-height: 16px; font-weight: 700; cursor: help; }
+.prs-structure-warnings td { padding: 0 4px 3px; font-size: 12px; line-height: 16px; color: #F5C36B; }
 .prs-anatomy-notes { margin: 6px 0; padding-left: 18px; color: #F5C36B; }
 .prs-anatomy-foot { margin-top: 8px; font-size: 11px; color: #6B7A8C; }
 `;

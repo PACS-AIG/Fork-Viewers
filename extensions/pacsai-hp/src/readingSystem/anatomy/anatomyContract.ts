@@ -15,6 +15,13 @@
  * ignores fields it does not know. A series whose entry is malformed is kept
  * with the reason and draws nothing: a series never shows part of its set.
  *
+ * Contract 1.13 (the reading system's D-340) adds per-label numbers: the
+ * volume of a measurement-eligible structure (and whether it is only a lower
+ * bound), its slice extent, whether it reaches the scanned volume's edge, and
+ * its concept record's checks. Dev serves 1.10-shaped labels until then, so
+ * every one of these is optional, and one that is malformed is left out
+ * rather than refusing the series.
+ *
  * Pure: no window, React or OHIF here.
  */
 import { checkDocument, type RsEnvelope, type RsMode } from '../rsContract';
@@ -48,6 +55,88 @@ export interface RsAnatomyLabel {
   /** TotalSegmentator's own class name. */
   rawClass: string | null;
   voxels: number;
+  /**
+   * Whether its mapping allows a measurement (FINAL_SPEC §2.3: measurement
+   * eligibility supports volumes and attenuation). Only these show a volume.
+   */
+  measurementEligible: boolean;
+  /** 1.13: its volume in mL (continuous), for a measurement-eligible label. */
+  volumeMl: number | null;
+  /** 1.13: the volume is only a lower bound (the mask reaches the scanned volume's edge). */
+  volumeLowerBound: boolean;
+  /** 1.13: how many slices it spans. */
+  slices: number | null;
+  /** 1.13: its first index and one past its last, (slice, row, column) as grid.shape orders them. */
+  indexBox: [[number, number, number], [number, number, number]] | null;
+  /** 1.13: how many connected parts it has. */
+  components: number | null;
+  /** 1.13: the scanned volume's faces it reaches (first_slice, last_slice, first_row, ...). */
+  touchesVolumeEdge: string[];
+  /** 1.13: its concept record's checks, for an organ the record checks. */
+  checks: RsAnatomyChecks | null;
+}
+
+export type RelationStatus = 'consistent' | 'inconsistent' | 'unevaluable';
+
+export interface RsAnatomyChecks {
+  degraded: boolean;
+  degradedBy: string[];
+  /** Whether its volume lies in the record's band; null without a band or with only a lower bound. */
+  volumeInBand: boolean | null;
+  /** E.g. vertebral_level, laterality, adjacency; `reason` is a sentence fit for display. */
+  relations: Array<{ kind: string; status: RelationStatus; reason: string }>;
+}
+
+const EDGES = ['first_slice', 'last_slice', 'first_row', 'last_row', 'first_column', 'last_column'];
+const STATUSES: RelationStatus[] = ['consistent', 'inconsistent', 'unevaluable'];
+
+const shortText = (v: unknown, most = 300): string | null =>
+  typeof v === 'string' && v.trim() ? v.trim().slice(0, most) : null;
+
+/** A 1.13 index box: two (slice, row, column) triples, each first index below its end. */
+function readIndexBox(v: unknown): [[number, number, number], [number, number, number]] | null {
+  if (!Array.isArray(v) || v.length !== 2) {
+    return null;
+  }
+  const [a, b] = v;
+  const triple = (t: unknown): t is [number, number, number] =>
+    Array.isArray(t) && t.length === 3 && t.every(n => Number.isInteger(n) && n >= 0);
+  if (!triple(a) || !triple(b) || a.some((n, i) => n >= b[i])) {
+    return null;
+  }
+  return [
+    [a[0], a[1], a[2]],
+    [b[0], b[1], b[2]],
+  ];
+}
+
+/** 1.13's checks, read leniently: what is malformed is left out. */
+function readChecks(v: unknown): RsAnatomyChecks | null {
+  if (!isObject(v)) {
+    return null;
+  }
+  const relations: RsAnatomyChecks['relations'] = [];
+  if (Array.isArray(v.relations)) {
+    for (const r of v.relations) {
+      if (!isObject(r)) {
+        continue;
+      }
+      const kind = shortText(r.kind, 64);
+      const status = STATUSES.find(s => s === r.status);
+      const reason = shortText(r.reason);
+      if (kind && status && reason) {
+        relations.push({ kind, status, reason });
+      }
+    }
+  }
+  return {
+    degraded: v.degraded === true,
+    degradedBy: Array.isArray(v.degradedBy)
+      ? v.degradedBy.map(x => shortText(x, 120)).filter((x): x is string => Boolean(x))
+      : [],
+    volumeInBand: typeof v.volumeInBand === 'boolean' ? v.volumeInBand : null,
+    relations,
+  };
 }
 
 /**
@@ -193,6 +282,14 @@ function readLabels(v: unknown, datatype: LabelmapDatatype): RsAnatomyLabel[] | 
     if (!isCount(raw.voxels)) {
       return "a label's voxel count is not a count";
     }
+    const measurementEligible = raw.measurementEligible === true;
+    const volumeMl =
+      measurementEligible &&
+      typeof raw.volumeMl === 'number' &&
+      Number.isFinite(raw.volumeMl) &&
+      raw.volumeMl >= 0
+        ? raw.volumeMl
+        : null;
     labels.push({
       value,
       name,
@@ -200,6 +297,16 @@ function readLabels(v: unknown, datatype: LabelmapDatatype): RsAnatomyLabel[] | 
       concept,
       rawClass,
       voxels: raw.voxels,
+      measurementEligible,
+      volumeMl,
+      volumeLowerBound: volumeMl !== null && raw.volumeLowerBound === true,
+      slices: isCount(raw.slices) && raw.slices > 0 ? raw.slices : null,
+      indexBox: readIndexBox(raw.indexBox),
+      components: isCount(raw.components) && raw.components > 0 ? raw.components : null,
+      touchesVolumeEdge: Array.isArray(raw.touchesVolumeEdge)
+        ? EDGES.filter(e => (raw.touchesVolumeEdge as unknown[]).includes(e))
+        : [],
+      checks: readChecks(raw.checks),
     });
   }
   return labels;

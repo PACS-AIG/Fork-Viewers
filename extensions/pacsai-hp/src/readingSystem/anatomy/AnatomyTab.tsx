@@ -5,10 +5,13 @@
  *
  *   - The layers' switch for the images, their opacity, fill or outline.
  *   - Per task (organs, vertebrae, body cavities): shown or hidden, and its
- *     structures from head to feet, each with its colour, a switch, and its
- *     volume. A click on a structure's name shows it and brings its largest
- *     slice into the viewport; pointing at a row brings the structure out on
- *     the images.
+ *     structures from head to feet, each with its colour, a switch, its slice
+ *     extent and, for a measurement-eligible structure only (FINAL_SPEC §2.3),
+ *     its volume ("≥" when the document says it is only a lower bound). A
+ *     click on a structure's name shows it and brings its largest slice into
+ *     the viewport; pointing at a row brings the structure out on the images.
+ *   - What its concept record's checks found wrong (contract 1.13), under the
+ *     structure's row; a volume outside the record's band in amber.
  *   - What was not drawn, and why.
  */
 import React, { useState, useSyncExternalStore } from 'react';
@@ -17,6 +20,7 @@ import {
   displayName,
   type AnatomySnapshot,
   type AnatomyStore,
+  type AnatomyStructure,
   type AnatomyTask,
 } from './anatomyStore';
 
@@ -32,6 +36,37 @@ export function formatVolume(ml: number): string {
     return `${ml.toFixed(1)} mL`;
   }
   return `${ml.toFixed(2)} mL`;
+}
+
+/** The volume cell's text and title, or empty for a structure that shows no volume. */
+export function volumeCell(s: AnatomyStructure): { text: string; title: string | undefined } {
+  const v = s.volume;
+  if (!v) {
+    return { text: '', title: undefined };
+  }
+  const text = `${v.atLeast ? '≥ ' : ''}${formatVolume(v.ml)}`;
+  const parts = [
+    v.from === 'document'
+      ? 'From the reading system'
+      : `From ${s.voxels.toLocaleString('en-US')} voxels`,
+    v.atLeast ? 'at least: the structure reaches the scan’s edge' : null,
+    s.outOfBand ? 'outside the expected range for this organ' : null,
+  ].filter(Boolean);
+  return { text, title: `${parts.join('; ')}.` };
+}
+
+/** The extent cell's text and title ("29 sl", "≥ 12 sl" when it runs past the scan's first or last slice). */
+export function extentCell(s: AnatomyStructure): { text: string; title: string | undefined } {
+  const e = s.extent;
+  if (!e) {
+    return { text: '', title: undefined };
+  }
+  const parts = [
+    `${e.slices} ${e.slices === 1 ? 'slice' : 'slices'}, about ${Math.round(e.mm)} mm`,
+    e.atLeast ? 'it runs past the scan’s first or last slice' : null,
+    s.components && s.components > 1 ? `in ${s.components} parts` : null,
+  ].filter(Boolean);
+  return { text: `${e.atLeast ? '≥ ' : ''}${e.slices} sl`, title: `${parts.join('; ')}.` };
 }
 
 function Task({
@@ -84,6 +119,13 @@ function Task({
       </header>
       {open ? (
         <table className="prs-structures">
+          <thead>
+            <tr>
+              <th colSpan={3} />
+              <th className="prs-num">Extent</th>
+              <th className="prs-num">Volume</th>
+            </tr>
+          </thead>
           <tbody>
             {task.structures.map(key => {
               const s = snap.structures[key];
@@ -91,48 +133,82 @@ function Task({
                 return null;
               }
               const name = displayName(s.name);
+              const volume = volumeCell(s);
+              const extent = extentCell(s);
+              const rowProps = {
+                'data-hidden': !s.visible || !task.visible,
+                onMouseEnter: () => store.hover(key),
+                onMouseLeave: () => store.hover(null),
+              };
               return (
-                <tr
-                  key={key}
-                  data-rs-structure={`${s.task}/${s.value}`}
-                  aria-selected={snap.selected === key}
-                  data-hidden={!s.visible || !task.visible}
-                  onMouseEnter={() => store.hover(key)}
-                  onMouseLeave={() => store.hover(null)}
-                >
-                  <td className="prs-cell-check">
-                    <input
-                      type="checkbox"
-                      checked={s.visible}
-                      disabled={task.status === 'refused'}
-                      aria-label={`Show ${name}`}
-                      onChange={e => store.setStructureVisible(key, e.target.checked)}
-                    />
-                  </td>
-                  <td className="prs-cell-swatch">
-                    <span
-                      className="prs-swatch"
-                      style={{ background: cssColor(s.color) }}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="prs-structure"
-                      disabled={task.status !== 'ready'}
-                      title={task.status === 'ready' ? `Show ${name} on the images` : undefined}
-                      onClick={() => store.select(key)}
-                    >
-                      {name}
-                    </button>
-                  </td>
-                  <td
-                    className="prs-num"
-                    title={`${s.voxels.toLocaleString('en-US')} voxels`}
+                <React.Fragment key={key}>
+                  <tr
+                    data-rs-structure={`${s.task}/${s.value}`}
+                    aria-selected={snap.selected === key}
+                    {...rowProps}
                   >
-                    {formatVolume(s.volumeMl)}
-                  </td>
-                </tr>
+                    <td className="prs-cell-check">
+                      <input
+                        type="checkbox"
+                        checked={s.visible}
+                        disabled={task.status === 'refused'}
+                        aria-label={`Show ${name}`}
+                        onChange={e => store.setStructureVisible(key, e.target.checked)}
+                      />
+                    </td>
+                    <td className="prs-cell-swatch">
+                      <span
+                        className="prs-swatch"
+                        style={{ background: cssColor(s.color) }}
+                      />
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="prs-structure"
+                        disabled={task.status !== 'ready'}
+                        title={task.status === 'ready' ? `Show ${name} on the images` : undefined}
+                        onClick={() => store.select(key)}
+                      >
+                        {name}
+                      </button>
+                      {s.warnings.length ? (
+                        <span
+                          className="prs-flag"
+                          title={s.warnings.join(' ')}
+                          aria-label="Its record's checks found something"
+                        >
+                          !
+                        </span>
+                      ) : null}
+                    </td>
+                    <td
+                      className="prs-num"
+                      data-rs-extent=""
+                      title={extent.title}
+                    >
+                      {extent.text}
+                    </td>
+                    <td
+                      className="prs-num"
+                      data-rs-volume=""
+                      data-out-of-band={s.outOfBand || undefined}
+                      title={volume.title}
+                    >
+                      {volume.text}
+                    </td>
+                  </tr>
+                  {s.warnings.length ? (
+                    <tr
+                      className="prs-structure-warnings"
+                      data-rs-structure-warnings={`${s.task}/${s.value}`}
+                      {...rowProps}
+                    >
+                      <td colSpan={2} />
+                      <td colSpan={3}>{s.warnings.join(' ')}</td>
+                    </tr>
+                  ) : null}
+                </React.Fragment>
               );
             })}
           </tbody>

@@ -16,13 +16,29 @@
  *     hidden (per study). Body cavities start hidden: they contain the organs.
  *   - Selecting a structure shows it and asks the navigator (the overlay) to
  *     bring its largest slice into a viewport.
+ *   - A structure's volume is shown only when its mapping is measurement
+ *     eligible (FINAL_SPEC §2.3): the document's (contract 1.13) when it gives
+ *     one, else its voxels x |det(affine)|; "at least" when the document says
+ *     it is a lower bound. Its slice extent and its concept record's checks
+ *     (1.13) come with it when the document has them.
+ *
+ * Shown by default, every task but the body cavities, with all its
+ * structures coloured: WeiWei's interim decision for Roy (24 Nov 2026, through
+ * the run session: the pane is to show "what we can do by our software, more
+ * on the visual side"). It departs from FINAL_SPEC §2.16, which has a layer
+ * control "with only the owning structure coloured by default".
  *
  * Nothing here names the study by UID: the harness state uses references.
  */
 import { RsRefused } from '../rsContract';
 import { RsHttpError } from '../rsClient';
 import { isVertebra, labelColor, vertebraColor, type Rgb } from './anatomyColors';
-import type { RsAnatomy, RsAnatomyLabelmap, RsAnatomySeries } from './anatomyContract';
+import type {
+  RsAnatomy,
+  RsAnatomyLabel,
+  RsAnatomyLabelmap,
+  RsAnatomySeries,
+} from './anatomyContract';
 import {
   affineDifference,
   applyPoint,
@@ -62,13 +78,72 @@ export interface AnatomyStructure {
   rawClass: string | null;
   color: Rgb;
   visible: boolean;
-  /** The document's voxel count, and its volume (voxels x |det(affine)|). */
+  /** The document's voxel count. */
   voxels: number;
-  volumeMl: number;
+  /** Only for a measurement-eligible structure (§2.3); null otherwise. */
+  volume: AnatomyVolume | null;
+  /** How many slices it spans (null until known), and whether it runs past the scan's first or last slice. */
+  extent: { slices: number; atLeast: boolean; mm: number } | null;
+  /** 1.13: how many connected parts it has. */
+  components: number | null;
+  /** 1.13: what its concept record's checks found wrong, each a sentence for display. */
+  warnings: string[];
+  /** 1.13: its volume lies outside the record's band. */
+  outOfBand: boolean;
   /** Its centroid's height (patient superior, mm), once its labelmap is read. */
   superior: number | null;
   /** Its first and last slice (index), once its labelmap is read. */
   slices: [number, number] | null;
+}
+
+export interface AnatomyVolume {
+  ml: number;
+  /** Only a lower bound: the structure reaches the scanned volume's edge. */
+  atLeast: boolean;
+  /** The document's (1.13), or the viewer's voxels x |det(affine)|. */
+  from: 'document' | 'voxels';
+}
+
+/** What a label's checks say is wrong (1.13), each a sentence for display. */
+export function warningsOf(label: RsAnatomyLabel): string[] {
+  const c = label.checks;
+  if (!c) {
+    return [];
+  }
+  const out: string[] = [];
+  if (c.degraded) {
+    out.push(c.degradedBy.length ? `Degraded: ${c.degradedBy.join(', ')}.` : 'Degraded.');
+  }
+  for (const r of c.relations) {
+    if (r.status === 'inconsistent') {
+      out.push(r.reason);
+    }
+  }
+  return out;
+}
+
+/** A label's volume, when its mapping is measurement eligible. */
+export function volumeOf(label: RsAnatomyLabel, voxelMm3: number): AnatomyVolume | null {
+  if (!label.measurementEligible) {
+    return null;
+  }
+  if (label.volumeMl !== null) {
+    return { ml: label.volumeMl, atLeast: label.volumeLowerBound, from: 'document' };
+  }
+  return voxelMm3 > 0
+    ? { ml: (label.voxels * voxelMm3) / 1000, atLeast: false, from: 'voxels' }
+    : null;
+}
+
+/** A label's slice extent from the document (1.13), or null until the labelmap gives it. */
+export function documentExtent(label: RsAnatomyLabel, sliceMm: number): AnatomyStructure['extent'] {
+  const slices =
+    label.slices ?? (label.indexBox ? label.indexBox[1][0] - label.indexBox[0][0] : null);
+  if (!slices) {
+    return null;
+  }
+  const atLeast = label.touchesVolumeEdge.some(e => e === 'first_slice' || e === 'last_slice');
+  return { slices, atLeast, mm: slices * sliceMm };
 }
 
 export interface AnatomyTask {
@@ -239,6 +314,9 @@ export function webDigest(
 
 const formatMm = (n: number): string =>
   Math.abs(n - Math.round(n)) < 0.005 ? String(Math.round(n)) : n.toFixed(2).replace(/0$/, '');
+
+/** The distance between two slices of a grid (its affine's slice column), mm. */
+export const sliceSpacingOf = (a: Mat4): number => Math.hypot(a[0][2], a[1][2], a[2][2]);
 
 function seriesDescription(s: RsAnatomySeries): string {
   if (!s.grid) {
@@ -426,15 +504,23 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
       return refuse(`${wrong.length} of its labels do not hold the voxels the document counts`);
     }
     const toWorld = lpsFromIndex(grid.affineRAS);
+    const sliceMm = sliceSpacingOf(grid.affineRAS);
     const structures = { ...state.structures };
     for (const label of lm.labels) {
       const key = keyOf(sIndex, lm.task, label.value);
       const st = data.stats.get(label.value);
       if (structures[key] && st) {
+        const slices = st.slices[1] - st.slices[0] + 1;
         structures[key] = {
           ...structures[key],
           superior: applyPoint(toWorld, st.centroid)[2],
           slices: st.slices,
+          // The document's extent when it gives one (1.13), else the labelmap's own.
+          extent: structures[key].extent ?? {
+            slices,
+            atLeast: st.slices[0] === 0 || st.slices[1] === grid.shape[0] - 1,
+            mm: slices * sliceMm,
+          },
         };
       }
     }
@@ -503,6 +589,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
     const notes: string[] = [];
     const series: AnatomySeriesView[] = anatomy.series.map((s, index) => {
       const vox = s.grid ? voxelVolumeMm3(s.grid.affineRAS) : 0;
+      const sliceMm = s.grid ? sliceSpacingOf(s.grid.affineRAS) : 0;
       if (s.invalid) {
         notes.push(`A series' anatomy is not drawn: ${s.invalid}.`);
       } else if (!s.labelmaps.length && s.withheld) {
@@ -527,7 +614,11 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
                 color: labelColor(label),
                 visible: true,
                 voxels: label.voxels,
-                volumeMl: (label.voxels * vox) / 1000,
+                volume: volumeOf(label, vox),
+                extent: documentExtent(label, sliceMm),
+                components: label.components,
+                warnings: warningsOf(label),
+                outOfBand: label.checks?.volumeInBand === false,
                 superior: null,
                 slices: null,
               };

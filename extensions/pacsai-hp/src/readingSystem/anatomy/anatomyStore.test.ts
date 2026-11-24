@@ -164,7 +164,19 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(tasks[0].structures).toEqual([keyOf('total', 2), keyOf('total', 1)]);
     const liver = snap.structures[keyOf('total', 1)];
     expect(liver).toMatchObject({ name: 'liver', voxels: 27, slices: [1, 3], visible: true });
-    expect(liver.volumeMl).toBeCloseTo((27 * 12) / 1000, 9);
+    expect(liver.volume).toEqual({ ml: expect.any(Number), atLeast: false, from: 'voxels' });
+    expect(liver.volume!.ml).toBeCloseTo((27 * 12) / 1000, 9);
+    // Its slice extent from its labelmap: slices 1-3 of 0-4, so not past the scan's ends.
+    expect(liver.extent).toEqual({ slices: 3, atLeast: false, mm: 9 });
+    // §2.3: only a measurement-eligible structure shows a volume.
+    expect(snap.structures[keyOf('vertebrae_pp', 1)].volume).toBeNull();
+    expect(snap.structures[keyOf('trunk_cavities', 1)].volume).toBeNull();
+    // The cavity runs to the scan's last slice: its extent is at least what is seen.
+    expect(snap.structures[keyOf('trunk_cavities', 1)].extent).toEqual({
+      slices: 4,
+      atLeast: true,
+      mm: 12,
+    });
     expect(liver.superior).toBeCloseTo(16, 9);
     expect(snap.series[0].description).toBe('5 slices, 2 × 2 × 3 mm');
     expect(snap.series[0].unnamed).toBe(3);
@@ -221,6 +233,59 @@ describe('the anatomy layers’ state (RS-36)', () => {
       expect.stringMatching(/^Organs and structures: the header's qform differs from its sform/),
       expect.stringMatching(/^Vertebrae: 1 voxels hold a value the document does not name/),
     ]);
+  });
+
+  it("reads contract 1.13's numbers where the document gives them: the volume (eligible only, at least when bounded), extent, parts and the record's checks", async () => {
+    const { store } = setup({
+      mutate: raw => {
+        const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+        Object.assign(total.labels[0], {
+          volumeMl: 1464.23,
+          volumeLowerBound: true,
+          slices: 3,
+          indexBox: [
+            [1, 0, 0],
+            [4, 3, 3],
+          ],
+          components: 2,
+          touchesVolumeEdge: ['last_slice', 'first_row', 'nonsense'],
+          checks: {
+            degraded: true,
+            degradedBy: ['motion'],
+            volumeInBand: false,
+            relations: [
+              {
+                kind: 'laterality',
+                status: 'inconsistent',
+                reason: 'It lies left of the midline.',
+              },
+              { kind: 'adjacency', status: 'consistent', reason: 'It touches the right kidney.' },
+              {
+                kind: 'vertebral_level',
+                status: 'unevaluable',
+                reason: 'No vertebra is labelled.',
+              },
+              { kind: 'odd', status: 'maybe', reason: 'dropped' },
+            ],
+          },
+        });
+        // A volume on a structure that is not measurement eligible is never shown.
+        const spine = raw.series[0].labelmaps[2] as { labels: Array<Record<string, unknown>> };
+        Object.assign(spine.labels[0], { volumeMl: 30 });
+      },
+    });
+    store.enter(STUDY);
+    await flush();
+    const snap = store.getSnapshot();
+    const liver = snap.structures[keyOf('total', 1)];
+    expect(liver.volume).toEqual({ ml: 1464.23, atLeast: true, from: 'document' });
+    expect(liver.extent).toEqual({ slices: 3, atLeast: true, mm: 9 });
+    expect(liver.components).toBe(2);
+    expect(liver.outOfBand).toBe(true);
+    expect(liver.warnings).toEqual(['Degraded: motion.', 'It lies left of the midline.']);
+    expect(snap.structures[keyOf('vertebrae_pp', 1)].volume).toBeNull();
+    // A structure without 1.13's extent takes its labelmap's.
+    expect(snap.structures[keyOf('total', 2)].extent).toEqual({ slices: 1, atLeast: false, mm: 3 });
   });
 
   it("keeps the reader's settings in the browser: on or off, opacity (10 to 100 %), fill or outline", async () => {

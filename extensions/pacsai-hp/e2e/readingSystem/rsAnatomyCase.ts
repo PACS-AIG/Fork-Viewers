@@ -165,6 +165,7 @@ function anatomyJson(study: string) {
                 name: 'liver',
                 rawClass: 'liver',
                 voxels: count(TOTAL.data, 1),
+                measurementEligible: true,
               },
               {
                 value: 2,
@@ -172,6 +173,7 @@ function anatomyJson(study: string) {
                 name: 'left kidney',
                 rawClass: 'kidney_left',
                 voxels: count(TOTAL.data, 2),
+                measurementEligible: true,
               },
             ],
           },
@@ -187,6 +189,7 @@ function anatomyJson(study: string) {
                 name: 'abdominal cavity',
                 rawClass: 'abdominal_cavity',
                 voxels: count(CAVITIES.data, 1),
+                measurementEligible: false,
               },
             ],
           },
@@ -405,16 +408,24 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
       'true'
     );
 
-    // Head to feet, with volumes (voxels x 80 mm³): the liver (centred at slice 10) above the kidney (9.5).
-    const organs = pane(page).locator('[data-rs-anatomy-task="total"] tr');
+    // Head to feet, with extents and volumes (voxels x 80 mm³, measurement-eligible structures only):
+    // the liver (centred at slice 10) above the kidney (9.5).
+    const organs = pane(page).locator('[data-rs-anatomy-task="total"] tr[data-rs-structure]');
     await expect(organs).toHaveCount(2);
     await expect(organs.nth(0).locator('.prs-structure')).toHaveText('Liver');
-    await expect(organs.nth(0).locator('.prs-num')).toHaveText('102 mL');
+    await expect(organs.nth(0).locator('[data-rs-extent]')).toHaveText('5 sl');
+    await expect(organs.nth(0).locator('[data-rs-volume]')).toHaveText('102 mL');
     await expect(organs.nth(1).locator('.prs-structure')).toHaveText('Left kidney');
-    await expect(organs.nth(1).locator('.prs-num')).toHaveText('51.2 mL');
-    await expect(
-      pane(page).locator('[data-rs-anatomy-task="trunk_cavities"] [data-rs-anatomy-task-toggle]')
-    ).not.toBeChecked();
+    await expect(organs.nth(1).locator('[data-rs-extent]')).toHaveText('10 sl');
+    await expect(organs.nth(1).locator('[data-rs-volume]')).toHaveText('51.2 mL');
+    const cavities = pane(page).locator('[data-rs-anatomy-task="trunk_cavities"]');
+    await expect(cavities.locator('[data-rs-anatomy-task-toggle]')).not.toBeChecked();
+    // Unfolded: the abdominal cavity, not measurement eligible, shows its extent and no volume.
+    await cavities.locator('.prs-fold').click();
+    const cavity = cavities.locator('tr[data-rs-structure]');
+    await expect(cavity.locator('.prs-structure')).toHaveText('Abdominal cavity');
+    await expect(cavity.locator('[data-rs-extent]')).toHaveText('16 sl');
+    await expect(cavity.locator('[data-rs-volume]')).toHaveText('');
 
     // The series is on a viewport, with the layer canvas over it.
     await expect
