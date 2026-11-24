@@ -122,6 +122,16 @@ const CSS = `
 .prs-num[data-out-of-band="true"] { color: #F5C36B; }
 .prs-flag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #3A2E12; color: #F5C36B; font-size: 11px; line-height: 16px; font-weight: 700; cursor: help; }
 .prs-structure-warnings td { padding: 0 4px 3px; font-size: 12px; line-height: 16px; color: #F5C36B; }
+.prs-research-toggle { margin-left: 6px; padding: 0 6px; border: 1px solid #4B3F72; border-radius: 8px; background: transparent; color: #B7A8F0; font: inherit; font-size: 11px; line-height: 16px; cursor: pointer; }
+.prs-research-toggle[aria-expanded="true"] { background: #231C3D; }
+.prs-research { margin: 2px 0 6px 18px; padding: 6px 8px; border: 1px dashed #4B3F72; border-radius: 6px; background: #120F1F; }
+.prs-research-head { font-weight: 600; color: #D8D0FA; }
+.prs-research-banner { margin: 2px 0 6px; font-size: 12px; color: #F5C36B; }
+.prs-research-reason { font-size: 12px; color: #9AA8B8; }
+.prs-research summary { cursor: pointer; color: #B7A8F0; font-size: 12px; }
+.prs-research-grid { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 0 10px; margin: 2px 0 4px 12px; font-size: 12px; }
+.prs-research-grid dt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9AA8B8; }
+.prs-research-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .prs-anatomy-notes { margin: 6px 0; padding-left: 18px; color: #F5C36B; }
 .prs-anatomy-foot { margin-top: 8px; font-size: 11px; color: #6B7A8C; }
 `;

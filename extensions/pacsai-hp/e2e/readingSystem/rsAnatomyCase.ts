@@ -166,6 +166,20 @@ function anatomyJson(study: string) {
                 rawClass: 'liver',
                 voxels: count(TOTAL.data, 1),
                 measurementEligible: true,
+                // Research features (contract 1.15), made up for the test.
+                radiomics: {
+                  use: 'research',
+                  featureSet: 'radiomics_v1',
+                  engine: 'pyradiomics 3.0.1',
+                  state: 'computed',
+                  reason: '',
+                  features: {
+                    firstorder_Median: 180.25,
+                    firstorder_Entropy: 0.5,
+                    shape_Sphericity: 0.81,
+                    glcm_Contrast: null,
+                  },
+                },
               },
               {
                 value: 2,
@@ -174,6 +188,14 @@ function anatomyJson(study: string) {
                 rawClass: 'kidney_left',
                 voxels: count(TOTAL.data, 2),
                 measurementEligible: true,
+                radiomics: {
+                  use: 'research',
+                  featureSet: 'radiomics_v1',
+                  engine: null,
+                  state: 'not_computed',
+                  reason: 'no radiomics engine is installed in this build',
+                  features: {},
+                },
               },
             ],
           },
@@ -426,6 +448,29 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
     await expect(cavity.locator('.prs-structure')).toHaveText('Abdominal cavity');
     await expect(cavity.locator('[data-rs-extent]')).toHaveText('16 sl');
     await expect(cavity.locator('[data-rs-volume]')).toHaveText('');
+
+    // Research features (1.15): a section of their own behind each row's Research button, marked research use only.
+    await organs.nth(0).locator('[data-rs-research-toggle]').click();
+    const research = pane(page).locator('[data-rs-research="total/1"]');
+    await expect(research.locator('.prs-research-head')).toHaveText(
+      'Research features (radiomics_v1) · pyradiomics 3.0.1'
+    );
+    await expect(research.locator('.prs-research-banner')).toContainText('Research use only');
+    await expect(
+      research.locator('details[data-rs-research-class="firstorder"] dd').first()
+    ).toHaveText('180.3');
+    if (process.env.RS_E2E_SHOTS) {
+      await pane(page).screenshot({
+        path: path.join(__dirname, 'test-results', `anatomy-research-${want}.png`),
+      });
+    }
+    await organs.nth(1).locator('[data-rs-research-toggle]').click();
+    await expect(research).toHaveCount(0);
+    await expect(
+      pane(page).locator('[data-rs-research="total/2"] [data-rs-research-reason]')
+    ).toHaveText('Not computed: no radiomics engine is installed in this build.');
+    await organs.nth(1).locator('[data-rs-research-toggle]').click();
+    await expect(pane(page).locator('[data-rs-research]')).toHaveCount(0);
 
     // The series is on a viewport, with the layer canvas over it.
     await expect

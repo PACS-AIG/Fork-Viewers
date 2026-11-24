@@ -8,7 +8,7 @@ import { RsHttpError } from '../rsClient';
 import { RsRefused } from '../rsContract';
 import { readAnatomy } from './anatomyContract';
 import { createAnatomyStore, type AnatomyClient, type AnatomyTarget } from './anatomyStore';
-import { formatVolume } from './AnatomyTab';
+import { formatFeature, formatVolume } from './AnatomyTab';
 import {
   AFFINE,
   CAVITIES,
@@ -357,6 +357,100 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     // Not measurement eligible: no attenuation, an empty cell.
     expect(cell('vertebrae_pp/1').textContent).toBe('');
     destroy();
+  });
+
+  it("shows 1.15's research features in a section of their own, marked research use only, or why they were not computed", async () => {
+    const { s } = await store(undefined, raw => {
+      const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+      total.labels[0].radiomics = {
+        use: 'research',
+        featureSet: 'radiomics_v1',
+        engine: 'pyradiomics 3.0.1',
+        state: 'computed',
+        reason: '',
+        features: { firstorder_Median: 41.537, firstorder_Mean: null, glcm_Contrast: 123456.7 },
+      };
+      total.labels[1].radiomics = {
+        use: 'research',
+        featureSet: 'radiomics_v1',
+        engine: null,
+        state: 'not_computed',
+        reason: 'no radiomics engine is installed in this build',
+        features: {},
+      };
+    });
+    const { column, destroy } = mount(fakeController(), s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    const toggle = (key: string) =>
+      column.querySelector(`[data-rs-research-toggle="${key}"]`) as HTMLButtonElement | null;
+    // Only the structures with research features have the button; nothing is open yet.
+    expect(toggle('total/1')).not.toBeNull();
+    expect(toggle('total/2')).not.toBeNull();
+    expect(toggle('vertebrae_pp/1')).toBeNull();
+    expect(column.querySelector('[data-rs-research]')).toBeNull();
+    act(() => {
+      fireEvent.click(toggle('total/1')!);
+    });
+    const section = column.querySelector('[data-rs-research="total/1"]') as HTMLElement;
+    expect(toggle('total/1')!.getAttribute('aria-expanded')).toBe('true');
+    expect(section.querySelector('.prs-research-head')?.textContent).toBe(
+      'Research features (radiomics_v1) · pyradiomics 3.0.1'
+    );
+    expect(section.querySelector('.prs-research-banner')?.textContent).toBe(
+      'Research use only: not validated for diagnosis. Never a finding, a measurement or report content.'
+    );
+    const classes = Array.from(section.querySelectorAll('details'));
+    expect(
+      classes.map(d => [
+        d.getAttribute('data-rs-research-class'),
+        d.open,
+        d.querySelector('summary')?.textContent,
+      ])
+    ).toEqual([
+      ['firstorder', true, 'First order (2)'],
+      ['glcm', false, 'GLCM (co-occurrence) (1)'],
+    ]);
+    expect(Array.from(classes[0].querySelectorAll('dt, dd')).map(e => e.textContent)).toEqual([
+      'Median',
+      '41.54',
+      'Mean',
+      '—',
+    ]);
+    expect(classes[1].querySelector('dd')?.textContent).toBe('1.23e+5');
+    // The research features are no column of the table.
+    expect(Array.from(column.querySelectorAll('th')).map(th => th.textContent)).not.toContain(
+      'Research'
+    );
+    // Another structure's: one open at a time; why they were not computed.
+    act(() => {
+      fireEvent.click(toggle('total/2')!);
+    });
+    expect(column.querySelector('[data-rs-research="total/1"]')).toBeNull();
+    expect(
+      column.querySelector('[data-rs-research="total/2"] [data-rs-research-reason]')?.textContent
+    ).toBe('Not computed: no radiomics engine is installed in this build.');
+    expect(
+      column.querySelector('[data-rs-research="total/2"] .prs-research-head')?.textContent
+    ).toBe('Research features (radiomics_v1)');
+    act(() => {
+      fireEvent.click(toggle('total/2')!);
+    });
+    expect(column.querySelector('[data-rs-research]')).toBeNull();
+    destroy();
+  });
+
+  it('formats a research feature: four significant digits, an exponent beyond them, a dash for none', () => {
+    expect(formatFeature(41.537)).toBe('41.54');
+    expect(formatFeature(0.123456)).toBe('0.1235');
+    expect(formatFeature(12345.6)).toBe('12350');
+    expect(formatFeature(123456.7)).toBe('1.23e+5');
+    expect(formatFeature(0.0001234)).toBe('1.23e-4');
+    expect(formatFeature(0)).toBe('0');
+    expect(formatFeature(-2.5)).toBe('-2.5');
+    expect(formatFeature(null)).toBe('—');
   });
 
   it('formats a volume for the table', () => {

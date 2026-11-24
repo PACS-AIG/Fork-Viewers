@@ -94,10 +94,66 @@ export interface AnatomyStructure {
   outOfBand: boolean;
   /** 1.14: its whole-mask median and interquartile range (HU), for a measurement-eligible structure the run measured. */
   attenuation: AnatomyAttenuation | null;
+  /** 1.15: its research features (radiomics), grouped by class: never a finding or a measurement. */
+  radiomics: AnatomyRadiomics | null;
   /** Its centroid's height (patient superior, mm), once its labelmap is read. */
   superior: number | null;
   /** Its first and last slice (index), once its labelmap is read. */
   slices: [number, number] | null;
+}
+
+export interface AnatomyRadiomics {
+  featureSet: string;
+  engine: string | null;
+  /** computed, disabled or not_computed. */
+  state: string;
+  reason: string;
+  /** By class, in pyradiomics' usual order; each feature as pyradiomics names it, with its value or null. */
+  groups: Array<{ cls: string; title: string; features: Array<[string, number | null]> }>;
+}
+
+/** pyradiomics' feature classes, in the order the tab lists them, with their titles. */
+const RADIOMICS_CLASSES: Array<[string, string]> = [
+  ['firstorder', 'First order'],
+  ['shape', 'Shape'],
+  ['glcm', 'GLCM (co-occurrence)'],
+  ['glrlm', 'GLRLM (run length)'],
+  ['glszm', 'GLSZM (size zone)'],
+  ['gldm', 'GLDM (dependence)'],
+  ['ngtdm', 'NGTDM (neighbourhood tone difference)'],
+];
+
+/** A label's research features, grouped by class (a class the tab does not know comes last, by name). */
+export function radiomicsOf(label: RsAnatomyLabel): AnatomyRadiomics | null {
+  const r = label.radiomics;
+  if (!r) {
+    return null;
+  }
+  const byClass = new Map<string, Array<[string, number | null]>>();
+  for (const [key, value] of Object.entries(r.features)) {
+    const cut = key.indexOf('_');
+    const cls = key.slice(0, cut);
+    if (!byClass.has(cls)) {
+      byClass.set(cls, []);
+    }
+    byClass.get(cls)!.push([key.slice(cut + 1), value]);
+  }
+  const known = RADIOMICS_CLASSES.map(([cls]) => cls);
+  const order = [
+    ...known.filter(cls => byClass.has(cls)),
+    ...[...byClass.keys()].filter(cls => !known.includes(cls)).sort(),
+  ];
+  return {
+    featureSet: r.featureSet,
+    engine: r.engine,
+    state: r.state,
+    reason: r.reason,
+    groups: order.map(cls => ({
+      cls,
+      title: RADIOMICS_CLASSES.find(([c]) => c === cls)?.[1] ?? cls,
+      features: byClass.get(cls)!,
+    })),
+  };
 }
 
 export interface AnatomyAttenuation {
@@ -659,6 +715,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
                 warnings: warningsOf(label),
                 outOfBand: label.checks?.volumeInBand === false,
                 attenuation: attenuationOf(label),
+                radiomics: radiomicsOf(label),
                 superior: null,
                 slices: null,
               };
