@@ -5,7 +5,12 @@
  *
  * A bar that is always there (the pane collapses to it): CT analysis, the
  * published draft's revision, the inbox and change counts, the Copilot's key.
- * Open, the pane shows the chrome lines and three tabs:
+ * Open, the pane shows the chrome lines and three tabs, four with anatomy:
+ *   - Anatomy (when the study's anatomy is published, and then first, and
+ *     shown at the study's opening): TotalSegmentator's structures drawn over
+ *     the images, with their switches, opacity and volumes
+ *     (anatomy/AnatomyTab); the bar's Anatomy button turns the layers on and
+ *     off from anywhere;
  *   - Draft: the published report; a click on a sentence selects it and opens
  *     nothing; Enter (or K anywhere outside a text field) opens the Copilot on
  *     the selected finding; the arrow keys move the selection;
@@ -19,6 +24,8 @@
  * in: the viewer's route changes and its study-not-found page leave it alone.
  */
 import React, { useEffect, useRef, useSyncExternalStore } from 'react';
+import { AnatomyTab } from './anatomy/AnatomyTab';
+import type { AnatomySnapshot, AnatomyStore } from './anatomy/anatomyStore';
 import type { RsController, RsSnapshot, RsTab } from './rsController';
 import {
   changeListView,
@@ -86,6 +93,37 @@ const CSS = `
 .prs-copilot dt { color: #7F8EA0; }
 .prs-copilot dd { margin: 0; }
 .prs-copilot h5 { margin: 8px 0 2px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #7F8EA0; }
+.prs-btn[aria-pressed="true"] { border-color: #8AB4F8; color: #8AB4F8; }
+.prs-anatomy-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 2px 0 8px; margin-bottom: 6px; border-bottom: 1px solid #1B2735; }
+.prs-anatomy-controls label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.prs-opacity input[type="range"] { width: 96px; height: 14px; accent-color: #8AB4F8; color-scheme: dark; }
+.prs-seg { display: inline-flex; border: 1px solid #2B3A4D; border-radius: 6px; overflow: hidden; }
+.prs-seg button { padding: 2px 10px; border: 0; background: #101A26; color: #9AA8B8; font: inherit; cursor: pointer; }
+.prs-seg button[aria-pressed="true"] { background: #15263A; color: #E8EEF5; }
+.prs-seg button:disabled { opacity: 0.5; cursor: default; }
+.prs-anatomy-desc { margin: 2px 0 4px; font-size: 12px; color: #7F8EA0; }
+.prs-anatomy-task { margin: 4px 0 8px; }
+.prs-anatomy-task header { display: flex; align-items: center; gap: 6px; }
+.prs-anatomy-task header label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.prs-fold { width: 18px; padding: 0; border: 0; background: transparent; color: #9AA8B8; cursor: pointer; font: inherit; }
+.prs-structures { width: calc(100% - 18px); margin: 2px 0 0 18px; border-collapse: collapse; }
+.prs-structures td { padding: 1px 4px; vertical-align: middle; }
+.prs-structures tr:hover { background: #111C29; }
+.prs-structures tr[aria-selected="true"] { background: #15263A; }
+.prs-structures tr[data-hidden="true"] .prs-structure, .prs-structures tr[data-hidden="true"] .prs-num { color: #6B7A8C; }
+.prs-cell-check, .prs-cell-swatch { width: 1%; }
+.prs-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.25); vertical-align: middle; }
+.prs-structure { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.prs-structure:hover:not(:disabled), .prs-structure:focus-visible { color: #8AB4F8; text-decoration: underline; outline: none; }
+.prs-structure:disabled { cursor: default; }
+.prs-num { text-align: right; white-space: nowrap; color: #9AA8B8; font-variant-numeric: tabular-nums; }
+.prs-structures th { padding: 0 4px 2px; font-size: 11px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; color: #6B7A8C; }
+.prs-th-sub { display: block; font-size: 10px; letter-spacing: 0.02em; text-transform: none; color: #5D6B7C; }
+.prs-num[data-out-of-band="true"] { color: #F5C36B; }
+.prs-flag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #3A2E12; color: #F5C36B; font-size: 11px; line-height: 16px; font-weight: 700; cursor: help; }
+.prs-structure-warnings td { padding: 0 4px 3px; font-size: 12px; line-height: 16px; color: #F5C36B; }
+.prs-anatomy-notes { margin: 6px 0; padding-left: 18px; color: #F5C36B; }
+.prs-anatomy-foot { margin-top: 8px; font-size: 11px; color: #6B7A8C; }
 `;
 
 function useInjectedStyle(doc: Document | undefined): void {
@@ -105,6 +143,26 @@ const TABS: Array<{ id: RsTab; label: string }> = [
   { id: 'inbox', label: 'Inbox' },
   { id: 'changes', label: 'Changes' },
 ];
+const ANATOMY_TAB: { id: RsTab; label: string } = { id: 'anatomy', label: 'Anatomy' };
+
+// A pane without an anatomy store: no Anatomy tab.
+const NO_ANATOMY: AnatomySnapshot = {
+  phase: 'idle',
+  reason: null,
+  series: [],
+  structures: {},
+  settings: { enabled: false, opacity: 0.35, style: 'fill' },
+  selected: null,
+  hovered: null,
+  notes: [],
+  revision: 0,
+};
+const noAnatomy = () => NO_ANATOMY;
+const noSubscribe = () => () => {};
+
+/** The Anatomy tab is there once the study's anatomy is read (or its read refused, to say why). */
+export const anatomyTabShown = (phase: AnatomySnapshot['phase']): boolean =>
+  phase === 'ready' || phase === 'refused' || phase === 'failed';
 
 function Change({ line }: { line: ChangeLine }) {
   return (
@@ -447,13 +505,39 @@ function CSS_ESCAPE(value: string): string {
   return css?.escape ? css.escape(value) : value.replace(/["\\]/g, '\\$&');
 }
 
-export function RsPane({ controller, doc }: { controller: RsController; doc?: Document }) {
+export function RsPane({
+  controller,
+  doc,
+  anatomy = null,
+}: {
+  controller: RsController;
+  doc?: Document;
+  anatomy?: AnatomyStore | null;
+}) {
   useInjectedStyle(doc ?? (typeof document !== 'undefined' ? document : undefined));
   const snap = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot
   );
+  const anat = useSyncExternalStore(
+    anatomy ? anatomy.subscribe : noSubscribe,
+    anatomy ? anatomy.getSnapshot : noAnatomy,
+    anatomy ? anatomy.getSnapshot : noAnatomy
+  );
+  const withAnatomy = Boolean(anatomy) && anatomyTabShown(anat.phase);
+  const anatomyReady = Boolean(anatomy) && anat.phase === 'ready';
+  const paneReady = snap.phase === 'ready';
+  useEffect(() => {
+    // WeiWei: the pane is to show what the software can do, more on the visual
+    // side; a study with anatomy opens on it (unless the reader picked a tab).
+    if (anatomyReady && paneReady) {
+      controller.offerTab('anatomy');
+    }
+  }, [anatomyReady, paneReady, controller]);
+  const tabs = withAnatomy ? [ANATOMY_TAB, ...TABS] : TABS;
+  const tab: RsTab = snap.tab === 'anatomy' && !withAnatomy ? 'draft' : snap.tab;
+  const structureCount = Object.keys(anat.structures).length;
   const docs = snap.docs;
   const inboxCount = docs?.inbox.entries.length ?? 0;
   const changeCount = docs
@@ -518,6 +602,22 @@ export function RsPane({ controller, doc }: { controller: RsController; doc?: Do
         >
           {status}
         </span>
+        {ready && anatomy && anatomyReady ? (
+          <button
+            type="button"
+            className="prs-btn"
+            data-rs-anatomy-toggle=""
+            aria-pressed={anat.settings.enabled}
+            title={
+              anat.settings.enabled
+                ? 'Hide the anatomy on the images'
+                : 'Show the anatomy on the images'
+            }
+            onClick={() => anatomy.setEnabled(!anat.settings.enabled)}
+          >
+            Anatomy
+          </button>
+        ) : null}
         {ready ? (
           <button
             type="button"
@@ -555,13 +655,13 @@ export function RsPane({ controller, doc }: { controller: RsController; doc?: Do
             role="tablist"
             aria-label="CT analysis"
           >
-            {TABS.map(t => (
+            {tabs.map(t => (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
                 className="prs-tab"
-                aria-selected={snap.tab === t.id}
+                aria-selected={tab === t.id}
                 data-rs-tab={t.id}
                 onClick={() => controller.setTab(t.id)}
               >
@@ -570,21 +670,25 @@ export function RsPane({ controller, doc }: { controller: RsController; doc?: Do
                   ? ` (${inboxCount})`
                   : t.id === 'changes'
                     ? ` (${changeCount})`
-                    : ''}
+                    : t.id === 'anatomy' && anatomyReady
+                      ? ` (${structureCount})`
+                      : ''}
               </button>
             ))}
           </div>
           <div
             className="prs-panel"
             role="tabpanel"
-            data-rs-panel={snap.tab}
+            data-rs-panel={tab}
           >
-            {snap.tab === 'draft' ? (
+            {tab === 'anatomy' && anatomy ? (
+              <AnatomyTab store={anatomy} />
+            ) : tab === 'draft' ? (
               <Draft
                 snap={snap}
                 controller={controller}
               />
-            ) : snap.tab === 'inbox' ? (
+            ) : tab === 'inbox' ? (
               <Inbox
                 snap={snap}
                 controller={controller}

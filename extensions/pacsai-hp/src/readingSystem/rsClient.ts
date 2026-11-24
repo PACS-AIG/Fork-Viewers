@@ -14,6 +14,8 @@
  *   GET  /studies/{uid}/versions | inbox | evidence_view?version=
  *   GET  /snapshots/{snapshotId}            (the patient key the events carry)
  *   POST /events                            (one intake event; 200, 409, 422)
+ *   GET  /studies/{uid}/anatomy             (the anatomy artifact, contract 1.10)
+ *   GET  /studies/{uid}/anatomy/{file}      (one of its labelmaps: NIfTI-1, gzip)
  *
  * Each document read is checked against the contract's rules for a consumer
  * (rsContract.checkDocument): this major, this viewer's mode, the artifact.
@@ -31,6 +33,7 @@ import {
   type RsVersions,
 } from './rsContract';
 import type { RsIntakeEvent } from './rsEvents';
+import { readAnatomy, type RsAnatomy } from './anatomy/anatomyContract';
 
 export type FetchLike = (
   url: string,
@@ -41,7 +44,17 @@ export type FetchLike = (
     credentials?: 'include' | 'same-origin' | 'omit';
     cache?: 'no-store';
   }
-) => Promise<{ status: number; ok: boolean; json: () => Promise<unknown> }>;
+) => Promise<{
+  status: number;
+  ok: boolean;
+  json: () => Promise<unknown>;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+}>;
+
+/** A labelmap's file name under `anatomy/`, as the contract names it. */
+export const LABELMAP_BASENAME = /^[0-9]{1,4}\.[a-z0-9_]{1,64}\.labels\.nii\.gz$/;
+/** The largest labelmap file read (gzip): far above a thin-slice trunk's. */
+export const MAX_LABELMAP_BYTES = 256 * 1024 * 1024;
 
 /** An answer the API gave that is not a document: the HTTP status says which. */
 export class RsHttpError extends Error {
@@ -63,6 +76,10 @@ export interface RsClient {
   snapshot(snapshotId: string): Promise<RsSnapshotDocument>;
   /** One intake event. 200, 409 and 422 are answers (intake responses); anything else throws. */
   postEvent(doc: RsIntakeEvent): Promise<RsIntakeResponse>;
+  /** The study's anatomy artifact (404 when it has none). */
+  anatomy(study: string): Promise<RsAnatomy>;
+  /** One of its labelmaps' bytes, by its file name under `anatomy/`. */
+  anatomyFile(study: string, basename: string): Promise<Uint8Array>;
 }
 
 /** The base path without a trailing slash; empty when none is configured. */
@@ -132,6 +149,44 @@ export function createRsClient({
         );
       }
       return answer;
+    },
+    async anatomy(uid) {
+      const res = await fetchFn(`${root}${study(uid)}/anatomy`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        throw new RsHttpError(res.status, 'anatomy');
+      }
+      let doc: unknown;
+      try {
+        doc = await res.json();
+      } catch (_) {
+        throw new RsRefused('The CT analysis service sent an anatomy document that is not JSON.');
+      }
+      return readAnatomy(doc, mode);
+    },
+    async anatomyFile(uid, basename) {
+      if (!LABELMAP_BASENAME.test(basename)) {
+        throw new RsRefused('A labelmap was named outside the contract’s anatomy files.');
+      }
+      const res = await fetchFn(`${root}${study(uid)}/anatomy/${basename}`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { Accept: 'application/gzip, application/octet-stream' },
+      });
+      if (!res.ok) {
+        throw new RsHttpError(res.status, 'labelmap');
+      }
+      if (typeof res.arrayBuffer !== 'function') {
+        throw new RsRefused('This page cannot read a labelmap’s bytes.');
+      }
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > MAX_LABELMAP_BYTES) {
+        throw new RsRefused('A labelmap is larger than the viewer takes.');
+      }
+      return new Uint8Array(buffer);
     },
   };
 }

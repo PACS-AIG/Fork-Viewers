@@ -17,6 +17,7 @@
  */
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { AnatomyStore } from './anatomy/anatomyStore';
 import type { RsController, RsSnapshot } from './rsController';
 import { RsPane } from './RsPane';
 
@@ -83,11 +84,14 @@ export function createRsHost({
   win,
   column,
   controller,
+  anatomy = null,
   setInset,
 }: {
   win: Window;
   column: HTMLElement;
   controller: RsController;
+  /** The study's anatomy layers (the Anatomy tab), when the reading system serves them. */
+  anatomy?: AnatomyStore | null;
   /** The dock's: the island and its cover start this far below the column's top. */
   setInset: (px: number) => void;
 }): RsHost {
@@ -112,6 +116,7 @@ export function createRsHost({
     <RsPane
       controller={controller}
       doc={doc}
+      anatomy={anatomy}
     />
   );
 

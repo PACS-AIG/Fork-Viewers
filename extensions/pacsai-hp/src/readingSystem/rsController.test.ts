@@ -204,6 +204,25 @@ describe('the reading-system pane state (RS-36)', () => {
     );
   });
 
+  it('offers a tab (the Anatomy tab at a study with anatomy) until the reader picks one, and starts over at each study', async () => {
+    const { controller } = setup();
+    controller.offerTab('anatomy');
+    expect(controller.getSnapshot().tab).toBe('draft'); // no study yet
+    controller.enter(STUDY);
+    await flush();
+    controller.offerTab('anatomy');
+    expect(controller.getSnapshot().tab).toBe('anatomy');
+    controller.setTab('inbox');
+    controller.offerTab('anatomy');
+    expect(controller.getSnapshot().tab).toBe('inbox');
+    controller.enter(`${STUDY}.2`);
+    await flush();
+    expect(controller.getSnapshot().tab).toBe('draft');
+    controller.offerTab('anatomy');
+    expect(controller.getSnapshot().tab).toBe('anatomy');
+    expect(controller.harnessState()).toMatchObject({ tab: 'anatomy' });
+  });
+
   it('takes an answer to `opened` as final: a refused one is not sent again', async () => {
     let nowMs = Date.parse('2026-11-20T10:00:00Z');
     const t = setup({}, { now: () => new Date(nowMs) });
