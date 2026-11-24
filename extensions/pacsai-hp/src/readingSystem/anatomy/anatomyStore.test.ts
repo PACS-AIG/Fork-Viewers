@@ -22,6 +22,7 @@ import {
   alphasFor,
   createAnatomyStore,
   readSettings,
+  SPOTLIGHT_DIM,
   taskTitle,
   type AnatomyTarget,
 } from './anatomyStore';
@@ -483,15 +484,49 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(JSON.parse(storage.value!).enabled).toBe(true);
     expect(snap.structures[keyOf('trunk_cavities', 1)].visible).toBe(true);
     expect(snap.series[0].tasks.find(t => t.task === 'trunk_cavities')!.visible).toBe(true);
-    // The cavity's slices 1-4 hold 48 voxels each: its largest is the first, centred at voxel (3.5, 2.5, 1).
+    // The cavity's slices 1-4 hold 48 voxels each: its largest is the first. The point inside it
+    // there: of its deepest voxels (2-5, 2-3), the one nearest their middle, (3, 2, 1).
     expect(navigations).toEqual([
-      { key: keyOf('trunk_cavities', 1), seriesUID: SERIES, point: [-1, -1, 13] },
+      { key: keyOf('trunk_cavities', 1), seriesUID: SERIES, point: [-2, -2, 13] },
     ]);
     store.select(keyOf('total', 1));
     expect(navigations[1].point).toEqual([-6, -4, 13]); // the liver's first full slice, voxel (1, 1, 1)
     expect(store.renderSetFor(SERIES)!.highlight).toEqual({ layer: 1, value: 1 });
     store.select(null);
     expect(store.getSnapshot().selected).toBeNull();
+  });
+
+  it('draws the selected structure in the spotlight with its name, and clears it when it is selected again', async () => {
+    const { store, navigations } = setup();
+    store.enter(STUDY);
+    await flush();
+    const rs = () => store.renderSetFor(SERIES)!;
+    expect(rs()).toMatchObject({ highlight: null, dim: 1, focus: null });
+    store.select(keyOf('total', 1));
+    expect(rs()).toMatchObject({
+      highlight: { layer: 0, value: 1 },
+      dim: SPOTLIGHT_DIM,
+      focus: { key: keyOf('total', 1), name: 'Liver' },
+    });
+    expect(rs().focus!.color).toEqual(store.getSnapshot().structures[keyOf('total', 1)].color);
+    expect(store.harnessState()).toMatchObject({ selected: 'total/1', spotlight: true });
+    // Pointing at another row shows that one instead, while the pointer is there.
+    store.hover(keyOf('total', 2));
+    expect(rs().focus).toMatchObject({ name: 'Spleen' });
+    store.hover(null);
+    expect(rs().focus).toMatchObject({ name: 'Liver' });
+    // The selected structure again (clicked, so the pointer is on its row): cleared, its row's
+    // showing too, with no second jump.
+    store.hover(keyOf('total', 1));
+    store.select(keyOf('total', 1));
+    expect(store.getSnapshot()).toMatchObject({ selected: null, hovered: null });
+    expect(navigations).toHaveLength(1);
+    expect(rs()).toMatchObject({ highlight: null, dim: 1, focus: null });
+    expect(store.harnessState()).toMatchObject({ selected: null, spotlight: false });
+    // A hidden structure pointed at in the table is not drawn, so no spotlight.
+    store.setStructureVisible(keyOf('total', 2), false);
+    store.hover(keyOf('total', 2));
+    expect(rs()).toMatchObject({ highlight: null, dim: 1, focus: null });
   });
 
   it('colours vertebrae in their head-to-feet order, so neighbours never share a colour whatever their values', async () => {

@@ -26,6 +26,16 @@
  *     image through the same point (only when the point lies on one of its
  *     images); with none of them on the screen, hang the series in the
  *     active viewport first.
+ *   - The highlighted structure (selected, or pointed at in the table) is
+ *     drawn in the spotlight (anatomyRender), and its name stands beside it
+ *     on every view showing it, a leader to a point inside its largest piece
+ *     (anatomyFocus). The name follows the structure as the reader scrolls
+ *     and goes when the structure leaves the view. Where a click brought a
+ *     view, a ring closes on the structure once it is drawn there (not with
+ *     reduced motion). Esc clears the selection (not from a text field, and
+ *     not when something else closes on it first).
+ *     None of it is an annotation: nothing reaches the measurements, an SR
+ *     or the report.
  *
  * Cornerstone comes in as an argument (the extension hands it over at its
  * registration), so the pane's modules load without it.
@@ -37,9 +47,16 @@ import {
   type ImageGeometry,
   type Vec3,
 } from './anatomyGeometry';
+import type { Rgb } from './anatomyColors';
+import { deepestPoint, placeCallout, type CalloutSide, type Rect } from './anatomyFocus';
 import { relatedVerdict, seriesFacts, type RelatedVerdict } from './anatomyRelated';
-import { renderLabels } from './anatomyRender';
-import { displayName, type AnatomyStore, type AnatomyTarget } from './anatomyStore';
+import { renderLabels, type RenderOutput } from './anatomyRender';
+import {
+  displayName,
+  type AnatomyRenderSet,
+  type AnatomyStore,
+  type AnatomyTarget,
+} from './anatomyStore';
 
 /** What the overlay uses of OHIF's services (all optional: it does less without them). */
 export interface OverlayServices {
@@ -89,8 +106,9 @@ interface CsViewport {
   jumpToWorld?: (world: Vec3) => boolean;
   /** A stack viewport drawn without WebGL (cornerstone's CPU path). */
   useCPURendering?: boolean;
-  /** A stack viewport's: show the image at this index. */
+  /** A stack viewport's: show the image at this index, and the index it shows. */
   setImageIdIndex?: (index: number) => unknown;
+  getCurrentImageIdIndex?: () => number;
 }
 
 interface Attached {
@@ -114,11 +132,46 @@ interface Attached {
   /** The last draw's mapping (canvas size, index of pixel (0, 0), steps), for the harness. */
   last: { size: [number, number]; origin: Vec3; stepX: Vec3; stepY: Vec3 } | null;
   drawn: number;
+  /** Over the labels, under the annotations: the name's leader, its dot, and the landing ring. */
+  marks: SVGSVGElement;
+  leader: SVGLineElement;
+  dot: SVGCircleElement;
+  ring: SVGCircleElement;
+  /** The highlighted structure's name. */
+  name: HTMLDivElement;
+  /** The name as last placed (null: none shown). */
+  callout: { key: string; side: CalloutSide; anchor: [number, number]; box: Rect } | null;
+  /** A click's landing still to come here: its structure and the stack image it went to (null: a camera move). */
+  landing: { key: string; index: number | null; until: number } | null;
+  /** The landing ring's animation frame while it runs, and which run it is (a stopped run's frame does nothing). */
+  pulse: number | null;
+  pulseRun: number;
   off: () => void;
+}
+
+/** Where a click brought a view: how a stack goes there (its image) or a volume (its camera). */
+interface Landing {
+  index: number | null;
 }
 
 const LAYER_ATTR = 'data-pacsai-anatomy-layer';
 const TIP_ATTR = 'data-pacsai-anatomy-tip';
+const MARKS_ATTR = 'data-pacsai-anatomy-marks';
+const NAME_ATTR = 'data-pacsai-anatomy-name';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** How long after a click a view may still land and show the ring, ms. */
+export const LANDING_WAIT_MS = 15000;
+/** The ring closing on a structure where a click brought a view, ms. */
+export const PULSE_MS = 700;
+/** The fewest pixels of the highlighted structure on a view that get its name. */
+export const NAME_MIN_PIXELS = 6;
+/** Past this many pixels, the highlighted structure's box on a view is read at a coarser step. */
+const FOCUS_MAX_PIXELS = 160000;
+/** A label's colour, a third of the way to white, for its name and leader on the dark image. */
+const lighten = (c: Rgb, alpha = 1): string => {
+  const [r, g, b] = c.map(v => Math.round(v + (255 - v) * 0.35));
+  return alpha >= 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 
 const fixed = (v: Vec3, digits: number) => v.map(x => x.toFixed(digits)).join(',');
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -242,7 +295,21 @@ export function createAnatomyOverlay({
   let instances = new Map<string, Array<Record<string, unknown>>>();
   let scanned = '';
   let pendingJump: AnatomyTarget | null = null;
-  const counts = { draws: 0, clears: 0, hovers: 0, jumps: 0, hangs: 0, scans: 0 };
+  const counts = { draws: 0, clears: 0, hovers: 0, jumps: 0, hangs: 0, scans: 0, pulses: 0 };
+  const now = (): number => {
+    try {
+      return win.performance?.now?.() ?? Date.now();
+    } catch (_) {
+      return Date.now();
+    }
+  };
+  const reducedMotion = (): boolean => {
+    try {
+      return Boolean(win.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
+    } catch (_) {
+      return false;
+    }
+  };
 
   const viewportOf = (element: HTMLElement): CsViewport | null => {
     try {
@@ -263,6 +330,202 @@ export function createAnatomyOverlay({
     a.key = '';
     a.anatomyUID = null;
     a.resampled = false;
+    hideName(a);
+  }
+
+  function stopPulse(a: Attached) {
+    a.pulseRun++;
+    if (a.pulse !== null) {
+      win.cancelAnimationFrame?.(a.pulse);
+      a.pulse = null;
+    }
+    a.ring.style.display = 'none';
+  }
+
+  function hideName(a: Attached) {
+    a.callout = null;
+    a.marks.style.display = 'none';
+    a.name.style.display = 'none';
+    stopPulse(a);
+  }
+
+  /** Where the viewport's own text and buttons sit, on this view's canvas (CSS px). */
+  function avoidOf(a: Attached, W: number, H: number): Rect[] {
+    const out: Rect[] = [];
+    try {
+      const origin = a.host.getBoundingClientRect();
+      const scope =
+        (a.element.closest('.viewport-wrapper') as HTMLElement | null) ??
+        a.element.parentElement ??
+        a.element;
+      scope.querySelectorAll('.overlay-item, .orientation-marker-value').forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          out.push({
+            left: r.left - origin.left - 4,
+            top: r.top - origin.top - 4,
+            right: r.right - origin.left + 4,
+            bottom: r.bottom - origin.top + 4,
+          });
+        }
+      });
+    } catch (_) {
+      /* no layout: the corners below */
+    }
+    // The top corners hold the viewport's buttons; without its text found, all four corners stay clear.
+    const cw = Math.min(out.length ? 140 : 200, 0.3 * W);
+    const ch = Math.min(out.length ? 36 : 80, 0.2 * H);
+    out.push(
+      { left: 0, top: 0, right: cw, bottom: ch },
+      { left: W - cw, top: 0, right: W, bottom: ch }
+    );
+    if (out.length === 2) {
+      out.push(
+        { left: 0, top: H - ch, right: cw, bottom: H },
+        { left: W - cw, top: H - ch, right: W, bottom: H }
+      );
+    }
+    return out;
+  }
+
+  /**
+   * The highlighted structure's name beside it on this view, its leader ending
+   * on its largest piece's deepest pixel here; and the ring, when a click's
+   * landing on this view is this draw.
+   */
+  function showName(
+    a: Attached,
+    W: number,
+    H: number,
+    found: RenderOutput['focus'],
+    focus: AnatomyRenderSet['focus'],
+    landed: { key: string } | null
+  ) {
+    const keys = a.scratch;
+    if (!focus || !found || found.pixels < NAME_MIN_PIXELS || !keys) {
+      return hideName(a);
+    }
+    // Its pixels over their box (a coarser step for a large one): their largest piece's deepest one.
+    const bw = found.right - found.left;
+    const bh = found.bottom - found.top;
+    const step = Math.max(1, Math.ceil(Math.sqrt((bw * bh) / FOCUS_MAX_PIXELS)));
+    const half = step >> 1;
+    const w = Math.ceil(bw / step);
+    const h = Math.ceil(bh / step);
+    const mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const py = Math.min(found.bottom - 1, found.top + y * step + half);
+      for (let x = 0; x < w; x++) {
+        const px = Math.min(found.right - 1, found.left + x * step + half);
+        mask[y * w + x] = keys[py * W + px] === found.key ? 1 : 0;
+      }
+    }
+    const deep = deepestPoint(mask, w, h);
+    if (!deep) {
+      return hideName(a);
+    }
+    const anchor: [number, number] = [
+      found.left + deep.x * step + half + 0.5,
+      found.top + deep.y * step + half + 0.5,
+    ];
+    const piece: Rect = {
+      left: found.left + deep.box.left * step,
+      top: found.top + deep.box.top * step,
+      right: Math.min(found.right, found.left + deep.box.right * step),
+      bottom: Math.min(found.bottom, found.top + deep.box.bottom * step),
+    };
+    if (a.name.textContent !== focus.name) {
+      a.name.textContent = focus.name;
+    }
+    a.name.style.color = lighten(focus.color);
+    a.name.style.borderColor = lighten(focus.color, 0.6);
+    a.name.style.display = 'block';
+    const lw = a.name.offsetWidth || Math.round(7 * focus.name.length + 16);
+    const lh = a.name.offsetHeight || 20;
+    const cover = (r: Rect) => {
+      let n = 0;
+      let anatomy = 0;
+      let self = 0;
+      const y1 = Math.min(H, r.bottom);
+      const x1 = Math.min(W, r.right);
+      for (let y = Math.max(0, Math.floor(r.top)); y < y1; y += 3) {
+        for (let x = Math.max(0, Math.floor(r.left)); x < x1; x += 3) {
+          const k = keys[y * W + x];
+          n++;
+          if (k !== 0) {
+            anatomy++;
+            self += k === found.key ? 1 : 0;
+          }
+        }
+      }
+      return n ? { anatomy: anatomy / n, self: self / n } : { anatomy: 0, self: 0 };
+    };
+    const placed = placeCallout({
+      width: W,
+      height: H,
+      anchor,
+      piece,
+      label: [lw, lh],
+      cover,
+      avoid: avoidOf(a, W, H),
+      last: a.callout?.key === focus.key ? a.callout.side : null,
+    });
+    if (!placed) {
+      return hideName(a);
+    }
+    a.name.style.left = `${Math.round(placed.box.left)}px`;
+    a.name.style.top = `${Math.round(placed.box.top)}px`;
+    const color = lighten(focus.color);
+    a.leader.setAttribute('x1', placed.from[0].toFixed(1));
+    a.leader.setAttribute('y1', placed.from[1].toFixed(1));
+    a.leader.setAttribute('x2', anchor[0].toFixed(1));
+    a.leader.setAttribute('y2', anchor[1].toFixed(1));
+    a.leader.setAttribute('stroke', color);
+    a.dot.setAttribute('cx', anchor[0].toFixed(1));
+    a.dot.setAttribute('cy', anchor[1].toFixed(1));
+    a.dot.setAttribute('fill', color);
+    a.marks.style.display = 'block';
+    a.callout = { key: focus.key, side: placed.side, anchor, box: placed.box };
+    if (landed && landed.key === focus.key) {
+      startPulse(a, piece, color);
+    }
+  }
+
+  /** A ring closing on the structure's largest piece and fading, once. */
+  function startPulse(a: Attached, piece: Rect, color: string) {
+    stopPulse(a);
+    if (reducedMotion()) {
+      return;
+    }
+    counts.pulses++;
+    const cx = (piece.left + piece.right) / 2;
+    const cy = (piece.top + piece.bottom) / 2;
+    const r1 = Math.max(10, Math.hypot(piece.right - piece.left, piece.bottom - piece.top) / 2 + 4);
+    const r0 = r1 + 60;
+    a.ring.setAttribute('cx', cx.toFixed(1));
+    a.ring.setAttribute('cy', cy.toFixed(1));
+    a.ring.setAttribute('stroke', color);
+    a.ring.setAttribute('r', r0.toFixed(1));
+    a.ring.setAttribute('stroke-opacity', '0.95');
+    a.ring.style.display = '';
+    const start = now();
+    const run = a.pulseRun;
+    const frame = () => {
+      if (run !== a.pulseRun) {
+        return;
+      }
+      const t = Math.min(1, Math.max(0, (now() - start) / PULSE_MS));
+      const e = 1 - Math.pow(1 - t, 3);
+      a.ring.setAttribute('r', (r0 + (r1 - r0) * e).toFixed(1));
+      a.ring.setAttribute('stroke-opacity', (0.95 * (1 - t)).toFixed(3));
+      if (t < 1) {
+        a.pulse = win.requestAnimationFrame(frame);
+      } else {
+        a.pulse = null;
+        a.ring.style.display = 'none';
+      }
+    };
+    a.pulse = win.requestAnimationFrame(frame);
   }
 
   /** An image's plane: its first pixel's position, row and column directions, normal, size and spacings. */
@@ -473,7 +736,9 @@ export function createAnatomyOverlay({
     if (!resampled && pendingJump && pendingJump.seriesUID === anatomyUID) {
       const target = pendingJump;
       pendingJump = null;
-      if (bringTo(vp, target.point, anatomyUID, false)) {
+      const landing = bringTo(vp, target.point, anatomyUID, false);
+      if (landing) {
+        a.landing = { key: target.key, index: landing.index, until: now() + LANDING_WAIT_MS };
         return; // the jump renders again, and that render draws
       }
     }
@@ -518,6 +783,7 @@ export function createAnatomyOverlay({
         fillAlpha: rs.fillAlpha,
         edgeAlpha: rs.edgeAlpha,
         highlight: rs.highlight,
+        dim: rs.dim,
       },
       a.scratch,
       a.image.data
@@ -531,6 +797,23 @@ export function createAnatomyOverlay({
     a.shift = shift;
     a.last = { size: [W, H], origin: o, stepX: sx, stepY: sy };
     counts.draws++;
+    // A click's landing here: the stack shows the image it went to, or the camera has moved.
+    let landed: { key: string } | null = null;
+    if (a.landing) {
+      let index: number | undefined;
+      try {
+        index = vp.getCurrentImageIdIndex?.();
+      } catch (_) {
+        index = undefined;
+      }
+      if (a.landing.index === null || a.landing.index === index) {
+        landed = a.landing;
+        a.landing = null;
+      } else if (now() > a.landing.until) {
+        a.landing = null;
+      }
+    }
+    showName(a, W, H, out.focus, rs.focus, landed);
   }
 
   const queue = (a: Attached) => {
@@ -543,6 +826,25 @@ export function createAnatomyOverlay({
   function hideTip(a: Attached) {
     if (a.tip.style.display !== 'none') {
       a.tip.style.display = 'none';
+    }
+  }
+
+  /** The structures the labelmap holds under a canvas point of this view (for the harness). */
+  function namesAt(a: Attached, at: [number, number]): string[] {
+    const vp = viewportOf(a.element);
+    if (!vp || !a.anatomyUID) {
+      return [];
+    }
+    try {
+      const world = vp.canvasToWorld(at);
+      if (!isPoint(world)) {
+        return [];
+      }
+      return store
+        .structuresAt(a.anatomyUID, sub([world[0], world[1], world[2]], a.shift))
+        .map(s => displayName(s.name));
+    } catch (_) {
+      return [];
     }
   }
 
@@ -622,6 +924,46 @@ export function createAnatomyOverlay({
       textOverflow: 'ellipsis',
     });
     host.appendChild(tip);
+    const marks = doc.createElementNS(SVG_NS, 'svg') as SVGSVGElement;
+    marks.setAttribute(MARKS_ATTR, '');
+    marks.setAttribute('aria-hidden', 'true');
+    Object.assign(marks.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: '100%',
+      height: '100%',
+      display: 'none',
+      overflow: 'visible',
+      pointerEvents: 'none',
+    });
+    const leader = doc.createElementNS(SVG_NS, 'line') as SVGLineElement;
+    leader.setAttribute('stroke-width', '1.5');
+    leader.setAttribute('stroke-linecap', 'round');
+    const dot = doc.createElementNS(SVG_NS, 'circle') as SVGCircleElement;
+    dot.setAttribute('r', '3');
+    dot.setAttribute('stroke', 'rgba(0, 0, 0, 0.7)');
+    dot.setAttribute('stroke-width', '1');
+    const ring = doc.createElementNS(SVG_NS, 'circle') as SVGCircleElement;
+    ring.setAttribute('fill', 'none');
+    ring.setAttribute('stroke-width', '2.5');
+    ring.style.display = 'none';
+    marks.append(leader, dot, ring);
+    canvas.after(marks);
+    const name = doc.createElement('div');
+    name.setAttribute(NAME_ATTR, '');
+    Object.assign(name.style, {
+      position: 'absolute',
+      display: 'none',
+      pointerEvents: 'none',
+      padding: '1px 7px',
+      borderRadius: '4px',
+      background: 'rgba(10, 17, 27, 0.88)',
+      border: '1px solid #2B3A4D',
+      font: '12px/18px system-ui, -apple-system, "Segoe UI", sans-serif',
+      whiteSpace: 'nowrap',
+    });
+    marks.after(name);
 
     const a: Attached = {
       element,
@@ -640,6 +982,15 @@ export function createAnatomyOverlay({
       shift: NO_SHIFT,
       last: null,
       drawn: 0,
+      marks,
+      leader,
+      dot,
+      ring,
+      name,
+      callout: null,
+      landing: null,
+      pulse: null,
+      pulseRun: 0,
       off: () => {},
     };
     const onRendered = () => queue(a);
@@ -662,8 +1013,11 @@ export function createAnatomyOverlay({
       element.removeEventListener(Enums.Events.IMAGE_RENDERED, onRendered as EventListener);
       element.removeEventListener('mousemove', onMove);
       element.removeEventListener('mouseleave', onLeave);
+      stopPulse(a);
       canvas.remove();
       tip.remove();
+      marks.remove();
+      name.remove();
     };
     attached.set(element, a);
     queue(a);
@@ -725,9 +1079,15 @@ export function createAnatomyOverlay({
    * stack image data's slice spacing), which a point from the labelmap's
    * affine can miss. With `onImage` (a series resampled from the labelmap,
    * which may not reach the point), only when the point lies on that image.
-   * A volume viewport moves its camera (jumpToWorld).
+   * A volume viewport moves its camera (jumpToWorld). Answers where it went
+   * (null: nowhere).
    */
-  function bringTo(vp: CsViewport, point: Vec3, seriesUID: string, onImage: boolean): boolean {
+  function bringTo(
+    vp: CsViewport,
+    point: Vec3,
+    seriesUID: string,
+    onImage: boolean
+  ): Landing | null {
     try {
       if (typeof vp.setImageIdIndex === 'function') {
         const ids = vp.getImageIds?.() ?? [];
@@ -742,16 +1102,16 @@ export function createAnatomyOverlay({
           }
         });
         if (best < 0 || (onImage && !liesOn(ids, best, point, seriesUID))) {
-          return false;
+          return null;
         }
         stopCine(vp);
         void Promise.resolve(vp.setImageIdIndex(best)).catch(() => {});
-        return true;
+        return { index: best };
       }
       stopCine(vp);
-      return vp.jumpToWorld?.(point) === true;
+      return vp.jumpToWorld?.(point) === true ? { index: null } : null;
     } catch (_) {
-      return false;
+      return null;
     }
   }
 
@@ -776,7 +1136,7 @@ export function createAnatomyOverlay({
       .filter((x): x is { a: Attached; vp: CsViewport } => Boolean(x.vp))
       .sort((x, y) => Number(y.vp.id === active) - Number(x.vp.id === active));
     let moved = 0;
-    for (const { vp } of list) {
+    for (const { a, vp } of list) {
       let ids: string[] = [];
       let shown: string | null = null;
       try {
@@ -785,10 +1145,16 @@ export function createAnatomyOverlay({
       } catch (_) {
         ids = [];
       }
+      let landing: Landing | null = null;
       if (ids.some(id => seriesOf(id) === target.seriesUID)) {
-        moved += bringTo(vp, target.point, target.seriesUID, false) ? 1 : 0;
+        landing = bringTo(vp, target.point, target.seriesUID, false);
       } else if (shown && relatedSource(shown) === target.seriesUID) {
-        moved += bringTo(vp, target.point, shown, true) ? 1 : 0;
+        landing = bringTo(vp, target.point, shown, true);
+      }
+      if (landing) {
+        moved++;
+        a.landing = { key: target.key, index: landing.index, until: now() + LANDING_WAIT_MS };
+        queue(a);
       }
     }
     if (moved > 0) {
@@ -841,6 +1207,32 @@ export function createAnatomyOverlay({
     /* no rendering engine yet: the viewports attach as they are enabled */
   }
 
+  // Esc clears the selection, unless typed into a field (the report's editor, a search box). On
+  // the document, as it bubbles: OHIF's own Esc (cancel a measurement) is bound there too, and
+  // marks it handled and stops it, so neither a window listener nor `defaultPrevented` would
+  // do; what closes on Esc first (the Copilot card, the arrange panel, the prior switcher) stops
+  // it before it gets here, and the selection stays.
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || e.repeat) {
+      return;
+    }
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+      return;
+    }
+    const t = e.target as Element | null;
+    if (
+      t &&
+      typeof t.closest === 'function' &&
+      t.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')
+    ) {
+      return;
+    }
+    if (store.getSnapshot().selected !== null) {
+      store.select(null);
+    }
+  };
+  doc.addEventListener('keydown', onKey);
+
   const offStore = store.subscribe(() => {
     // Labelmap series coming ready may have other series of their acquisition.
     scanRelated();
@@ -858,6 +1250,7 @@ export function createAnatomyOverlay({
   return {
     destroy() {
       offStore();
+      doc.removeEventListener('keydown', onKey);
       store.setNavigator(null);
       eventTarget.removeEventListener(Enums.Events.ELEMENT_ENABLED, onEnabled);
       eventTarget.removeEventListener(Enums.Events.ELEMENT_DISABLED, onDisabled);
@@ -894,6 +1287,22 @@ export function createAnatomyOverlay({
             : null,
           anatomy: a.anatomyUID !== null,
           tip: a.tip.style.display === 'block' ? a.tip.textContent : null,
+          name: a.callout
+            ? {
+                text: a.name.textContent,
+                side: a.callout.side,
+                // What the labelmap holds under the leader's end (names only).
+                under: namesAt(a, a.callout.anchor),
+                box: [
+                  a.callout.box.left,
+                  a.callout.box.top,
+                  a.callout.box.right,
+                  a.callout.box.bottom,
+                ].map(Math.round),
+                anchor: a.callout.anchor.map(x => Math.round(x * 10) / 10),
+              }
+            : null,
+          pulsing: a.pulse !== null,
         })),
         related,
         notRelated,

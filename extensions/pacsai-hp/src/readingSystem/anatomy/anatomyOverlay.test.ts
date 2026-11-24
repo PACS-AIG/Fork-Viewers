@@ -72,13 +72,24 @@ beforeAll(() => {
 });
 
 const frames: Array<() => void> = [];
+// The page's clock moves 16 ms a frame; the reader may ask for reduced motion.
+const clock = { t: 0 };
+const motion = { reduce: false };
 const win = {
   document,
   requestAnimationFrame: (cb: () => void) => frames.push(cb),
+  addEventListener: (type: string, fn: EventListener) => window.addEventListener(type, fn),
+  removeEventListener: (type: string, fn: EventListener) => window.removeEventListener(type, fn),
+  performance: { now: () => clock.t },
+  matchMedia: () => ({ matches: motion.reduce }),
 } as unknown as Window;
+const runFrame = () => {
+  clock.t += 16;
+  frames.shift()!();
+};
 const runFrames = () => {
   while (frames.length) {
-    frames.shift()!();
+    runFrame();
   }
 };
 const flush = async (n = 30) => {
@@ -132,11 +143,12 @@ function registerImages(series: string, prefix: string, shift = 0) {
 }
 
 /**
- * A viewport showing image `slice` of a stack, one CSS pixel per image pixel,
- * pixel (0, 0)'s centre at (0.5, 0.5). With `cpu`, its world is cornerstone's
- * CPU path's: the first pixel's corner, not its centre, at ImagePositionPatient.
+ * A viewport showing image `slice` of a stack, one CSS pixel per image pixel
+ * (or `scale`), pixel (0, 0)'s centre at (0.5, 0.5). With `cpu`, its world is
+ * cornerstone's CPU path's: the first pixel's corner, not its centre, at
+ * ImagePositionPatient.
  */
-function viewport(id: string, prefix: string, slice = 3, cpu = false) {
+function viewport(id: string, prefix: string, slice = 3, cpu = false, scale = 1) {
   const element = document.createElement('div');
   const inner = document.createElement('div');
   inner.className = 'viewport-element';
@@ -145,18 +157,19 @@ function viewport(id: string, prefix: string, slice = 3, cpu = false) {
   inner.append(canvas);
   element.append(inner);
   document.body.append(element);
-  Object.defineProperty(inner, 'clientWidth', { value: GRID.nx });
-  Object.defineProperty(inner, 'clientHeight', { value: GRID.ny });
+  Object.defineProperty(inner, 'clientWidth', { value: GRID.nx * scale });
+  Object.defineProperty(inner, 'clientHeight', { value: GRID.ny * scale });
   const state = { slice };
   const vp = {
     id,
     element,
     getImageIds: () => Array.from({ length: GRID.nz }, (_, k) => `${prefix}${k}`),
     getCurrentImageId: () => `${prefix}${state.slice}`,
+    getCurrentImageIdIndex: () => state.slice,
     useCPURendering: cpu,
     canvasToWorld: ([x, y]: [number, number]) => [
-      -8 + 2 * (cpu ? x : x - 0.5),
-      -6 + 2 * (cpu ? y : y - 0.5),
+      -8 + 2 * (cpu ? x / scale : x / scale - 0.5),
+      -6 + 2 * (cpu ? y / scale : y / scale - 0.5),
       10 + 3 * state.slice,
     ],
     setImageIdIndex: jest.fn((index: number) => {
@@ -274,6 +287,7 @@ afterEach(() => {
   puts.length = 0;
   frames.length = 0;
   clears = 0;
+  motion.reduce = false;
 });
 
 describe('the anatomy layers on the viewports (RS-36)', () => {
@@ -716,5 +730,220 @@ describe('the anatomy layers on other series of the same acquisition (RS-36)', (
     expect(setDisplaySetsForViewports).not.toHaveBeenCalled();
     expect(store.harnessState()).toMatchObject({ counts: { jumps: 1, jumpMisses: 0 } });
     overlay.destroy();
+  });
+});
+
+describe('the selected structure on the images: the spotlight, its name, the landing ring (RS-36)', () => {
+  const nameOf = (inner: HTMLElement) =>
+    inner.querySelector('[data-pacsai-anatomy-name]') as HTMLDivElement;
+  const marksOf = (inner: HTMLElement) =>
+    inner.querySelector('[data-pacsai-anatomy-marks]') as SVGSVGElement;
+  const viewOf = (overlay: { harnessState(): Record<string, unknown> }) =>
+    (overlay.harnessState().viewports as Array<Record<string, unknown>>)[0];
+
+  it('dims every other label while a structure is pointed at in the table, its own edge two pixels wide', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    const { element } = viewport('vp1', 'a', 3);
+    const overlay = createAnatomyOverlay({ store, services: null, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element });
+    rendered(element);
+    runFrames();
+    const fill = Math.round(0.35 * 255);
+    expect(alphaAt(last(), 6, 4)).toBe(fill); // the spleen's inside
+    store.hover('0/total/1');
+    runFrames();
+    expect(alphaAt(last(), 6, 4)).toBe(Math.round(fill * 0.25));
+    expect(alphaAt(last(), 1, 1)).toBe(255); // the liver: three pixels across, all edge
+    store.hover(null);
+    runFrames();
+    expect(alphaAt(last(), 6, 4)).toBe(fill);
+    overlay.destroy();
+  });
+
+  it('names the selected structure beside it, a leader to a point inside it, and follows it from slice to slice', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    // 25 CSS pixels to an image pixel: a 200 x 150 view, the liver in its top left (0-75).
+    const { element, inner, state } = viewport('vp1', 'a', 3, false, 25);
+    const overlay = createAnatomyOverlay({ store, services: null, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element });
+    rendered(element);
+    runFrames();
+    const name = nameOf(inner);
+    const marks = marksOf(inner);
+    expect(name.style.display).toBe('none');
+    // Between the layers and the annotations, and never in the pointer's way.
+    expect(marks.previousElementSibling?.hasAttribute('data-pacsai-anatomy-layer')).toBe(true);
+    expect(name.previousElementSibling).toBe(marks);
+    expect([marks.style.pointerEvents, name.style.pointerEvents]).toEqual(['none', 'none']);
+
+    store.select('0/total/1'); // the liver; its largest slice is the first it is on, slice 1
+    expect(state.slice).toBe(1);
+    rendered(element);
+    runFrames();
+    expect(name.style.display).toBe('block');
+    expect(name.textContent).toBe('Liver');
+    // In the liver's colour (190 104 78), a third of the way to white.
+    expect(name.style.color).toBe('rgb(213, 157, 140)');
+    // Its middle; the name on its right, clear of the vertebra below and the corners.
+    expect(viewOf(overlay).name).toMatchObject({
+      text: 'Liver',
+      side: 'right',
+      anchor: [37.5, 37.5],
+      under: ['Liver'],
+    });
+    const leader = marks.querySelector('line')!;
+    expect([leader.getAttribute('x2'), leader.getAttribute('y2')]).toEqual(['37.5', '37.5']);
+    expect(Number(leader.getAttribute('x1'))).toBe(Number(name.style.left.replace('px', '')));
+    expect(marks.style.display).toBe('block');
+
+    // Scrolled past the liver, the name goes; back on it, it comes back on the same side.
+    state.slice = 4;
+    rendered(element);
+    runFrames();
+    expect(name.style.display).toBe('none');
+    expect(viewOf(overlay).name).toBeNull();
+    state.slice = 2;
+    rendered(element);
+    runFrames();
+    expect(viewOf(overlay).name).toMatchObject({ text: 'Liver', side: 'right' });
+    // The layers turned off take the name with them.
+    store.setEnabled(false);
+    runFrames();
+    expect(name.style.display).toBe('none');
+    overlay.destroy();
+    expect(inner.querySelector('[data-pacsai-anatomy-name]')).toBeNull();
+    expect(inner.querySelector('[data-pacsai-anatomy-marks]')).toBeNull();
+  });
+
+  it('closes a ring on the structure where a click brought a view, once, and not with reduced motion', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    const { element, inner, state } = viewport('vp1', 'a', 3, false, 25);
+    const overlay = createAnatomyOverlay({ store, services: null, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element });
+    rendered(element);
+    runFrames();
+    const ring = marksOf(inner).querySelectorAll('circle')[1] as SVGCircleElement;
+    // Pointed at in the table, the liver is named, with no ring: nothing brought the view.
+    store.hover('0/total/2');
+    runFrames();
+    expect(nameOf(inner).textContent).toBe('Spleen');
+    expect(overlay.harnessState()).toMatchObject({ counts: { pulses: 0 } });
+    store.hover(null);
+
+    store.select('0/total/1');
+    rendered(element);
+    runFrame(); // the draw on the slice the click went to: the ring at its widest
+    expect(ring.style.display).toBe('');
+    const widest = Number(ring.getAttribute('r'));
+    runFrame();
+    runFrame();
+    expect(Number(ring.getAttribute('r'))).toBeLessThan(widest);
+    expect(Number(ring.getAttribute('stroke-opacity'))).toBeLessThan(0.95);
+    expect(viewOf(overlay)).toMatchObject({ pulsing: true });
+    runFrames();
+    expect(ring.style.display).toBe('none');
+    // It closed on the liver's piece: 75 px across, centred on it.
+    expect(Number(ring.getAttribute('r'))).toBeCloseTo(Math.hypot(75, 75) / 2 + 4, 0);
+    expect([ring.getAttribute('cx'), ring.getAttribute('cy')]).toEqual(['37.5', '37.5']);
+    expect(viewOf(overlay)).toMatchObject({ pulsing: false });
+    expect(overlay.harnessState()).toMatchObject({ counts: { pulses: 1 } });
+    // Scrolling on draws the name again, without a ring.
+    state.slice = 2;
+    rendered(element);
+    runFrames();
+    expect(overlay.harnessState()).toMatchObject({ counts: { pulses: 1 } });
+
+    // With reduced motion, the click still lands and names, without a ring.
+    motion.reduce = true;
+    store.select('0/total/2'); // the spleen, on slice 3
+    expect(state.slice).toBe(3);
+    rendered(element);
+    runFrames();
+    expect(nameOf(inner).textContent).toBe('Spleen');
+    expect(overlay.harnessState()).toMatchObject({ counts: { pulses: 1 } });
+    overlay.destroy();
+  });
+
+  it('a ring waits for the image the click went to, and a stopped ring stays stopped', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    const { element, inner, vp, state } = viewport('vp1', 'a', 3, false, 25);
+    // The stack takes its time: the image index moves only when its image has loaded.
+    let loaded: (() => void) | null = null;
+    vp.setImageIdIndex = jest.fn((index: number) => {
+      loaded = () => {
+        state.slice = index;
+      };
+    });
+    const overlay = createAnatomyOverlay({ store, services: null, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element });
+    rendered(element);
+    runFrames();
+    store.select('0/total/1');
+    runFrames(); // still on slice 3, where the liver is too: named, no ring yet
+    expect(nameOf(inner).textContent).toBe('Liver');
+    expect(overlay.harnessState()).toMatchObject({ counts: { pulses: 0 } });
+    loaded!();
+    rendered(element);
+    runFrame();
+    expect(overlay.harnessState()).toMatchObject({ counts: { pulses: 1 } });
+    // Cleared mid-ring: the ring goes, and its next frame does nothing.
+    store.select(null);
+    runFrames();
+    const ring = marksOf(inner).querySelectorAll('circle')[1] as SVGCircleElement;
+    expect(ring.style.display).toBe('none');
+    expect(viewOf(overlay)).toMatchObject({ pulsing: false, name: null });
+    overlay.destroy();
+  });
+
+  it('Esc clears the selection, alongside OHIF’s own Esc, but not from a field or what closes on it first', async () => {
+    // OHIF's hotkeys take Esc on the document as it bubbles (cancel a measurement), marking it
+    // handled and stopping it; they were there first.
+    const ohifEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener('keydown', ohifEsc);
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    const { element, inner } = viewport('vp1', 'a', 3, false, 25);
+    const overlay = createAnatomyOverlay({ store, services: null, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element });
+    store.select('0/total/1');
+    rendered(element);
+    runFrames();
+    const esc = (target: EventTarget, over: KeyboardEventInit = {}) =>
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, ...over }));
+    const input = document.createElement('input');
+    const editor = document.createElement('div');
+    editor.setAttribute('contenteditable', 'true');
+    const paragraph = document.createElement('p');
+    editor.append(paragraph);
+    // A card that closes on Esc and stops it (as the Copilot does).
+    const card = document.createElement('div');
+    const cardButton = document.createElement('button');
+    card.append(cardButton);
+    card.addEventListener('keydown', e => e.stopPropagation());
+    document.body.append(input, editor, card);
+    esc(input);
+    esc(paragraph);
+    esc(cardButton);
+    esc(document.body, { shiftKey: true });
+    expect(store.getSnapshot().selected).toBe('0/total/1');
+    esc(document.body);
+    expect(store.getSnapshot().selected).toBeNull();
+    runFrames();
+    expect(nameOf(inner).style.display).toBe('none');
+    overlay.destroy();
+    // Gone with the overlay.
+    store.select('0/total/1');
+    esc(document.body);
+    expect(store.getSnapshot().selected).toBe('0/total/1');
+    document.removeEventListener('keydown', ohifEsc);
   });
 });

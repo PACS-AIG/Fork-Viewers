@@ -194,8 +194,17 @@ describe('the layers drawn for a viewport (RS-36 anatomy)', () => {
       highlight: { layer: 0, value: 2 },
     });
     expect(rgbaAt(first.pixels, GRID.nx, 1, 1)[3]).toBe(Math.round(0.2 * 255));
-    expect(rgbaAt(first.pixels, GRID.nx, 6, 4)[3]).toBe(Math.round(0.55 * 255)); // the spleen's inside
-    expect(rgbaAt(first.pixels, GRID.nx, 5, 3)[3]).toBe(255); // its edge
+    // The spleen's edge is two pixels wide: at three pixels across, it is all edge.
+    expect(rgbaAt(first.pixels, GRID.nx, 6, 4)[3]).toBe(255);
+    expect(rgbaAt(first.pixels, GRID.nx, 5, 3)[3]).toBe(255);
+    expect(first.focus).toEqual({
+      key: (1 << 16) | 2,
+      pixels: 9,
+      left: 5,
+      top: 3,
+      right: 8,
+      bottom: 6,
+    });
     const again = renderLabels(
       { ...nativeSlice(3), layers: [organs], fillAlpha: 0.2, edgeAlpha: 0.4 },
       first.scratch,
@@ -204,6 +213,67 @@ describe('the layers drawn for a viewport (RS-36 anatomy)', () => {
     expect(again.pixels).toBe(first.pixels);
     expect(again.scratch).toBe(first.scratch);
     expect(rgbaAt(again.pixels, GRID.nx, 6, 4)[3]).toBe(Math.round(0.2 * 255));
+    expect(again.focus).toBeNull();
+  });
+
+  it('draws the spotlight: the highlighted structure strong with a two-pixel edge, every other label dimmed, and where it is', async () => {
+    const organs = await layerOf(ORGANS, { 1: RED, 2: GREEN });
+    // Four canvas pixels to a voxel: voxel i covers x = 4i .. 4i + 3.
+    const zoomed = {
+      width: 32,
+      height: 24,
+      origin: [-0.375, -0.375, 3] as [number, number, number],
+      stepX: [0.25, 0, 0] as [number, number, number],
+      stepY: [0, 0.25, 0] as [number, number, number],
+      layers: [organs],
+      fillAlpha: 0.4,
+      edgeAlpha: 0.8,
+    };
+    const lit = renderLabels({ ...zoomed, highlight: { layer: 0, value: 2 }, dim: 0.25 });
+    const fill = Math.round(0.4 * 255);
+    const edge = Math.round(0.8 * 255);
+    // The liver at a quarter of its strength, inside and on its edge.
+    expect(rgbaAt(lit.pixels, 32, 5, 5)).toEqual([255, 0, 0, Math.round(fill * 0.25)]);
+    expect(rgbaAt(lit.pixels, 32, 11, 5)[3]).toBe(Math.round(edge * 0.25));
+    // The spleen (x 20-31, y 12-23): its edge two pixels wide, its inside stronger than a plain fill.
+    expect(rgbaAt(lit.pixels, 32, 20, 18)).toEqual([0, 255, 0, 255]);
+    expect(rgbaAt(lit.pixels, 32, 21, 18)[3]).toBe(255);
+    expect(rgbaAt(lit.pixels, 32, 22, 18)[3]).toBe(Math.round(0.55 * 255));
+    expect(rgbaAt(lit.pixels, 32, 26, 18)[3]).toBe(Math.round(0.55 * 255));
+    expect(lit.focus).toEqual({
+      key: (1 << 16) | 2,
+      pixels: 144,
+      left: 20,
+      top: 12,
+      right: 32,
+      bottom: 24,
+    });
+    // Without a highlight, nothing is dimmed whatever `dim` says.
+    const plain = renderLabels({ ...zoomed, dim: 0.25 });
+    expect(rgbaAt(plain.pixels, 32, 5, 5)[3]).toBe(fill);
+    expect(plain.focus).toBeNull();
+    // A highlighted structure that is not on this slice: no focus, the others dimmed all the same.
+    const elsewhere = renderLabels({
+      ...zoomed,
+      origin: [-0.375, -0.375, 1],
+      highlight: { layer: 0, value: 2 },
+      dim: 0.25,
+    });
+    expect(elsewhere.focus).toBeNull();
+    expect(rgbaAt(elsewhere.pixels, 32, 5, 5)[3]).toBe(Math.round(fill * 0.25));
+  });
+
+  it('aims a click at a point inside a curved label on its largest slice, where its centroid would miss it', async () => {
+    // A C on slice 2 opening to the right: its centroid (2.5, 2.5) lies in the opening.
+    const c = gridVolume((i, j, k) => (k === 2 && (j === 0 || j === 5 || i <= 1) ? 1 : 0));
+    const layer = await buildLayer(volume(c), [1]);
+    const st = layer.stats.get(1)!;
+    expect(st.bestSlice).toBe(2);
+    expect(valueAt(layer, Math.round(st.centroid[0]), Math.round(st.centroid[1]), 2)).toBe(0);
+    const [i, j, k] = st.bestPoint;
+    expect(valueAt(layer, i, j, k)).toBe(1);
+    // At two voxels thick, every voxel of it is on its edge: the one nearest their middle.
+    expect(st.bestPoint).toEqual([1, 2, 2]);
   });
 
   it('names the visible labels under a point, topmost first', async () => {

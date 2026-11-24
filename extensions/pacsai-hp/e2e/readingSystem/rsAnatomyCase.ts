@@ -292,7 +292,10 @@ interface Measured {
   bright: { left: Box; right: Box };
   drawn: { left: Box; right: Box };
   rect: { left: number; top: number };
-  centre: { left: { r: number; g: number; b: number; a: number } | null };
+  centre: {
+    left: { r: number; g: number; b: number; a: number } | null;
+    right: { r: number; g: number; b: number; a: number } | null;
+  };
 }
 
 /** In the page: the bright blocks on cornerstone's canvas and the drawn labels on the layer, as boxes (CSS px). */
@@ -329,7 +332,7 @@ function measure(): Measured | null {
     bright: { left: null, right: null },
     drawn: { left: null, right: null },
     rect: { left: host.getBoundingClientRect().left, top: host.getBoundingClientRect().top },
-    centre: { left: null },
+    centre: { left: null, right: null },
   };
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
@@ -343,13 +346,15 @@ function measure(): Measured | null {
       }
     }
   }
-  const b = out.drawn.left;
-  if (b) {
-    const cx = Math.round((b.x0 + b.x1) / 2);
-    const cy = Math.round((b.y0 + b.y1) / 2);
-    const q = (cy * W + cx) * 4;
-    out.centre.left = { r: lay[q], g: lay[q + 1], b: lay[q + 2], a: lay[q + 3] };
-  }
+  (['left', 'right'] as const).forEach(side => {
+    const b = out.drawn[side];
+    if (b) {
+      const cx = Math.round((b.x0 + b.x1) / 2);
+      const cy = Math.round((b.y0 + b.y1) / 2);
+      const q = (cy * W + cx) * 4;
+      out.centre[side] = { r: lay[q], g: lay[q + 1], b: lay[q + 2], a: lay[q + 3] };
+    }
+  });
   return out;
 }
 
@@ -521,6 +526,49 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
         path: path.join(__dirname, 'test-results', `anatomy-layers-${rendering}.png`),
       });
     }
+
+    // The liver in the spotlight: the kidney at a quarter of its strength, the liver named
+    // beside it, the leader ending inside it, the name clear of it.
+    const fill = Math.round(0.35 * 255);
+    expect(at.centre.right!.a, report).toBe(Math.round(fill * 0.25));
+    const name = page.locator('[data-pacsai-anatomy-name]');
+    await expect(name).toHaveText('Liver');
+    await expect(name).toBeVisible();
+    const marks = await page.evaluate(() => {
+      const line = document.querySelector('[data-pacsai-anatomy-marks] line');
+      const chip = document.querySelector('[data-pacsai-anatomy-name]') as HTMLElement | null;
+      return line && chip
+        ? {
+            end: [Number(line.getAttribute('x2')), Number(line.getAttribute('y2'))],
+            chip: {
+              x0: chip.offsetLeft,
+              y0: chip.offsetTop,
+              x1: chip.offsetLeft + chip.offsetWidth,
+              y1: chip.offsetTop + chip.offsetHeight,
+            },
+          }
+        : null;
+    });
+    const liver = at.drawn.left!;
+    const marksReport = JSON.stringify({ marks, liver });
+    expect(marks, marksReport).not.toBeNull();
+    const [ex, ey] = marks!.end;
+    expect(
+      ex >= liver.x0 && ex <= liver.x1 + 1 && ey >= liver.y0 && ey <= liver.y1 + 1,
+      marksReport
+    ).toBe(true);
+    const c2 = marks!.chip;
+    expect(
+      c2.x1 <= liver.x0 || c2.x0 > liver.x1 || c2.y1 <= liver.y0 || c2.y0 > liver.y1,
+      marksReport
+    ).toBe(true);
+    // Esc clears it: the name goes, the kidney back to its own strength.
+    await page.keyboard.press('Escape');
+    await expect(name).toBeHidden();
+    await expect
+      .poll(async () => (await page.evaluate(measure))?.centre.right?.a ?? null)
+      .toBe(fill);
+    await expect(organs.nth(0)).toHaveAttribute('aria-selected', 'false');
 
     // Hovering the liver names it.
     const b = at.drawn.left!;

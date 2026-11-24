@@ -301,7 +301,14 @@ function Task({
                         type="button"
                         className="prs-structure"
                         disabled={task.status !== 'ready'}
-                        title={task.status === 'ready' ? `Show ${name} on the images` : undefined}
+                        aria-pressed={snap.selected === key}
+                        title={
+                          task.status !== 'ready'
+                            ? undefined
+                            : snap.selected === key
+                              ? `${name} is picked out on the images: click again or press Esc to stop`
+                              : `Show ${name} on the images`
+                        }
                         onClick={() => store.select(key)}
                       >
                         {name}
