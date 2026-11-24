@@ -303,6 +303,85 @@ describe('the anatomy artifact as the pane reads it (RS-36, contract 1.10)', () 
     });
   });
 
+  it("reads contract 1.15's research radiomics on a measurement-eligible label only, and only as research", () => {
+    const lm = makeAnatomyDoc().series[0].labelmaps as Array<Record<string, unknown>>;
+    const computed = {
+      use: 'research',
+      featureSet: 'radiomics_v1',
+      engine: 'pyradiomics 3.0.1',
+      state: 'computed',
+      reason: '',
+      features: {
+        firstorder_Median: 41.5,
+        glcm_Contrast: null,
+        'bad key': 1,
+        shape_Sphericity: 'x',
+        glrlm_RunEntropy: Infinity,
+      },
+    };
+    const labels = series({
+      labelmaps: [
+        {
+          ...lm[1],
+          labels: [
+            { value: 1, name: 'liver', voxels: 1, measurementEligible: true, radiomics: computed },
+            {
+              value: 2,
+              name: 'spleen',
+              voxels: 1,
+              measurementEligible: false,
+              radiomics: computed,
+            },
+            {
+              value: 3,
+              name: 'aorta',
+              voxels: 1,
+              measurementEligible: true,
+              radiomics: { ...computed, use: 'clinical' },
+            },
+            {
+              value: 4,
+              name: 'right kidney',
+              voxels: 1,
+              measurementEligible: true,
+              radiomics: {
+                use: 'research',
+                featureSet: 'radiomics_v1',
+                engine: null,
+                state: 'not_computed',
+                reason: 'no radiomics engine is installed in this build',
+                features: {},
+              },
+            },
+            {
+              value: 5,
+              name: 'left kidney',
+              voxels: 1,
+              measurementEligible: true,
+              radiomics: { use: 'research' },
+            },
+          ],
+        },
+      ],
+    }).labelmaps[0].labels;
+    expect(labels[0].radiomics).toEqual({
+      use: 'research',
+      featureSet: 'radiomics_v1',
+      engine: 'pyradiomics 3.0.1',
+      state: 'computed',
+      reason: '',
+      features: { firstorder_Median: 41.5, glcm_Contrast: null },
+    });
+    expect(labels[1].radiomics).toBeNull(); // not measurement eligible
+    expect(labels[2].radiomics).toBeNull(); // not research: never shown as research features
+    expect(labels[3].radiomics).toMatchObject({
+      engine: null,
+      state: 'not_computed',
+      features: {},
+    });
+    expect(labels[4].radiomics).toBeNull(); // no state
+  });
+
   it('takes an affine only as a 4 x 4 whose last row is 0 0 0 1 and whose 3 x 3 is invertible', () => {
     expect(readAffine(AFFINE)).toEqual(AFFINE);
     expect(

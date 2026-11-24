@@ -326,6 +326,51 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(snap.structures[keyOf('vertebrae_pp', 1)].attenuation).toBeNull();
   });
 
+  it("groups 1.15's research features by class in pyradiomics' order, a class it does not know last", async () => {
+    const { store } = setup({
+      mutate: raw => {
+        const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+        total.labels[0].radiomics = {
+          use: 'research',
+          featureSet: 'radiomics_v1',
+          engine: 'pyradiomics 3.0.1',
+          state: 'computed',
+          reason: '',
+          features: {
+            ngtdm_Busyness: 0.5,
+            firstorder_Median: 41.5,
+            zzz_Extra: 1,
+            shape_Sphericity: 0.8,
+            firstorder_Mean: null,
+          },
+        };
+      },
+    });
+    store.enter(STUDY);
+    await flush();
+    const r = store.getSnapshot().structures[keyOf('total', 1)].radiomics!;
+    expect(r).toMatchObject({
+      featureSet: 'radiomics_v1',
+      engine: 'pyradiomics 3.0.1',
+      state: 'computed',
+      reason: '',
+    });
+    expect(r.groups.map(g => [g.cls, g.title, g.features])).toEqual([
+      [
+        'firstorder',
+        'First order',
+        [
+          ['Median', 41.5],
+          ['Mean', null],
+        ],
+      ],
+      ['shape', 'Shape', [['Sphericity', 0.8]]],
+      ['ngtdm', 'NGTDM (neighbourhood tone difference)', [['Busyness', 0.5]]],
+      ['zzz', 'zzz', [['Extra', 1]]],
+    ]);
+    expect(store.getSnapshot().structures[keyOf('total', 2)].radiomics).toBeNull();
+  });
+
   it("keeps the reader's settings in the browser: on or off, opacity (10 to 100 %), fill or outline", async () => {
     const storage = { value: JSON.stringify({ enabled: false, opacity: 0.6, style: 'outline' }) };
     const { store } = setup({ storage });

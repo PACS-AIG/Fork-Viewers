@@ -15,6 +15,11 @@
  * ignores fields it does not know. A series whose entry is malformed is kept
  * with the reason and draws nothing: a series never shows part of its set.
  *
+ * Contract 1.15 (D-342) adds, on the same labels, their radiomics: research
+ * features (radiomics_v1, `use` "research"), shown only as such, never as a
+ * finding, a measurement or report content (D-277: no stability gate passed;
+ * invariant 19: clinical display is a separate gate).
+ *
  * Contract 1.14 (D-341) adds, for a measurement-eligible label the run
  * measured, its attenuation: the whole-mask median and interquartile range in
  * HU, read on the original CT over every voxel of the mask (its feature
@@ -81,6 +86,63 @@ export interface RsAnatomyLabel {
   checks: RsAnatomyChecks | null;
   /** 1.14: its attenuation, for a measurement-eligible label the run measured. */
   attenuation: RsAnatomyAttenuation | null;
+  /** 1.15: its research features, for a measurement-eligible label the run measured. */
+  radiomics: RsAnatomyRadiomics | null;
+}
+
+export interface RsAnatomyRadiomics {
+  /** Always "research": features of no validated use (only such are read). */
+  use: 'research';
+  /** E.g. "radiomics_v1". */
+  featureSet: string;
+  /** E.g. "pyradiomics 3.0.1" when computed, else null. */
+  engine: string | null;
+  /** computed, disabled or not_computed. */
+  state: string;
+  /** Why not computed ("" when computed). */
+  reason: string;
+  /** `<class>_<feature>` (pyradiomics' names) -> its unrounded value, or null where it gave none. */
+  features: Record<string, number | null>;
+}
+
+/** A radiomics feature's key: its class, then pyradiomics' feature name. */
+const FEATURE_KEY = /^[a-z0-9]{1,24}_[A-Za-z0-9]{1,64}$/;
+/** The most features a label's radiomics may carry (radiomics_v1 has 80). */
+const MAX_FEATURES = 500;
+
+/** 1.15's radiomics, read leniently; none unless its use is "research" and it names its state. */
+function readRadiomics(v: unknown): RsAnatomyRadiomics | null {
+  if (!isObject(v) || v.use !== 'research') {
+    return null;
+  }
+  const state = shortText(v.state, 32);
+  if (!state) {
+    return null;
+  }
+  const features: Record<string, number | null> = {};
+  if (isObject(v.features)) {
+    let n = 0;
+    for (const [key, value] of Object.entries(v.features)) {
+      if (n >= MAX_FEATURES) {
+        break;
+      }
+      if (
+        FEATURE_KEY.test(key) &&
+        (value === null || (typeof value === 'number' && Number.isFinite(value)))
+      ) {
+        features[key] = value;
+        n++;
+      }
+    }
+  }
+  return {
+    use: 'research',
+    featureSet: shortText(v.featureSet, 64) ?? 'radiomics',
+    engine: shortText(v.engine, 64),
+    state,
+    reason: typeof v.reason === 'string' ? v.reason.trim().slice(0, 300) : '',
+    features,
+  };
 }
 
 export interface RsAnatomyAttenuation {
@@ -351,6 +413,7 @@ function readLabels(v: unknown, datatype: LabelmapDatatype): RsAnatomyLabel[] | 
         : [],
       checks: readChecks(raw.checks),
       attenuation: measurementEligible ? readAttenuation(raw.attenuation) : null,
+      radiomics: measurementEligible ? readRadiomics(raw.radiomics) : null,
     });
   }
   return labels;

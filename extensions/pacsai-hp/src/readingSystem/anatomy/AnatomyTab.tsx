@@ -13,6 +13,10 @@
  *   - When the document has it (contract 1.14), the whole-mask median and
  *     interquartile range in HU, in a column named for that statistic so it is
  *     never read as the report's ROI median (invariant 9).
+ *   - Its research features (contract 1.15's radiomics, WeiWei: "Yes, research
+ *     label"), behind a Research button on its row: a section of their own,
+ *     marked research use only and not validated for diagnosis, never a
+ *     column of the table, a finding, a measurement or report content.
  *   - What its concept record's checks found wrong (contract 1.13), under the
  *     structure's row; a volume outside the record's band in amber.
  *   - What was not drawn, and why.
@@ -23,6 +27,7 @@ import {
   displayName,
   type AnatomySnapshot,
   type AnatomyStore,
+  type AnatomyRadiomics,
   type AnatomyStructure,
   type AnatomyTask,
 } from './anatomyStore';
@@ -56,6 +61,74 @@ export function volumeCell(s: AnatomyStructure): { text: string; title: string |
     s.outOfBand ? 'outside the expected range for this organ' : null,
   ].filter(Boolean);
   return { text, title: `${parts.join('; ')}.` };
+}
+
+/** A research feature's value as the section shows it: four significant digits, or an exponent past them. */
+export function formatFeature(v: number | null): string {
+  if (v === null) {
+    return '—';
+  }
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 1e5 || a < 1e-3)) {
+    return v.toExponential(2);
+  }
+  return String(Number(v.toPrecision(4)));
+}
+
+const RESEARCH_STATE: Record<string, string> = {
+  disabled: 'Disabled',
+  not_computed: 'Not computed',
+};
+
+/** The research banner's words (WeiWei: clearly labelled research features, not for diagnosis). */
+export const RESEARCH_BANNER =
+  'Research use only: not validated for diagnosis. Never a finding, a measurement or report content.';
+
+/** A structure's research features (1.15): by class, the first open; or why they were not computed. */
+function ResearchFeatures({ r }: { r: AnatomyRadiomics }) {
+  return (
+    <div
+      className="prs-research"
+      role="region"
+      aria-label={`Research features (${r.featureSet})`}
+    >
+      <div className="prs-research-head">
+        Research features ({r.featureSet}){r.engine ? ` · ${r.engine}` : ''}
+      </div>
+      <div className="prs-research-banner">{RESEARCH_BANNER}</div>
+      {r.state !== 'computed' ? (
+        <div
+          className="prs-research-reason"
+          data-rs-research-reason=""
+        >
+          {RESEARCH_STATE[r.state] ?? r.state}
+          {r.reason ? `: ${r.reason.replace(/[.]$/, '')}` : ''}.
+        </div>
+      ) : r.groups.length ? (
+        r.groups.map((g, i) => (
+          <details
+            key={g.cls}
+            open={i === 0}
+            data-rs-research-class={g.cls}
+          >
+            <summary>
+              {g.title} ({g.features.length})
+            </summary>
+            <dl className="prs-research-grid">
+              {g.features.map(([name, value]) => (
+                <React.Fragment key={name}>
+                  <dt title={name}>{name}</dt>
+                  <dd>{formatFeature(value)}</dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          </details>
+        ))
+      ) : (
+        <div className="prs-empty">No features.</div>
+      )}
+    </div>
+  );
 }
 
 /** The attenuation column's header title (invariant 9: the statistic is named). */
@@ -107,6 +180,9 @@ function Task({
   const [open, setOpen] = useState(task.visible);
   // The attenuation column is there once the document gives any (contract 1.14).
   const withAttenuation = Object.values(snap.structures).some(x => x.attenuation);
+  const columns = withAttenuation ? 6 : 5;
+  // The structure whose research features are open (one at a time).
+  const [research, setResearch] = useState<string | null>(null);
   const loading = task.status === 'loading' || task.status === 'waiting';
   return (
     <section
@@ -218,6 +294,18 @@ function Task({
                           !
                         </span>
                       ) : null}
+                      {s.radiomics ? (
+                        <button
+                          type="button"
+                          className="prs-research-toggle"
+                          aria-expanded={research === key}
+                          data-rs-research-toggle={`${s.task}/${s.value}`}
+                          title="Research features (radiomics): research use only, not for diagnosis"
+                          onClick={() => setResearch(research === key ? null : key)}
+                        >
+                          Research
+                        </button>
+                      ) : null}
                     </td>
                     <td
                       className="prs-num"
@@ -251,7 +339,18 @@ function Task({
                       {...rowProps}
                     >
                       <td colSpan={2} />
-                      <td colSpan={withAttenuation ? 4 : 3}>{s.warnings.join(' ')}</td>
+                      <td colSpan={columns - 2}>{s.warnings.join(' ')}</td>
+                    </tr>
+                  ) : null}
+                  {s.radiomics && research === key ? (
+                    <tr
+                      className="prs-research-row"
+                      data-rs-research={`${s.task}/${s.value}`}
+                      {...rowProps}
+                    >
+                      <td colSpan={columns}>
+                        <ResearchFeatures r={s.radiomics} />
+                      </td>
                     </tr>
                   ) : null}
                 </React.Fragment>
