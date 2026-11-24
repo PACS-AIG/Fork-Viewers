@@ -7,7 +7,11 @@
  *     serve (404) is `not_served`, a document the contract's rules refuse is
  *     `refused`. On the first read of a study not yet opened it posts `opened`,
  *     so inference that completes later reaches the inbox instead of moving
- *     the draft (the system's invariant 5).
+ *     the draft (the system's invariant 5). Nothing waits for that answer: the
+ *     service republishes the study before it answers, which can outlast the
+ *     proxy in front of it. A request without an answer is sent again as the
+ *     same event (the service records an event id once) after a growing wait,
+ *     and any answer ends it.
  *   - It polls the study's versions and reads the documents again when a
  *     revision moved, so a late result or another reader's edit shows.
  *   - A click selects a sentence and opens nothing; `openCopilot` (one key)
@@ -67,6 +71,11 @@ export interface RsCounts {
   reads: number;
   polls: number;
   pollFailures: number;
+  /** `opened` requests sent, first or again. */
+  openedTries: number;
+  /** `opened` requests that got no answer. */
+  openedFailures: number;
+  /** `opened` requests answered. */
   openedPosts: number;
   events: number;
   applied: number;
@@ -116,6 +125,24 @@ export interface RsController {
 /** Consecutive poll failures before the pane says the service is not answering. */
 export const POLL_FAILURES_BEFORE_NOTICE = 3;
 
+/**
+ * After an `opened` request got no answer, the wait before the same event goes
+ * again: the service may still be recording it. The last wait repeats.
+ */
+export const OPENED_RETRY_MS: readonly number[] = [15_000, 30_000, 60_000, 120_000];
+
+/** A study's `opened` in this window. */
+interface OpenedTry {
+  /** The one event: sent again as it is, so the service records it once. */
+  doc: RsIntakeEvent;
+  inFlight: boolean;
+  /** Answered: recorded, or refused, which sending it again would only repeat. */
+  answered: boolean;
+  failures: number;
+  /** No try before this time (ms). */
+  notBefore: number;
+}
+
 const describe = (e: unknown): string => {
   if (e instanceof RsRefused) {
     return e.why;
@@ -150,13 +177,15 @@ export function createRsController(deps: RsControllerDeps): RsController {
   /** The notice on screen is the poll's "not answering" one. */
   let pollNotice = false;
   let lastFailed: { doc: RsIntakeEvent; label: string } | null = null;
-  /** Studies this window posted `opened` for. */
-  const openedPosted = new Set<string>();
+  /** The `opened` of each study this window posted it for. */
+  const openedTries = new Map<string, OpenedTry>();
   const listeners = new Set<() => void>();
   const counts: RsCounts = {
     reads: 0,
     polls: 0,
     pollFailures: 0,
+    openedTries: 0,
+    openedFailures: 0,
     openedPosts: 0,
     events: 0,
     applied: 0,
@@ -240,37 +269,64 @@ export function createRsController(deps: RsControllerDeps): RsController {
     }
   }
 
-  async function ensureOpened(gen: number): Promise<void> {
+  /**
+   * Posts the study's `opened` without holding anything up: one request at a
+   * time, the same event again after an unanswered one (OPENED_RETRY_MS), and
+   * nothing more once it is answered.
+   */
+  function ensureOpened(gen: number): void {
     const uid = study;
     const docs = state.docs;
-    if (!uid || !docs || docs.versions.opened || openedPosted.has(uid) || patientKey === null) {
+    if (gen !== generation || !uid || !docs || docs.versions.opened || patientKey === null) {
       return;
     }
-    openedPosted.add(uid);
-    const doc = buildIntakeEvent(
-      {
-        studyUID: uid,
-        patientKey,
-        reader: deps.reader(),
-        sessionId: deps.sessionId,
-        contractVersion: docs.report.contractVersion,
+    let attempt = openedTries.get(uid);
+    if (
+      attempt &&
+      (attempt.answered || attempt.inFlight || deps.now().getTime() < attempt.notBefore)
+    ) {
+      return;
+    }
+    if (!attempt) {
+      attempt = {
+        doc: buildIntakeEvent(
+          {
+            studyUID: uid,
+            patientKey,
+            reader: deps.reader(),
+            sessionId: deps.sessionId,
+            contractVersion: docs.report.contractVersion,
+          },
+          { type: 'opened' },
+          { eventId: deps.newId(), now: deps.now() }
+        ),
+        inFlight: false,
+        answered: false,
+        failures: 0,
+        notBefore: 0,
+      };
+      openedTries.set(uid, attempt);
+    }
+    const tried = attempt;
+    tried.inFlight = true;
+    counts.openedTries++;
+    void client.postEvent(tried.doc).then(
+      () => {
+        tried.inFlight = false;
+        tried.answered = true;
+        counts.openedPosts++;
+        if (gen === generation) {
+          void refresh(gen);
+        }
       },
-      { type: 'opened' },
-      { eventId: deps.newId(), now: deps.now() }
-    );
-    try {
-      const answer = await client.postEvent(doc);
-      counts.openedPosts++;
-      if (answer.status !== 'recorded' && answer.status !== 'applied') {
-        openedPosted.delete(uid);
+      () => {
+        tried.inFlight = false;
+        tried.failures++;
+        counts.openedFailures++;
+        const wait = OPENED_RETRY_MS[Math.min(tried.failures, OPENED_RETRY_MS.length) - 1];
+        tried.notBefore = deps.now().getTime() + wait;
       }
-    } catch (_) {
-      // Tried again at the next poll.
-      openedPosted.delete(uid);
-    }
-    if (gen === generation) {
-      await refresh(gen);
-    }
+    );
   }
 
   async function poll(gen: number): Promise<void> {
@@ -305,7 +361,7 @@ export function createRsController(deps: RsControllerDeps): RsController {
       if (moved) {
         await refresh(gen, v);
       }
-      await ensureOpened(gen);
+      ensureOpened(gen);
     } catch (e) {
       counts.pollFailures++;
       pollFailures++;
@@ -337,7 +393,7 @@ export function createRsController(deps: RsControllerDeps): RsController {
       set({ phase: e instanceof RsRefused ? 'refused' : 'failed', reason: describe(e) });
       return;
     }
-    await ensureOpened(gen);
+    ensureOpened(gen);
     if (gen === generation) {
       schedulePoll(gen);
     }

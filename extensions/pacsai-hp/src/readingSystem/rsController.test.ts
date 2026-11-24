@@ -1,6 +1,7 @@
 import { RsRefused } from './rsContract';
 import { RsHttpError, type RsClient } from './rsClient';
 import {
+  OPENED_RETRY_MS,
   POLL_FAILURES_BEFORE_NOTICE,
   createRsController,
   type RsControllerDeps,
@@ -126,6 +127,103 @@ describe('the reading-system pane state (RS-36)', () => {
     t.controller.enter(STUDY);
     await flush();
     expect(t.posted).toHaveLength(0);
+  });
+
+  it('goes on polling while `opened` waits for its answer, and sends it once meanwhile', async () => {
+    const gate: { answer: () => void } = { answer: () => {} };
+    const t = setup();
+    t.client.postEvent.mockImplementationOnce(
+      (doc: RsIntakeEvent) =>
+        new Promise(resolve => {
+          t.posted.push(doc);
+          gate.answer = () =>
+            resolve({
+              artifact: 'intake_response',
+              eventId: doc.eventId,
+              status: 'recorded',
+              httpStatus: 200,
+              revision: 4,
+            });
+        })
+    );
+    t.controller.enter(STUDY);
+    await flush();
+    expect(t.controller.getSnapshot().phase).toBe('ready');
+    const polls = t.client.versions.mock.calls.length;
+    await t.tick();
+    await t.tick();
+    await t.tick();
+    expect(t.client.versions.mock.calls.length).toBe(polls + 3);
+    expect(t.posted).toHaveLength(1);
+    const reads = t.client.report.mock.calls.length;
+    t.set({ versions: makeVersions({ opened: true }) });
+    gate.answer();
+    await flush();
+    // The answer reads the documents again.
+    expect(t.client.report.mock.calls.length).toBe(reads + 1);
+    expect(t.controller.getSnapshot().docs?.versions.opened).toBe(true);
+    await t.tick();
+    expect(t.posted).toHaveLength(1);
+  });
+
+  it('sends an unanswered `opened` again as the same event after a growing wait, until it is answered', async () => {
+    let nowMs = Date.parse('2026-11-20T10:00:00Z');
+    const t = setup({}, { now: () => new Date(nowMs) });
+    const lost = async (doc: RsIntakeEvent) => {
+      t.posted.push(doc);
+      throw new RsHttpError(502, 'event');
+    };
+    t.client.postEvent.mockImplementationOnce(lost).mockImplementationOnce(lost);
+    t.controller.enter(STUDY);
+    await flush();
+    expect(t.posted).toHaveLength(1);
+    // Not again before the first wait is over, however often it polls.
+    nowMs += OPENED_RETRY_MS[0] - 1;
+    await t.tick();
+    expect(t.posted).toHaveLength(1);
+    nowMs += 1;
+    await t.tick();
+    expect(t.posted).toHaveLength(2);
+    // The second wait is longer.
+    nowMs += OPENED_RETRY_MS[1] - 1;
+    await t.tick();
+    expect(t.posted).toHaveLength(2);
+    nowMs += 1;
+    await t.tick();
+    expect(t.posted).toHaveLength(3);
+    // The same event each time, id and time included, so the service records it once.
+    expect(t.posted[1]).toEqual(t.posted[0]);
+    expect(t.posted[2]).toEqual(t.posted[0]);
+    // The third was answered: nothing more, though the versions do not say opened yet.
+    nowMs += 10 * 60_000;
+    await t.tick();
+    await t.tick();
+    expect(t.posted).toHaveLength(3);
+    expect(t.controller.harnessState().counts).toEqual(
+      expect.objectContaining({ openedTries: 3, openedFailures: 2, openedPosts: 1 })
+    );
+  });
+
+  it('takes an answer to `opened` as final: a refused one is not sent again', async () => {
+    let nowMs = Date.parse('2026-11-20T10:00:00Z');
+    const t = setup({}, { now: () => new Date(nowMs) });
+    t.client.postEvent.mockImplementationOnce(async (doc: RsIntakeEvent) => {
+      t.posted.push(doc);
+      return {
+        artifact: 'intake_response',
+        eventId: doc.eventId,
+        status: 'rejected',
+        httpStatus: 422,
+        revision: 4,
+        reason: 'refused under test',
+      };
+    });
+    t.controller.enter(STUDY);
+    await flush();
+    nowMs += 10 * 60_000;
+    await t.tick();
+    await t.tick();
+    expect(t.posted).toHaveLength(1);
   });
 
   it('is not_served for a study the API does not serve, and refused for a document the rules refuse', async () => {
