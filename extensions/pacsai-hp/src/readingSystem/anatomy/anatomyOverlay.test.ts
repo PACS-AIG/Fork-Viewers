@@ -171,6 +171,96 @@ function viewport(id: string, prefix: string, slice = 3, cpu = false) {
   return { element, inner, vp, state };
 }
 
+// ---- other series of the acquisition ------------------------------------------------
+/** An instance as OHIF naturalizes it (made up; the test grid's frame of reference). */
+const instance = (imageId: string, over: Record<string, unknown> = {}) => ({
+  imageId,
+  FrameOfReferenceUID: '2.25.1003',
+  Modality: 'CT',
+  ImageType: ['ORIGINAL', 'PRIMARY', 'AXIAL'],
+  AcquisitionDate: '20261124',
+  AcquisitionTime: '101500',
+  ...over,
+});
+const displaySet = (
+  uid: string,
+  series: string,
+  ids: string[],
+  over: Record<string, unknown> = {}
+) => ({
+  displaySetInstanceUID: uid,
+  SeriesInstanceUID: series,
+  instances: ids.map(id => instance(id, over)),
+});
+const nativeSet = (prefix = 'a') =>
+  displaySet(
+    'ds-ct',
+    SERIES,
+    Array.from({ length: GRID.nz }, (_, k) => `${prefix}${k}`)
+  );
+const REFORMAT = { ImageType: ['DERIVED', 'PRIMARY', 'AXIAL', 'MPR'] };
+const COR = '2.25.1010';
+/** The coronal reformat's images, anterior first: LPS y of each. */
+const CORONAL_YS = [4, 2, 0, -2, -4, -6];
+const idsOf = (prefix: string, ys: number[]) => ys.map((_, n) => `${prefix}${n}`);
+
+/**
+ * A coronal reformat's metadata: an image per LPS y, 8 columns of 2 mm along
+ * +x and 9 rows of 1.5 mm from z = `top` down (the labelmap's slices are 3 mm
+ * apart, so each covers two rows).
+ */
+function registerCoronal(series: string, prefix: string, ys: number[], top = 22) {
+  ys.forEach((y, n) => {
+    cs.meta.set(`generalSeriesModule|${prefix}${n}`, { seriesInstanceUID: series });
+    cs.meta.set(`imagePlaneModule|${prefix}${n}`, {
+      imagePositionPatient: [-8, y, top],
+      rowCosines: [1, 0, 0],
+      columnCosines: [0, 0, -1],
+      rowPixelSpacing: 1.5,
+      columnPixelSpacing: 2,
+      rows: 9,
+      columns: 8,
+    });
+  });
+}
+
+/** A stack viewport on a coronal reformat, one CSS pixel per image pixel (as `viewport`). */
+function coronalViewport(
+  id: string,
+  prefix: string,
+  ys: number[],
+  index: number,
+  cpu = false,
+  top = 22
+) {
+  const element = document.createElement('div');
+  const inner = document.createElement('div');
+  inner.className = 'viewport-element';
+  element.append(inner);
+  document.body.append(element);
+  Object.defineProperty(inner, 'clientWidth', { value: 8 });
+  Object.defineProperty(inner, 'clientHeight', { value: 9 });
+  const state = { index };
+  const vp = {
+    id,
+    element,
+    getImageIds: () => idsOf(prefix, ys),
+    getCurrentImageId: () => `${prefix}${state.index}`,
+    useCPURendering: cpu,
+    canvasToWorld: ([x, y]: [number, number]) => [
+      -8 + 2 * (cpu ? x : x - 0.5),
+      ys[state.index],
+      top - 1.5 * (cpu ? y : y - 0.5),
+    ],
+    setImageIdIndex: jest.fn((n: number) => {
+      state.index = n;
+    }),
+    jumpToWorld: jest.fn(() => true),
+  };
+  cs.enabled.set(element, { viewport: vp });
+  return { element, inner, vp, state };
+}
+
 const rendered = (el: HTMLElement) =>
   el.dispatchEvent(new CustomEvent('CORNERSTONE_IMAGE_RENDERED'));
 const last = () => puts[puts.length - 1];
@@ -407,6 +497,22 @@ describe('the anatomy layers on the viewports (RS-36)', () => {
     overlay.destroy();
   });
 
+  it('moves every volume viewport showing the series (MPR’s three), each through the structure', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    const views = ['vp-ax', 'vp-cor', 'vp-sag'].map(id => {
+      const v = viewport(id, 'a', 0);
+      v.vp.setImageIdIndex = undefined;
+      return v;
+    });
+    const overlay = createAnatomyOverlay({ store, services: null, cornerstone, win });
+    views.forEach(v => fire('CORNERSTONE_ELEMENT_ENABLED', { element: v.element }));
+    store.select('0/total/1');
+    views.forEach(v => expect(v.vp.jumpToWorld).toHaveBeenCalledWith([-6, -4, 13]));
+    expect(overlay.harnessState()).toMatchObject({ counts: { jumps: 3 } });
+    overlay.destroy();
+  });
+
   it('lets go of a viewport cornerstone disables, and of everything when destroyed', async () => {
     const store = await loadedStore();
     registerImages(SERIES, 'a');
@@ -422,5 +528,193 @@ describe('the anatomy layers on the viewports (RS-36)', () => {
     // A selection after the overlay went navigates nowhere.
     store.select('0/total/1');
     expect(store.harnessState()).toMatchObject({ counts: { jumps: 0 } });
+  });
+});
+
+describe('the anatomy layers on other series of the same acquisition (RS-36)', () => {
+  it.each([
+    ['with WebGL', false],
+    ['on the CPU path', true],
+  ])(
+    'draws the labelmap, resampled, on a coronal reformat of the acquisition %s, and names what is under the cursor there',
+    async (_how, cpu) => {
+      const store = await loadedStore();
+      registerImages(SERIES, 'a');
+      registerCoronal(COR, 'r', CORONAL_YS);
+      const services: OverlayServices = {
+        displaySetService: {
+          getActiveDisplaySets: () => [
+            nativeSet(),
+            displaySet('ds-cor', COR, idsOf('r', CORONAL_YS), REFORMAT),
+          ],
+        },
+      };
+      const cor = coronalViewport('vp-cor', 'r', CORONAL_YS, 4, cpu); // y = -4: the liver's row 1
+      const overlay = createAnatomyOverlay({ store, services, cornerstone, win });
+      // The store hears of it as soon as the overlay reads the display sets.
+      expect(store.getSnapshot().series[0].related).toBe(1);
+      fire('CORNERSTONE_ELEMENT_ENABLED', { element: cor.element });
+      rendered(cor.element);
+      runFrames();
+      const img = last();
+      expect([img.width, img.height]).toEqual([8, 9]);
+      // The liver fills slices 1-3 (3 mm apart): rows 2-7 of 1.5 mm, two rows a slice; columns 0-2.
+      const column1 = Array.from({ length: 9 }, (_, y) => alphaAt(img, 1, y) > 0);
+      expect(column1).toEqual([false, false, true, true, true, true, true, true, false]);
+      expect(alphaAt(img, 3, 4)).toBe(0);
+      expect(overlay.harnessState()).toMatchObject({
+        viewports: [{ drawn: 18, resampled: true, anatomy: true }],
+        related: 1,
+      });
+      const tip = cor.inner.querySelector('[data-pacsai-anatomy-tip]') as HTMLElement;
+      cor.element.dispatchEvent(new MouseEvent('mousemove', { clientX: 1.5, clientY: 4.5 }));
+      runFrames();
+      expect(tip.textContent).toBe('Liver');
+      cor.element.dispatchEvent(new MouseEvent('mousemove', { clientX: 1.5, clientY: 1 }));
+      runFrames();
+      expect(tip.style.display).toBe('none');
+      overlay.destroy();
+    }
+  );
+
+  it('leaves alone another phase, a localizer and another frame of reference, and counts why', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    registerCoronal(COR, 'r', CORONAL_YS);
+    const services: OverlayServices = {
+      displaySetService: {
+        getActiveDisplaySets: () => [
+          nativeSet(),
+          // The venous phase, a minute later: the same patient coordinates, not the same moment.
+          displaySet('ds-cor', COR, idsOf('r', CORONAL_YS), {
+            ...REFORMAT,
+            AcquisitionTime: '101600',
+          }),
+          displaySet('ds-scout', '2.25.1011', ['l0'], {
+            ImageType: ['ORIGINAL', 'PRIMARY', 'LOCALIZER'],
+          }),
+          displaySet('ds-prior', '2.25.1012', ['p0'], { FrameOfReferenceUID: '2.25.1099' }),
+          // The composite of every series is nobody's acquisition.
+          {
+            ...nativeSet(),
+            displaySetInstanceUID: 'ds-all',
+            SeriesInstanceUID: '2.25.1013',
+            isAllInOne: true,
+          },
+        ],
+      },
+    };
+    const cor = coronalViewport('vp-cor', 'r', CORONAL_YS, 4);
+    const overlay = createAnatomyOverlay({ store, services, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element: cor.element });
+    rendered(cor.element);
+    runFrames();
+    expect(puts).toHaveLength(0);
+    expect(overlay.harnessState()).toMatchObject({
+      viewports: [{ drawn: 0, resampled: false, anatomy: false }],
+      related: 0,
+      notRelated: {
+        'acquired at another time': 1,
+        'a localizer or projection': 1,
+        'another frame of reference': 1,
+      },
+    });
+    expect(store.getSnapshot().series[0].related).toBe(0);
+    overlay.destroy();
+  });
+
+  it("draws nothing resampled while the labelmap's own series is off its grid, and says so", async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'c', 1); // shifted half a voxel
+    registerCoronal(COR, 'r', CORONAL_YS);
+    const services: OverlayServices = {
+      displaySetService: {
+        getActiveDisplaySets: () => [
+          nativeSet('c'),
+          displaySet('ds-cor', COR, idsOf('r', CORONAL_YS), REFORMAT),
+        ],
+      },
+    };
+    const cor = coronalViewport('vp-cor', 'r', CORONAL_YS, 4);
+    const overlay = createAnatomyOverlay({ store, services, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element: cor.element });
+    rendered(cor.element);
+    runFrames();
+    expect(puts).toHaveLength(0);
+    expect(store.getSnapshot().notes.join(' ')).toMatch(
+      /Not drawn on one series: an image's pixels sit between/
+    );
+    expect(store.getSnapshot().series[0].related).toBe(0);
+    overlay.destroy();
+  });
+
+  it('a click brings each view of the acquisition to the structure, and leaves a reformat that does not reach it', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    registerCoronal(COR, 'r', CORONAL_YS);
+    registerCoronal('2.25.1020', 'f', [20, 22, 24]); // behind the liver
+    registerCoronal('2.25.1021', 's', [-4, -2], 60); // its plane, but rows from z 60 down to 48
+    const setDisplaySetsForViewports = jest.fn();
+    const services: OverlayServices = {
+      viewportGridService: {
+        getState: () => ({ activeViewportId: 'vp-cor' }),
+        setDisplaySetsForViewports,
+      },
+      hangingProtocolService: { getViewportsRequireUpdate: jest.fn(() => []) },
+      displaySetService: {
+        getActiveDisplaySets: () => [
+          nativeSet(),
+          displaySet('ds-cor', COR, idsOf('r', CORONAL_YS), REFORMAT),
+          displaySet('ds-far', '2.25.1020', idsOf('f', [20, 22, 24]), REFORMAT),
+          displaySet('ds-short', '2.25.1021', idsOf('s', [-4, -2]), REFORMAT),
+        ],
+      },
+    };
+    const axial = viewport('vp-ax', 'a', 4);
+    const cor = coronalViewport('vp-cor', 'r', CORONAL_YS, 0);
+    const far = coronalViewport('vp-far', 'f', [20, 22, 24], 0);
+    const short = coronalViewport('vp-short', 's', [-4, -2], 1, false, 60);
+    const overlay = createAnatomyOverlay({ store, services, cornerstone, win });
+    [axial, cor, far, short].forEach(v =>
+      fire('CORNERSTONE_ELEMENT_ENABLED', { element: v.element })
+    );
+    expect(store.getSnapshot().series[0].related).toBe(3);
+    // The liver's largest slice: LPS (-6, -4, 13).
+    store.select('0/total/1');
+    expect(axial.vp.setImageIdIndex).toHaveBeenCalledWith(1);
+    expect(cor.vp.setImageIdIndex).toHaveBeenCalledWith(4);
+    expect(far.vp.setImageIdIndex).not.toHaveBeenCalled();
+    expect(short.vp.setImageIdIndex).not.toHaveBeenCalled();
+    expect(setDisplaySetsForViewports).not.toHaveBeenCalled();
+    expect(overlay.harnessState()).toMatchObject({ counts: { jumps: 2 } });
+    overlay.destroy();
+  });
+
+  it('with only a reformat on the screen, a click moves it and hangs nothing', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    registerCoronal(COR, 'r', CORONAL_YS);
+    const setDisplaySetsForViewports = jest.fn();
+    const services: OverlayServices = {
+      viewportGridService: {
+        getState: () => ({ activeViewportId: 'vp-cor' }),
+        setDisplaySetsForViewports,
+      },
+      hangingProtocolService: { getViewportsRequireUpdate: jest.fn(() => []) },
+      displaySetService: {
+        getActiveDisplaySets: () => [
+          nativeSet(),
+          displaySet('ds-cor', COR, idsOf('r', CORONAL_YS), REFORMAT),
+        ],
+      },
+    };
+    const cor = coronalViewport('vp-cor', 'r', CORONAL_YS, 0);
+    const overlay = createAnatomyOverlay({ store, services, cornerstone, win });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element: cor.element });
+    store.select('0/total/1');
+    expect(cor.vp.setImageIdIndex).toHaveBeenCalledWith(4);
+    expect(setDisplaySetsForViewports).not.toHaveBeenCalled();
+    expect(store.harnessState()).toMatchObject({ counts: { jumps: 1, jumpMisses: 0 } });
+    overlay.destroy();
   });
 });

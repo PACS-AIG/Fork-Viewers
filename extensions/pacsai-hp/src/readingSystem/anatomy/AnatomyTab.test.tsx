@@ -8,7 +8,7 @@ import { RsHttpError } from '../rsClient';
 import { RsRefused } from '../rsContract';
 import { readAnatomy } from './anatomyContract';
 import { createAnatomyStore, type AnatomyClient, type AnatomyTarget } from './anatomyStore';
-import { formatFeature, formatVolume } from './AnatomyTab';
+import { formatFeature, formatVolume, resampledNote } from './AnatomyTab';
 import {
   AFFINE,
   CAVITIES,
@@ -180,6 +180,41 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     ).toBe(false);
     expect(column.textContent).toMatch(/3 unnamed proposals are not drawn/);
     expect(column.textContent).toMatch(/not reviewed, never saved as a segmentation/);
+    // No other series of the acquisition carries it (yet): no word of resampling.
+    expect(column.querySelector('[data-rs-anatomy-resampled]')).toBeNull();
+    destroy();
+  });
+
+  it('says which other series of the acquisition carry the labelmap, resampled, and how coarse it is there', async () => {
+    const controller = fakeController();
+    const { s } = await store();
+    const { column, destroy } = mount(controller, s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    act(() => s.reportRelated(s.anatomySeries()[0], 2));
+    expect(column.querySelector('[data-rs-anatomy-resampled]')?.textContent).toBe(
+      'Also drawn on 2 other series of the same acquisition, resampled from this labelmap: along the body, their outlines step every 3 mm.'
+    );
+    act(() => s.reportRelated(s.anatomySeries()[0], 0));
+    expect(column.querySelector('[data-rs-anatomy-resampled]')).toBeNull();
+    // A grid whose slices do not run along the body says so plainly.
+    expect(
+      resampledNote({
+        index: 0,
+        description: '',
+        withheld: null,
+        unnamed: 0,
+        invalid: null,
+        tasks: [],
+        related: 1,
+        sliceMm: 0.75,
+        alongBody: false,
+      })
+    ).toBe(
+      'Also drawn on 1 other series of the same acquisition, resampled from this labelmap: across its slices, their outlines step every 0.75 mm.'
+    );
     destroy();
   });
 

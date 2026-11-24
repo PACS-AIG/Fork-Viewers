@@ -260,6 +260,11 @@ export interface AnatomySeriesView {
   unnamed: number;
   invalid: string | null;
   tasks: AnatomyTask[];
+  /** How many other series of its acquisition carry its labelmap, resampled (the overlay counts them). */
+  related: number;
+  /** Its labelmap's slice spacing, mm, and whether its slices follow one another along the body. */
+  sliceMm: number;
+  alongBody: boolean;
 }
 
 export interface AnatomySnapshot {
@@ -337,6 +342,10 @@ export interface AnatomyStore {
   structuresAt(seriesUID: string, world: Vec3): AnatomyStructure[];
   /** The overlay's verdict on a series' images against its grid. */
   reportFit(seriesUID: string, fit: GridFit): void;
+  /** The series UIDs with drawable layers. */
+  anatomySeries(): string[];
+  /** The overlay's count of the other series of a labelmap series' acquisition (anatomyRelated). */
+  reportRelated(seriesUID: string, related: number): void;
   harnessState(): Record<string, unknown>;
 }
 
@@ -407,11 +416,17 @@ export function webDigest(
   return async bytes => hex(await subtle.digest('SHA-256', bytes));
 }
 
-const formatMm = (n: number): string =>
+export const formatMm = (n: number): string =>
   Math.abs(n - Math.round(n)) < 0.005 ? String(Math.round(n)) : n.toFixed(2).replace(/0$/, '');
 
 /** The distance between two slices of a grid (its affine's slice column), mm. */
 export const sliceSpacingOf = (a: Mat4): number => Math.hypot(a[0][2], a[1][2], a[2][2]);
+
+/** Whether a grid's slices follow one another along the body (its slice column mostly head to feet). */
+export const alongBodyOf = (a: Mat4): boolean => {
+  const len = sliceSpacingOf(a);
+  return len > 0 && Math.abs(a[2][2]) / len > 0.9;
+};
 
 function seriesDescription(s: RsAnatomySeries): string {
   if (!s.grid) {
@@ -449,6 +464,8 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
   // `<series>/<task>` -> the loaded layer.
   const loaded = new Map<string, LoadedLayer>();
   const fits = new Map<string, GridFit>();
+  // `<series UID>` -> how many other series of its acquisition the overlay found.
+  const relatedCounts = new Map<string, number>();
   const counts = { reads: 0, files: 0, refusedFiles: 0, selections: 0, jumps: 0, jumpMisses: 0 };
   let renderCache: { revision: number; sets: Map<number, AnatomyRenderSet> } = {
     revision: -1,
@@ -513,6 +530,18 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
 
   function addNote(note: string): string[] {
     return state.notes.includes(note) ? state.notes : [...state.notes, note];
+  }
+
+  /**
+   * The series views with one series' count of other series carrying its
+   * labelmap: none once its own images were found off its grid.
+   */
+  function withRelated(seriesUID: string): AnatomySeriesView[] {
+    const index = doc ? doc.series.findIndex(s => s.seriesUID === seriesUID) : -1;
+    const related = fits.get(seriesUID)?.fits === false ? 0 : (relatedCounts.get(seriesUID) ?? 0);
+    return state.series.map(s =>
+      s.index === index && s.related !== related ? { ...s, related } : s
+    );
   }
 
   async function loadLabelmap(
@@ -737,6 +766,9 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
         unnamed: s.unnamed,
         invalid: s.invalid,
         tasks,
+        related: 0,
+        sliceMm,
+        alongBody: s.grid ? alongBodyOf(s.grid.affineRAS) : false,
       };
     });
     const drawable = series.some(s => s.tasks.length > 0);
@@ -770,6 +802,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
     doc = null;
     loaded.clear();
     fits.clear();
+    relatedCounts.clear();
     renderCache = { revision: -1, sets: new Map() };
   }
 
@@ -982,7 +1015,22 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
           notes: addNote(
             `Not drawn on one series: ${fit.reason ?? "its images are not on the labelmap's grid"}.`
           ),
+          series: withRelated(seriesUID),
         });
+      }
+    },
+    anatomySeries() {
+      return doc
+        ? doc.series
+            .filter((s, index) => seriesIndexOf(s.seriesUID) === index)
+            .map(s => s.seriesUID)
+        : [];
+    },
+    reportRelated(seriesUID, related) {
+      relatedCounts.set(seriesUID, Math.max(0, Math.floor(related)));
+      const series = withRelated(seriesUID);
+      if (series.some((s, n) => s !== state.series[n])) {
+        set({ series }, false);
       }
     },
     harnessState() {
@@ -1008,6 +1056,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
             box: layer ? { origin: layer.data.origin, size: layer.data.size } : null,
           };
         }),
+        related: state.series.map(s => s.related),
         structures: all.length,
         visibleStructures: all.filter(s => s.visible).length,
         settings: { ...state.settings },

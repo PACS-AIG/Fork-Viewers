@@ -19,18 +19,39 @@
  *     column of the table, a finding, a measurement or report content.
  *   - What its concept record's checks found wrong (contract 1.13), under the
  *     structure's row; a volume outside the record's band in amber.
+ *   - Which other series of the acquisition carry the labelmap, resampled
+ *     (the scanner's reformats), and how coarse it is there.
  *   - What was not drawn, and why.
  */
 import React, { useState, useSyncExternalStore } from 'react';
 import { cssColor } from './anatomyColors';
 import {
   displayName,
+  formatMm,
+  type AnatomySeriesView,
   type AnatomySnapshot,
   type AnatomyStore,
   type AnatomyRadiomics,
   type AnatomyStructure,
   type AnatomyTask,
 } from './anatomyStore';
+
+/**
+ * What a series view says of the other series of its acquisition that carry
+ * its labelmap: resampled, so along its slice axis the outlines step by its
+ * slice spacing. Null when there are none.
+ */
+export function resampledNote(s: AnatomySeriesView): string | null {
+  if (s.related < 1) {
+    return null;
+  }
+  const step = s.sliceMm > 0 ? formatMm(s.sliceMm) : null;
+  const where = s.alongBody ? 'along the body' : 'across its slices';
+  return (
+    `Also drawn on ${s.related} other series of the same acquisition, resampled from this labelmap` +
+    (step ? `: ${where}, their outlines step every ${step} mm.` : '.')
+  );
+}
 
 /** A volume as the table shows it. */
 export function formatVolume(ml: number): string {
@@ -441,6 +462,14 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
             {snap.series.length > 1 ? `Series ${s.index + 1}: ` : ''}
             {s.description}
           </div>
+          {resampledNote(s) ? (
+            <div
+              className="prs-anatomy-resampled"
+              data-rs-anatomy-resampled=""
+            >
+              {resampledNote(s)}
+            </div>
+          ) : null}
           {s.tasks.map(t => (
             <Task
               key={t.task}
