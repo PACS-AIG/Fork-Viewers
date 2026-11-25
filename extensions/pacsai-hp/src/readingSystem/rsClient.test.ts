@@ -2,6 +2,7 @@ import { RsRefused } from './rsContract';
 import { RsHttpError, createRsClient, normalizeBase, type FetchLike } from './rsClient';
 import { makeInbox, makeReport, makeSnapshot, makeVersions } from './testDocs';
 import { makeAnatomyDoc } from './anatomy/anatomyTestData';
+import { makeShowcase } from './pathgrade/showcaseTestData';
 
 type Call = { url: string; init?: Parameters<FetchLike>[1] };
 
@@ -162,5 +163,90 @@ describe('the reading system client (RS-36)', () => {
       fetchFn: async () => ({ status: 200, ok: true, json: async () => makeAnatomyDoc() }),
     });
     await expect(fixture.anatomy('s')).rejects.toThrow(/clinical documents/);
+  });
+
+  it("reads PathGrade's showcase and its pictures under the base, and keeps the API's words when none is served", async () => {
+    const calls: Array<{ url: string; accept?: string; credentials?: string }> = [];
+    const answers: Record<string, { status: number; body?: unknown; bytes?: Uint8Array }> = {
+      '/rs/showcase/pathgrade': { status: 200, body: makeShowcase() },
+      '/rs/showcase/pathgrade/outline_KiTS-00001.png': {
+        status: 200,
+        bytes: new Uint8Array([1, 2]),
+      },
+    };
+    const fetchFn: FetchLike = async (url, init) => {
+      calls.push({ url, accept: init?.headers?.Accept, credentials: init?.credentials });
+      const a = answers[url] ?? { status: 404, body: { detail: 'no such picture' } };
+      return {
+        status: a.status,
+        ok: a.status === 200,
+        json: async () => a.body,
+        arrayBuffer: async () => (a.bytes ?? new Uint8Array(0)).buffer as ArrayBuffer,
+      };
+    };
+    const client = createRsClient({ base: '/rs', mode: 'fixture', fetchFn });
+    expect((await client.showcase()).title).toBe('PathGrade on public kidney tumours');
+    expect([...(await client.showcaseImage('outline_KiTS-00001.png'))]).toEqual([1, 2]);
+    await expect(client.showcaseImage('missing.png')).rejects.toEqual(
+      expect.objectContaining({ status: 404 })
+    );
+    expect(calls).toEqual([
+      { url: '/rs/showcase/pathgrade', accept: 'application/json', credentials: 'include' },
+      {
+        url: '/rs/showcase/pathgrade/outline_KiTS-00001.png',
+        accept: 'image/png',
+        credentials: 'include',
+      },
+      { url: '/rs/showcase/pathgrade/missing.png', accept: 'image/png', credentials: 'include' },
+    ]);
+    // Only the contract's picture names are asked for.
+    const bad = [
+      '../showcase.json',
+      'a.PNG',
+      '.hidden.png',
+      'x/y.png',
+      `${'a'.repeat(97)}.png`,
+      '',
+    ];
+    for (let n = 0; n < bad.length; n++) {
+      await expect(client.showcaseImage(bad[n])).rejects.toBeInstanceOf(RsRefused);
+    }
+    expect(calls).toHaveLength(3);
+    // None served: the 404's detail comes with the error; without one, none.
+    const none = createRsClient({
+      base: '/rs',
+      mode: 'fixture',
+      fetchFn: fakeFetch(() => ({
+        status: 404,
+        body: { detail: 'no PathGrade showcase is served: none is configured' },
+      })).fetchFn,
+    });
+    await expect(none.showcase()).rejects.toEqual(
+      expect.objectContaining({
+        status: 404,
+        detail: 'no PathGrade showcase is served: none is configured',
+      })
+    );
+    const bare = createRsClient({
+      base: '/rs',
+      mode: 'fixture',
+      fetchFn: async () => ({
+        status: 404,
+        ok: false,
+        json: async () => {
+          throw new Error('not JSON');
+        },
+      }),
+    });
+    await expect(bare.showcase()).rejects.toEqual(
+      expect.objectContaining({ status: 404, detail: null })
+    );
+    // A showcase of the other mode is refused like any document.
+    const clinical = createRsClient({
+      base: '/rs',
+      mode: 'clinical',
+      fetchFn: fakeFetch(() => ({ status: 200, body: makeShowcase() })).fetchFn,
+    });
+    await expect(clinical.showcase()).rejects.toThrow(/publishes fixture documents/);
   });
 });
