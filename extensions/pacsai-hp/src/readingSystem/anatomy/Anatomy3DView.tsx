@@ -6,7 +6,8 @@
  *     file) and draws each structure as it arrives (anatomy3dScene, vtk.js).
  *   - The Anatomy tab's colours and toggles: a structure or a task hidden
  *     there is hidden here (the body cavities start hidden: they wrap
- *     everything; shown, they are see-through, CONTAINER_OPACITY). The
+ *     everything; shown, they are see-through, CONTAINER_OPACITY, and so is
+ *     the skull, which wraps the brain). The
  *     structure in the spotlight (selected, or pointed at in the table) stays
  *     solid, every other one fades to OTHERS_OPACITY.
  *   - Front view, Enlarge (over the images, beside the pane, so the toggles
@@ -37,8 +38,16 @@ export function setSceneFactory(factory: SceneFactory | null): void {
 
 /** Every other structure's opacity while one is in the spotlight. */
 export const OTHERS_OPACITY = 0.15;
-/** A structure that wraps others (a body cavity): see-through, so what it holds shows. */
+/** A structure that wraps others (a body cavity, the skull): see-through, so what it holds shows. */
 export const CONTAINER_OPACITY = 0.3;
+
+/**
+ * A structure that wraps the others it is drawn with, though its task does not
+ * (WeiWei, 26 Nov 2026: the skull hid the brain and the ventricles from every
+ * side): see-through while nothing is in the spotlight.
+ */
+export const wrapsOthers = (s: { rawClass: string | null; name: string }): boolean =>
+  /^skull$/i.test(s.rawClass ?? s.name);
 
 /** Each structure's look in 3D: the Anatomy tab's colours and toggles, and its spotlight. */
 export function looksFor(snap: AnatomySnapshot, series: number, keys: string[]): SceneLook[] {
@@ -60,7 +69,7 @@ export function looksFor(snap: AnatomySnapshot, series: number, keys: string[]):
       opacity:
         spot && key !== spot
           ? OTHERS_OPACITY
-          : !spot && s && isContainerTask(s.task)
+          : !spot && s && (isContainerTask(s.task) || wrapsOthers(s))
             ? CONTAINER_OPACITY
             : 1,
     };

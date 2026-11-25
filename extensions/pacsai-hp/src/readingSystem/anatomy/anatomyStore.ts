@@ -406,8 +406,13 @@ export function taskTitle(task: string): string {
 export const displayName = (name: string): string =>
   name ? name[0].toUpperCase() + name.slice(1) : name;
 
-/** Tasks that contain others (the body's cavities) start hidden and sit at the bottom. */
-export const isContainerTask = (task: string): boolean => /cavit|^body$/.test(task);
+/**
+ * Tasks that contain others (the body's cavities) start hidden and sit at the
+ * bottom. Not a head's glands and cavities (WeiWei, 26 Nov 2026): specific
+ * structures, drawn and listed like any others.
+ */
+export const isContainerTask = (task: string): boolean =>
+  /^(trunk_cavities|body_cavities|body)$/.test(task);
 
 export function readSettings(raw: string | null | undefined): AnatomySettings {
   try {

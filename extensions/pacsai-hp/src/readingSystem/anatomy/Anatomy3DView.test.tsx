@@ -11,14 +11,21 @@ import {
   CONTAINER_OPACITY,
   OTHERS_OPACITY,
   anatomy3dHarness,
+  looksFor,
   setSceneFactory,
   surfaceStatusLine,
+  wrapsOthers,
   type SceneFactory,
 } from './Anatomy3DView';
 import { Anatomy3DViewport } from './Anatomy3DViewport';
 import { createAnatomy3dCell, type Anatomy3dCell } from './anatomy3dCell';
 import { readAnatomy } from './anatomyContract';
-import { createAnatomyStore, type AnatomyClient, type AnatomyTask } from './anatomyStore';
+import {
+  createAnatomyStore,
+  type AnatomyClient,
+  type AnatomySnapshot,
+  type AnatomyTask,
+} from './anatomyStore';
 import { overlayRect, surfacesOffered } from './AnatomyTab';
 import {
   AFFINE,
@@ -553,6 +560,54 @@ describe("the Anatomy tab's 3D view (RS-36, contract 1.17)", () => {
     expect(v.layout()).toBe('1x1');
     destroy();
     cell.destroy();
+  });
+
+  it('draws the skull see-through, as a body cavity is, and solid in the spotlight', () => {
+    const structure = (task: string, value: number, rawClass: string) => ({
+      key: `0/${task}/${value}`,
+      series: 0,
+      task,
+      value,
+      name: rawClass,
+      rawClass,
+      color: [200, 180, 150],
+      visible: true,
+    });
+    const snap = {
+      series: [
+        {
+          index: 0,
+          tasks: [
+            { task: 'total', visible: true },
+            { task: 'head_glands_cavities', visible: true },
+          ],
+        },
+      ],
+      structures: {
+        '0/total/1': structure('total', 1, 'brain'),
+        '0/total/2': structure('total', 2, 'skull'),
+        '0/head_glands_cavities/1': structure('head_glands_cavities', 1, 'nasal_cavity'),
+      },
+      hovered: null,
+      selected: null,
+    } as unknown as AnatomySnapshot;
+    const keys = ['0/total/1', '0/total/2', '0/head_glands_cavities/1'];
+    const opacities = (s: AnatomySnapshot) => looksFor(s, 0, keys).map(l => l.opacity);
+    // The skull see-through; the brain, and a head's cavity (not a body cavity), solid.
+    expect(opacities(snap)).toEqual([1, CONTAINER_OPACITY, 1]);
+    // The skull in the spotlight is solid, the others fade; another in it, the skull fades too.
+    expect(opacities({ ...snap, selected: '0/total/2' })).toEqual([
+      OTHERS_OPACITY,
+      1,
+      OTHERS_OPACITY,
+    ]);
+    expect(opacities({ ...snap, hovered: '0/total/1' })).toEqual([
+      1,
+      OTHERS_OPACITY,
+      OTHERS_OPACITY,
+    ]);
+    expect(wrapsOthers({ rawClass: null, name: 'Skull' })).toBe(true);
+    expect(wrapsOthers({ rawClass: 'skull_base', name: 'skull base' })).toBe(false);
   });
 
   it('says so when the page draws no WebGL', async () => {
