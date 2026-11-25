@@ -316,6 +316,52 @@ describe("the Anatomy tab's 3D view (RS-36, contract 1.17)", () => {
     destroy();
   });
 
+  it("lets the picked-out structure go in 3D from the tab's Show all, enlarged too", async () => {
+    const { made, factory } = fakeScenes();
+    setSceneFactory(factory);
+    const s = store();
+    const { column, destroy } = mount(fakeController(), s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    await act(async () => {
+      fireEvent.click(column.querySelector('[data-rs-anatomy-3d-open="0"]')!);
+      await flush();
+    });
+    const showAll = () =>
+      column.querySelector('[data-rs-anatomy-show-all]') as HTMLButtonElement | null;
+    const name = (k: string) =>
+      column.querySelector(`[data-rs-structure="${k}"] .prs-structure`) as HTMLButtonElement;
+    // The spleen's name clicked: picked out in 3D, the others faded; Show all brings them back.
+    act(() => {
+      fireEvent.click(name('total/2'));
+    });
+    expect(look(made[0], '0/total/1')).toEqual([true, OTHERS_OPACITY]);
+    act(() => {
+      fireEvent.click(showAll()!);
+    });
+    expect(s.getSnapshot().selected).toBeNull();
+    expect(look(made[0], '0/total/1')).toEqual([true, 1]);
+    expect(look(made[0], '0/total/2')).toEqual([true, 1]);
+    // Enlarged, the view sits beside the pane: the tab's Show all reaches it, and it stays open.
+    act(() => {
+      fireEvent.click(name('total/2'));
+    });
+    await act(async () => {
+      fireEvent.click(column.querySelector('[data-rs-anatomy-3d-enlarge]')!);
+      await flush();
+    });
+    const big = made[1];
+    expect(look(big, '0/total/1')).toEqual([true, OTHERS_OPACITY]);
+    act(() => {
+      fireEvent.click(showAll()!);
+    });
+    expect(look(big, '0/total/1')).toEqual([true, 1]);
+    expect(document.querySelector('[data-rs-anatomy-3d-overlay]')).not.toBeNull();
+    destroy();
+  });
+
   it("enlarges over the images beside the report column, keeps the tab's switches at hand, and goes back with Esc", async () => {
     const { made, factory } = fakeScenes();
     setSceneFactory(factory);
