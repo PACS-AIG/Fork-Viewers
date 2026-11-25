@@ -23,10 +23,6 @@
  * the reading system serves the study (the pane is ready) and drawn on the
  * viewports by one overlay per document, which the dock's services let bring
  * a structure into view.
- *
- * PathGrade's research showcase (pathgrade/) belongs to no study: one per
- * document, read when its tab is first opened, its pictures shown from object
- * URLs once their bytes match the showcase's sha256.
  */
 import { studyRefFor } from '@ohif/core/src/utils/attempt/attemptTrace';
 import {
@@ -37,7 +33,6 @@ import {
 } from './anatomy/anatomyOverlay';
 import { createAnatomyStore, webDigest, type AnatomyStore } from './anatomy/anatomyStore';
 import { platformGunzip } from './anatomy/nifti';
-import { createShowcaseStore, type ShowcaseStore } from './pathgrade/showcaseStore';
 import type { RsMode } from './rsContract';
 import { createRsClient, normalizeBase } from './rsClient';
 import { createRsController, type RsController } from './rsController';
@@ -141,7 +136,6 @@ let controllerKey = '';
 let host: RsHost | null = null;
 let offDock: (() => void) | null = null;
 let anatomy: AnatomyStore | null = null;
-let showcase: ShowcaseStore | null = null;
 let overlay: AnatomyOverlay | null = null;
 let offAnatomyFollow: (() => void) | null = null;
 // The study the pane was entered for (the anatomy follows it once it is served).
@@ -171,7 +165,6 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
   controller?.leave();
   offAnatomyFollow?.();
   anatomy?.leave();
-  showcase?.leave();
   controllerKey = key;
   const client = createRsClient({
     base: cfg.base,
@@ -201,11 +194,6 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
     },
     studyRef: studyRefFor,
   });
-  showcase = createShowcaseStore({
-    client,
-    digest: webDigest(win),
-    pictureUrl: objectUrls(win),
-  });
   controller = createRsController({
     client,
     reader: () => ({ id: readerId(), role: READER_ROLE }),
@@ -233,22 +221,6 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
   });
   installHarnessHook(win);
   return controller;
-}
-
-/** Object URLs for the showcase's pictures, where the page has them. */
-function objectUrls(
-  win: Window
-): { create(b: Uint8Array): string; revoke(u: string): void } | null {
-  const w = win as Window & { URL?: typeof URL; Blob?: typeof Blob };
-  const U = w.URL;
-  const B = w.Blob;
-  if (!U || typeof U.createObjectURL !== 'function' || typeof B !== 'function') {
-    return null;
-  }
-  return {
-    create: bytes => U.createObjectURL(new B([bytes], { type: 'image/png' })),
-    revoke: url => U.revokeObjectURL(url),
-  };
 }
 
 /** The overlay that draws the anatomy on the viewports (one per document). */
@@ -300,7 +272,6 @@ export function enterReadingSystem(
       column,
       controller: c,
       anatomy,
-      pathgrade: showcase,
       setInset: px => dock.setReadingSystemInset(px),
     });
     offDock = dock.subscribe(() => {
@@ -325,7 +296,6 @@ export function leaveReadingSystem(): void {
   enteredStudy = null;
   controller?.leave();
   anatomy?.leave();
-  showcase?.leave();
 }
 
 let hookInstalled = false;
@@ -345,7 +315,6 @@ function installHarnessHook(win: Window): void {
                 ...s,
                 anatomy: anatomy?.harnessState() ?? null,
                 anatomyOverlay: overlay?.harnessState() ?? null,
-                pathgrade: showcase?.harnessState() ?? null,
               }
             : null;
         },
