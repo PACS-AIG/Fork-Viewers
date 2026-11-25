@@ -42,7 +42,8 @@ import { draftView, selectionOf, type DraftPassage } from './rsModel';
 export type RsPhase = 'idle' | 'loading' | 'ready' | 'not_served' | 'refused' | 'failed';
 /**
  * `anatomy`: the study's anatomy layers (anatomy/AnatomyTab), when it has them;
- * `pathgrade`: PathGrade's research showcase on public cases (pathgrade/PathGradeTab).
+ * `pathgrade`: its findings with a held reference-case strip (pathgrade/PathGradeTab),
+ * when it has any.
  */
 export type RsTab = 'anatomy' | 'draft' | 'inbox' | 'changes' | 'pathgrade';
 

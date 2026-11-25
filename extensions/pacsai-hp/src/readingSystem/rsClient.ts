@@ -16,8 +16,6 @@
  *   POST /events                            (one intake event; 200, 409, 422)
  *   GET  /studies/{uid}/anatomy             (the anatomy artifact, contract 1.10)
  *   GET  /studies/{uid}/anatomy/{file}      (one of its labelmaps: NIfTI-1, gzip)
- *   GET  /showcase/pathgrade                (PathGrade's research showcase, 1.16)
- *   GET  /showcase/pathgrade/{name}         (one of its pictures: PNG)
  *
  * Each document read is checked against the contract's rules for a consumer
  * (rsContract.checkDocument): this major, this viewer's mode, the artifact.
@@ -36,7 +34,6 @@ import {
 } from './rsContract';
 import type { RsIntakeEvent } from './rsEvents';
 import { readAnatomy, type RsAnatomy } from './anatomy/anatomyContract';
-import { readShowcase, SHOWCASE_IMAGE_NAME, type RsShowcase } from './pathgrade/showcaseContract';
 
 export type FetchLike = (
   url: string,
@@ -59,21 +56,13 @@ export const LABELMAP_BASENAME = /^[0-9]{1,4}\.[a-z0-9_]{1,64}\.labels\.nii\.gz$
 /** The largest labelmap file read (gzip): far above a thin-slice trunk's. */
 export const MAX_LABELMAP_BYTES = 256 * 1024 * 1024;
 
-/** The largest showcase picture read: far above the showcase's own (about 150 kB each). */
-export const MAX_SHOWCASE_PICTURE_BYTES = 16 * 1024 * 1024;
-
-/**
- * An answer the API gave that is not a document: the HTTP status says which,
- * and `detail` what the answer's body said, when it said it in words.
- */
+/** An answer the API gave that is not a document: the HTTP status says which. */
 export class RsHttpError extends Error {
   readonly status: number;
-  readonly detail: string | null;
-  constructor(status: number, what: string, detail: string | null = null) {
+  constructor(status: number, what: string) {
     super(`${what}: HTTP ${status}`);
     this.name = 'RsHttpError';
     this.status = status;
-    this.detail = detail;
   }
 }
 
@@ -91,10 +80,6 @@ export interface RsClient {
   anatomy(study: string): Promise<RsAnatomy>;
   /** One of its labelmaps' bytes, by its file name under `anatomy/`. */
   anatomyFile(study: string, basename: string): Promise<Uint8Array>;
-  /** PathGrade's research showcase (404, with the API's words, when none is served). */
-  showcase(): Promise<RsShowcase>;
-  /** One of its pictures' bytes, by its name. */
-  showcaseImage(name: string): Promise<Uint8Array>;
 }
 
 /** The base path without a trailing slash; empty when none is configured. */
@@ -200,47 +185,6 @@ export function createRsClient({
       const buffer = await res.arrayBuffer();
       if (buffer.byteLength > MAX_LABELMAP_BYTES) {
         throw new RsRefused('A labelmap is larger than the viewer takes.');
-      }
-      return new Uint8Array(buffer);
-    },
-    async showcase() {
-      const res = await fetchFn(`${root}/showcase/pathgrade`, {
-        credentials: 'include',
-        cache: 'no-store',
-        headers: { Accept: 'application/json' },
-      });
-      if (!res.ok) {
-        // The API says why none is served in its answer's `detail`.
-        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
-        const detail = typeof body?.detail === 'string' ? body.detail : null;
-        throw new RsHttpError(res.status, 'PathGrade showcase', detail);
-      }
-      let doc: unknown;
-      try {
-        doc = await res.json();
-      } catch (_) {
-        throw new RsRefused('The CT analysis service sent a PathGrade showcase that is not JSON.');
-      }
-      return readShowcase(doc, mode);
-    },
-    async showcaseImage(name) {
-      if (!SHOWCASE_IMAGE_NAME.test(name)) {
-        throw new RsRefused('A picture was named outside the contract’s showcase pictures.');
-      }
-      const res = await fetchFn(`${root}/showcase/pathgrade/${name}`, {
-        credentials: 'include',
-        cache: 'no-store',
-        headers: { Accept: 'image/png' },
-      });
-      if (!res.ok) {
-        throw new RsHttpError(res.status, 'showcase picture');
-      }
-      if (typeof res.arrayBuffer !== 'function') {
-        throw new RsRefused('This page cannot read a picture’s bytes.');
-      }
-      const buffer = await res.arrayBuffer();
-      if (buffer.byteLength > MAX_SHOWCASE_PICTURE_BYTES) {
-        throw new RsRefused('A picture is larger than the viewer takes.');
       }
       return new Uint8Array(buffer);
     },
