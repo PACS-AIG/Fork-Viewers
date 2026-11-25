@@ -7,7 +7,8 @@
  *   - The Anatomy tab's colours and toggles: a structure or a task hidden
  *     there is hidden here (the body cavities start hidden: they wrap
  *     everything; shown, they are see-through, CONTAINER_OPACITY, and so is
- *     the skull, which wraps the brain). The
+ *     the skull, which wraps the brain, and the brain while the ventricles,
+ *     inside it, are shown). The
  *     structure in the spotlight (selected, or pointed at in the table) stays
  *     solid, every other one fades to OTHERS_OPACITY.
  *   - Front view, Enlarge (over the images, beside the pane, so the toggles
@@ -41,13 +42,23 @@ export const OTHERS_OPACITY = 0.15;
 /** A structure that wraps others (a body cavity, the skull): see-through, so what it holds shows. */
 export const CONTAINER_OPACITY = 0.3;
 
+/** The task of the ventricles' parts, which lie inside the brain. */
+const VENTRICLES_TASK = 'ventricle_parts';
+
 /**
  * A structure that wraps the others it is drawn with, though its task does not
- * (WeiWei, 26 Nov 2026: the skull hid the brain and the ventricles from every
- * side): see-through while nothing is in the spotlight.
+ * (WeiWei, 26 Nov 2026): the skull, which hid the brain and the ventricles
+ * from every side, and the brain while the ventricles are shown (with them
+ * hidden there is nothing in it to see). See-through while nothing is in the
+ * spotlight.
  */
-export const wrapsOthers = (s: { rawClass: string | null; name: string }): boolean =>
-  /^skull$/i.test(s.rawClass ?? s.name);
+export const wrapsOthers = (
+  s: { rawClass: string | null; name: string },
+  ventriclesShown = false
+): boolean => {
+  const kind = (s.rawClass ?? s.name).toLowerCase();
+  return kind === 'skull' || (kind === 'brain' && ventriclesShown);
+};
 
 /** Each structure's look in 3D: the Anatomy tab's colours and toggles, and its spotlight. */
 export function looksFor(snap: AnatomySnapshot, series: number, keys: string[]): SceneLook[] {
@@ -60,6 +71,7 @@ export function looksFor(snap: AnatomySnapshot, series: number, keys: string[]):
   };
   const lit = snap.hovered ?? snap.selected;
   const spot = lit && keys.includes(lit) && shown(lit) ? lit : null;
+  const ventricles = shownTasks.has(VENTRICLES_TASK);
   return keys.map(key => {
     const s = snap.structures[key];
     return {
@@ -69,7 +81,7 @@ export function looksFor(snap: AnatomySnapshot, series: number, keys: string[]):
       opacity:
         spot && key !== spot
           ? OTHERS_OPACITY
-          : !spot && s && (isContainerTask(s.task) || wrapsOthers(s))
+          : !spot && s && (isContainerTask(s.task) || wrapsOthers(s, ventricles))
             ? CONTAINER_OPACITY
             : 1,
     };
