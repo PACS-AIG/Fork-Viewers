@@ -10,6 +10,11 @@
  * on a structure's edge is outlined. Only each layer's rows inside its kept
  * box are visited.
  *
+ * A highlighted structure (the one selected, or pointed at in the table) is
+ * drawn stronger, its edge two pixels wide, and every other label at `dim`
+ * of its strength (the spotlight). Where the highlighted structure lies on
+ * the canvas comes back, for its name label.
+ *
  * Pure: no window, React or OHIF here; the overlay puts the pixels on a canvas.
  */
 import type { Vec3 } from './anatomyGeometry';
@@ -41,6 +46,8 @@ export interface RenderInput {
   edgeAlpha: number;
   /** A structure drawn stronger: its layer's place in `layers` and its value. */
   highlight?: { layer: number; value: number } | null;
+  /** 0..1: every other label's strength while a structure is highlighted (default 1). */
+  dim?: number;
 }
 
 export const DRAWN = 1 << 24;
@@ -71,6 +78,19 @@ export interface RenderOutput {
   pixels: Uint8ClampedArray;
   /** How many pixels hold a label. */
   drawn: number;
+  /**
+   * The highlighted structure on this canvas: its key in `scratch` (one per
+   * pixel), how many pixels it has and their box (right and bottom
+   * exclusive); null when it has none here.
+   */
+  focus: {
+    key: number;
+    pixels: number;
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  } | null;
 }
 
 /**
@@ -129,7 +149,15 @@ export function renderLabels(
     ? (((input.highlight.layer + 1) << 16) | input.highlight.value) >>> 0
     : -1;
   const hlFill = Math.max(fill, Math.round(0.55 * 255));
+  const dim = hl >= 0 ? Math.max(0, Math.min(1, input.dim ?? 1)) : 1;
+  const otherFill = Math.round(fill * dim);
+  const otherEdge = Math.round(edge * dim);
   let drawn = 0;
+  let focusPixels = 0;
+  let fx0 = W;
+  let fy0 = H;
+  let fx1 = -1;
+  let fy1 = -1;
   for (let y = 0; y < H; y++) {
     const rowBase = y * W;
     for (let x = 0; x < W; x++) {
@@ -139,13 +167,31 @@ export function renderLabels(
         continue;
       }
       drawn++;
-      const isEdge =
+      let isEdge =
         (x > 0 && keys[p - 1] !== key) ||
         (x < W - 1 && keys[p + 1] !== key) ||
         (y > 0 && keys[p - W] !== key) ||
         (y < H - 1 && keys[p + W] !== key);
       const strong = key === hl;
-      const alpha = isEdge ? (strong ? 255 : edge) : strong ? hlFill : fill;
+      if (strong) {
+        focusPixels++;
+        fx0 = Math.min(fx0, x);
+        fx1 = Math.max(fx1, x);
+        fy0 = Math.min(fy0, y);
+        fy1 = Math.max(fy1, y);
+        // Its edge two pixels wide: the next pixel in, and the diagonal neighbours.
+        isEdge =
+          isEdge ||
+          (x > 1 && keys[p - 2] !== key) ||
+          (x < W - 2 && keys[p + 2] !== key) ||
+          (y > 1 && keys[p - 2 * W] !== key) ||
+          (y < H - 2 && keys[p + 2 * W] !== key) ||
+          (x > 0 && y > 0 && keys[p - W - 1] !== key) ||
+          (x < W - 1 && y > 0 && keys[p - W + 1] !== key) ||
+          (x > 0 && y < H - 1 && keys[p + W - 1] !== key) ||
+          (x < W - 1 && y < H - 1 && keys[p + W + 1] !== key);
+      }
+      const alpha = isEdge ? (strong ? 255 : otherEdge) : strong ? hlFill : otherFill;
       if (alpha === 0) {
         continue;
       }
@@ -157,7 +203,11 @@ export function renderLabels(
       pixels[q + 3] = alpha;
     }
   }
-  return { pixels, drawn, scratch: keys };
+  const focus =
+    focusPixels > 0
+      ? { key: hl, pixels: focusPixels, left: fx0, top: fy0, right: fx1 + 1, bottom: fy1 + 1 }
+      : null;
+  return { pixels, drawn, focus, scratch: keys };
 }
 
 /** The visible labels at an index-space point, topmost first: [layer, value]. */

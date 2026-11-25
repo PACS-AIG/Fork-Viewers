@@ -232,6 +232,25 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     });
     expect(navigations.map(n => n.key)).toEqual(['0/total/1']);
     expect(row().getAttribute('aria-selected')).toBe('true');
+    const button = () => row().querySelector('.prs-structure') as HTMLButtonElement;
+    expect(button().getAttribute('aria-pressed')).toBe('true');
+    expect(button().getAttribute('title')).toBe(
+      'Liver is picked out on the images: click again or press Esc to stop'
+    );
+    // Its name again clears it, without a second jump, and the row under the pointer stops
+    // showing it.
+    act(() => {
+      fireEvent.mouseEnter(row());
+    });
+    expect(s.getSnapshot().hovered).toBe('0/total/1');
+    act(() => {
+      fireEvent.click(button());
+    });
+    expect(s.getSnapshot().hovered).toBeNull();
+    expect(row().getAttribute('aria-selected')).toBe('false');
+    expect(button().getAttribute('aria-pressed')).toBe('false');
+    expect(button().getAttribute('title')).toBe('Show Liver on the images');
+    expect(navigations.map(n => n.key)).toEqual(['0/total/1']);
     act(() => {
       fireEvent.click(row().querySelector('input[type="checkbox"]')!);
     });

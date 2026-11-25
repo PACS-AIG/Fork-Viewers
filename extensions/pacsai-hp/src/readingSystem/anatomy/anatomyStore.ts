@@ -15,7 +15,10 @@
  *     own, kept in this browser); each task and each structure shown or
  *     hidden (per study). Body cavities start hidden: they contain the organs.
  *   - Selecting a structure shows it and asks the navigator (the overlay) to
- *     bring its largest slice into a viewport.
+ *     bring its largest slice into a viewport, aiming at a point inside it.
+ *     While it is selected (or pointed at in the table) it is drawn in the
+ *     spotlight: every other label at a quarter of its strength, and its name
+ *     on the images (the overlay). Selecting it again clears it.
  *   - A structure's volume is shown only when its mapping is measurement
  *     eligible (FINAL_SPEC §2.3): the document's (contract 1.13) when it gives
  *     one, else its voxels x |det(affine)|; "at least" when the document says
@@ -66,6 +69,8 @@ export interface AnatomySettings {
 }
 
 export const DEFAULT_SETTINGS: AnatomySettings = { enabled: true, opacity: 0.35, style: 'fill' };
+/** The other labels' strength while one structure is in the spotlight. */
+export const SPOTLIGHT_DIM = 0.25;
 /** The reading system checks a labelmap's affine to this (mm); so does the viewer. */
 export const AFFINE_TOLERANCE_MM = 1e-3;
 
@@ -292,6 +297,10 @@ export interface AnatomyRenderSet {
   fillAlpha: number;
   edgeAlpha: number;
   highlight: { layer: number; value: number } | null;
+  /** Every other label's strength while a structure is highlighted (SPOTLIGHT_DIM), else 1. */
+  dim: number;
+  /** The highlighted structure, for its name on the images. */
+  focus: { key: string; name: string; color: Rgb } | null;
   revision: number;
 }
 
@@ -299,7 +308,10 @@ export interface AnatomyRenderSet {
 export interface AnatomyTarget {
   key: string;
   seriesUID: string;
-  /** Its largest slice's in-plane centroid, in the viewer's world (LPS mm). */
+  /**
+   * A point inside it on its largest slice (its largest piece's deepest
+   * pixel there), in the viewer's world (LPS mm).
+   */
   point: Vec3;
 }
 
@@ -329,7 +341,11 @@ export interface AnatomyStore {
   setStyle(style: AnatomyStyle): void;
   setTaskVisible(series: number, task: string, visible: boolean): void;
   setStructureVisible(key: string, visible: boolean): void;
-  /** Select a structure (null clears): shows it and asks the navigator to bring it into view. */
+  /**
+   * Select a structure (null clears; the selected one again clears it too,
+   * and what the pointer shows in the table with it): shows it and asks the
+   * navigator to bring it into view.
+   */
   select(key: string | null): void;
   /** The structure the reader points at in the table (null: none). */
   hover(key: string | null): void;
@@ -854,6 +870,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
     const { fill, edge } = alphasFor(state.settings);
     const strong = findStructure(state.hovered ?? state.selected);
     const hlLayer = strong && strong.series === index ? tasks.indexOf(strong.task) : -1;
+    const lit = hlLayer >= 0 && strong?.visible ? strong : null;
     return {
       series: index,
       indexFromLps: toIndex,
@@ -862,7 +879,9 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
       tasks,
       fillAlpha: fill,
       edgeAlpha: edge,
-      highlight: hlLayer >= 0 && strong?.visible ? { layer: hlLayer, value: strong.value } : null,
+      highlight: lit ? { layer: hlLayer, value: lit.value } : null,
+      dim: lit ? SPOTLIGHT_DIM : 1,
+      focus: lit ? { key: lit.key, name: displayName(lit.name), color: lit.color } : null,
       revision: state.revision,
     };
   }
@@ -932,9 +951,12 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
       set({ structures });
     },
     select(key) {
-      if (key === null) {
-        if (state.selected !== null) {
-          set({ selected: null });
+      if (key === null || key === state.selected) {
+        // Cleared: the row under the pointer (the one just clicked, most often) stops showing
+        // its structure too, until the pointer moves to another row; else the clear would show
+        // nothing.
+        if (state.selected !== null || state.hovered !== null) {
+          set({ selected: null, hovered: null });
         }
         return;
       }
@@ -1062,6 +1084,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
         settings: { ...state.settings },
         selected: sel ? `${sel.task}/${sel.value}` : null,
         selectedSlices: sel?.slices ?? null,
+        spotlight: Boolean(findStructure(state.hovered ?? state.selected)?.visible),
         notes: state.notes.length,
         counts: { ...counts },
       };
