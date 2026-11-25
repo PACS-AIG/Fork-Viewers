@@ -5,6 +5,7 @@
  * fixtures.
  */
 import type { Mat4 } from './anatomyGeometry';
+import { SURFACES_ENCODING } from './anatomySurfaces';
 
 export interface NiftiSpec {
   dims: [number, number, number];
@@ -232,5 +233,56 @@ export function makeAnatomyDoc(
       },
     ],
     ...over,
+  };
+}
+
+/**
+ * Display surfaces (contract 1.17) for one labelmap: a tetrahedron per label
+ * around its centre (LPS mm), its points then its triangles, little-endian as
+ * the contract has them (before gzip). `describe` gives the labelmap's
+ * `surfaces` for a sha256, `index` each label's `surface`.
+ */
+export function makeSurfaces(
+  task: string,
+  labels: Array<{ value: number; centre: [number, number, number]; size?: number }>
+) {
+  const points: number[] = [];
+  const triangles: number[] = [];
+  const index: Record<number, Record<string, number>> = {};
+  for (const l of labels) {
+    const [x, y, z] = l.centre;
+    const r = l.size ?? 4;
+    const vertexOffset = points.length / 3;
+    const triangleOffset = triangles.length / 3;
+    points.push(x + r, y + r, z + r, x - r, y - r, z + r, x - r, y + r, z - r, x + r, y - r, z - r);
+    triangles.push(0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2);
+    index[l.value] = {
+      vertexOffset,
+      vertexCount: 4,
+      triangleOffset,
+      triangleCount: 4,
+      samplingMm: 1.5,
+    };
+  }
+  const vertices = points.length / 3;
+  const count = triangles.length / 3;
+  const bytes = new Uint8Array(12 * (vertices + count));
+  const view = new DataView(bytes.buffer);
+  points.forEach((v, n) => view.setFloat32(4 * n, v, true));
+  triangles.forEach((v, n) => view.setUint32(12 * vertices + 4 * n, v, true));
+  return {
+    bytes,
+    vertices,
+    triangles: count,
+    index,
+    describe: (sha256: string) => ({
+      file: `anatomy/0.${task}.surfaces.bin.gz`,
+      sha256,
+      encoding: SURFACES_ENCODING,
+      use: 'display',
+      vertices,
+      triangles: count,
+      method: { builder: 'test', version: '0', field: 'sdf', triangleBudget: 50000 },
+    }),
   };
 }

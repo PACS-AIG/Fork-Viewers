@@ -18,12 +18,23 @@
  * brings its slice into the viewport, where each label is drawn exactly over
  * its block on the rendered image (a flipped axis would put it over the
  * other side); hovering names the structure; the bar's button turns the
- * layers off and on.
+ * layers off and on. Then the structures in 3D (contract 1.17's display
+ * surfaces, a box around each block): drawn from the front with the liver on
+ * the left, following the tab's switches, enlarged over the images beside the
+ * report column and back with Esc; without WebGL, the view says so.
  */
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type Route,
+} from '@playwright/test';
+import { SURFACES_ENCODING } from '../../src/readingSystem/anatomy/anatomySurfaces';
 import { makeNifti } from '../../src/readingSystem/anatomy/anatomyTestData';
 import { openStudy, pane, paneState } from './rsE2e';
 
@@ -136,9 +147,78 @@ const TOTAL = labelmap((u, v, k) => (inLiver(u, v, k) ? 1 : inKidney(u, v, k) ? 
 const CAVITIES = labelmap((u, v, k) => (inBody(u, v) && k >= 2 && k <= 17 ? 1 : 0));
 const count = (data: number[], value: number) => data.filter(x => x === value).length;
 
+/**
+ * A labelmap's display surfaces (contract 1.17): a box around each structure's
+ * block (LPS mm, the voxels' outer faces), 8 corners and 12 outward triangles
+ * each, little-endian points then triangles, gzip.
+ */
+type Corners = [[number, number, number], [number, number, number]];
+function surfaces(task: string, boxes: Array<[number, Corners]>) {
+  const points: number[] = [];
+  const triangles: number[] = [];
+  const index: Record<number, Record<string, number>> = {};
+  for (const [value, [[x0, y0, z0], [x1, y1, z1]]] of boxes) {
+    const vertexOffset = points.length / 3;
+    const triangleOffset = triangles.length / 3;
+    // Corner n is (x0 or x1, y0 or y1, z0 or z1) by its bits 1, 2 and 4.
+    for (const z of [z0, z1]) {
+      for (const y of [y0, y1]) {
+        for (const x of [x0, x1]) {
+          points.push(x, y, z);
+        }
+      }
+    }
+    // prettier-ignore
+    triangles.push(0, 2, 3, 0, 3, 1, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 6, 7, 2, 7, 3, 0, 4, 6, 0, 6, 2, 1, 3, 7, 1, 7, 5);
+    index[value] = {
+      vertexOffset,
+      vertexCount: 8,
+      triangleOffset,
+      triangleCount: 12,
+      samplingMm: 4,
+    };
+  }
+  const vertices = points.length / 3;
+  const raw = Buffer.alloc(4 * (points.length + triangles.length));
+  points.forEach((v, n) => raw.writeFloatLE(v, 4 * n));
+  triangles.forEach((v, n) => raw.writeUInt32LE(v, 4 * (points.length + n)));
+  const gz = gzipSync(raw);
+  return {
+    gz,
+    index,
+    surfaces: {
+      file: `anatomy/0.${task}.surfaces.bin.gz`,
+      sha256: createHash('sha256').update(gz).digest('hex'),
+      encoding: SURFACES_ENCODING,
+      use: 'display',
+      vertices,
+      triangles: triangles.length / 3,
+      method: { builder: 'e2e boxes', version: '1', field: 'none', triangleBudget: 12 },
+    },
+  };
+}
+// Pixel (u, v) of slice k is at LPS (-128 + 4u, -128 + 4v, -50 + 5k): each box reaches its voxels' outer faces.
+const LIVER_BOX: Corners = [
+  [-98, -50, -12.5],
+  [-34, 14, 12.5],
+];
+const KIDNEY_BOX: Corners = [
+  [30, 30, -27.5],
+  [62, 62, 22.5],
+];
+const CAVITY_BOX: Corners = [
+  [-114, -98, -42.5],
+  [110, 94, 37.5],
+];
+const TOTAL_SURFACES = surfaces('total', [
+  [1, LIVER_BOX],
+  [2, KIDNEY_BOX],
+]);
+const CAVITY_SURFACES = surfaces('trunk_cavities', [[1, CAVITY_BOX]]);
+
 function anatomyJson(study: string) {
   return {
-    contractVersion: 'pacsai.reading/1.10',
+    contractVersion: 'pacsai.reading/1.17',
     artifact: 'anatomy',
     snapshotId: null,
     studyUID: study,
@@ -158,6 +238,7 @@ function anatomyJson(study: string) {
             file: 'anatomy/0.total.labels.nii.gz',
             sha256: TOTAL.sha256,
             datatype: 'uint8',
+            surfaces: TOTAL_SURFACES.surfaces,
             labels: [
               {
                 value: 1,
@@ -166,6 +247,7 @@ function anatomyJson(study: string) {
                 rawClass: 'liver',
                 voxels: count(TOTAL.data, 1),
                 measurementEligible: true,
+                surface: TOTAL_SURFACES.index[1],
                 // Research features (contract 1.15), made up for the test.
                 radiomics: {
                   use: 'research',
@@ -188,6 +270,7 @@ function anatomyJson(study: string) {
                 rawClass: 'kidney_left',
                 voxels: count(TOTAL.data, 2),
                 measurementEligible: true,
+                surface: TOTAL_SURFACES.index[2],
                 radiomics: {
                   use: 'research',
                   featureSet: 'radiomics_v1',
@@ -204,6 +287,7 @@ function anatomyJson(study: string) {
             file: 'anatomy/0.trunk_cavities.labels.nii.gz',
             sha256: CAVITIES.sha256,
             datatype: 'uint8',
+            surfaces: CAVITY_SURFACES.surfaces,
             labels: [
               {
                 value: 1,
@@ -212,6 +296,7 @@ function anatomyJson(study: string) {
                 rawClass: 'abdominal_cavity',
                 voxels: count(CAVITIES.data, 1),
                 measurementEligible: false,
+                surface: CAVITY_SURFACES.index[1],
               },
             ],
           },
@@ -274,12 +359,13 @@ async function serveArchiveAndAnatomy(context: BrowserContext, unknown: string[]
           body: JSON.stringify(anatomyJson(decodeURIComponent(m[1]))),
         });
       }
-      const file =
-        m[2] === '0.total.labels.nii.gz'
-          ? TOTAL
-          : m[2] === '0.trunk_cavities.labels.nii.gz'
-            ? CAVITIES
-            : null;
+      const files: Record<string, { gz: Buffer }> = {
+        '0.total.labels.nii.gz': TOTAL,
+        '0.trunk_cavities.labels.nii.gz': CAVITIES,
+        '0.total.surfaces.bin.gz': TOTAL_SURFACES,
+        '0.trunk_cavities.surfaces.bin.gz': CAVITY_SURFACES,
+      };
+      const file = files[m[2]];
       return file
         ? route.fulfill({ status: 200, contentType: 'application/gzip', body: file.gz })
         : route.fulfill({ status: 404, body: '' });
@@ -359,6 +445,45 @@ function measure(): Measured | null {
 }
 
 const centre = (b: Box) => (b ? { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 } : null);
+
+/**
+ * How many pixels of an element's screenshot are drawn (not the 3D view's
+ * background, 10 17 27), in its left and right halves: the screenshot is what
+ * the page shows, WebGL included.
+ */
+async function drawnHalves(page: Page, el: Locator): Promise<{ left: number; right: number }> {
+  const png = (await el.screenshot()).toString('base64');
+  return page.evaluate(async b64 => {
+    const bytes = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const c = document.createElement('canvas');
+    c.width = bitmap.width;
+    c.height = bitmap.height;
+    const ctx = c.getContext('2d')!;
+    ctx.drawImage(bitmap, 0, 0);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let left = 0;
+    let right = 0;
+    for (let y = 0; y < c.height; y++) {
+      for (let x = 0; x < c.width; x++) {
+        const q = (y * c.width + x) * 4;
+        if (Math.abs(d[q] - 10) + Math.abs(d[q + 1] - 17) + Math.abs(d[q + 2] - 27) > 40) {
+          if (x < c.width / 2) {
+            left++;
+          } else {
+            right++;
+          }
+        }
+      }
+    }
+    return { left, right };
+  }, png);
+}
+const MANY = 200;
+const halves = async (page: Page, el: Locator) => {
+  const h = await drawnHalves(page, el);
+  return { left: h.left > MANY, right: h.right > MANY };
+};
 
 /**
  * The drawn label lies on its block: their centres within a pixel and a bit,
@@ -581,5 +706,83 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
     await expect.poll(async () => (await page.evaluate(measure))?.drawn.left ?? null).toBeNull();
     await toggle.click();
     await expect.poll(async () => Boolean((await page.evaluate(measure))?.drawn.left)).toBe(true);
+
+    // The structures in 3D (1.17's display surfaces), behind the series' 3D button.
+    const view3d = async () =>
+      ((await paneState(page))?.anatomy3d ?? null) as Record<string, unknown> | null;
+    const status3d = pane(page).locator('[data-rs-anatomy-3d-status]');
+    const open3d = pane(page).locator('[data-rs-anatomy-3d-open="0"]');
+    await expect(open3d).toHaveText('3D');
+    await open3d.click();
+    if (want === 'cpu') {
+      await expect(status3d).toHaveText(
+        'The 3D view needs WebGL, which this browser does not give.'
+      );
+      expect(await view3d()).toMatchObject({ open: true, webgl: false });
+      return;
+    }
+    // Both files read and checked; the organs drawn, the body cavities hidden as their task is.
+    await expect
+      .poll(view3d)
+      .toMatchObject({ open: true, enlarged: false, webgl: true, actors: 3, visibleActors: 2 });
+    await expect(status3d).toHaveText('3 structures, 36 triangles');
+    expect((await paneState(page))?.anatomy).toMatchObject({
+      counts: { surfaceFiles: 2, refusedSurfaces: 0 },
+    });
+    // From the front, the patient's right on the left: the liver on the left, the kidney on the right.
+    const inline = pane(page).locator('[data-rs-anatomy-3d-view]');
+    await expect.poll(() => halves(page, inline)).toEqual({ left: true, right: true });
+    if (process.env.RS_E2E_SHOTS) {
+      await pane(page).screenshot({
+        path: path.join(__dirname, 'test-results', 'anatomy-3d-inline.png'),
+      });
+    }
+    // The tab's switches: the kidney off leaves the right half empty; back on.
+    const kidneyBox = organs.nth(1).locator('input[type="checkbox"]');
+    await kidneyBox.uncheck();
+    await expect.poll(view3d).toMatchObject({ visibleActors: 1 });
+    await expect.poll(async () => (await drawnHalves(page, inline)).right).toBeLessThan(20);
+    await kidneyBox.check();
+    await expect.poll(view3d).toMatchObject({ visibleActors: 2 });
+
+    // Enlarged over the images, left of the report column, its keys at once; Esc takes it back.
+    await pane(page).locator('[data-rs-anatomy-3d-enlarge]').click();
+    const overlay = page.locator('[data-rs-anatomy-3d-overlay]');
+    await expect(overlay).toBeVisible();
+    await expect(pane(page).locator('[data-rs-anatomy-3d-away]')).toBeVisible();
+    await expect
+      .poll(view3d)
+      .toMatchObject({ enlarged: true, webgl: true, actors: 3, visibleActors: 2 });
+    const [ob, pb] = [
+      await overlay.boundingBox(),
+      await page.locator('[data-pacsai-rs-pane]').boundingBox(),
+    ];
+    expect(ob!.x + ob!.width).toBeLessThanOrEqual(pb!.x);
+    expect(ob!.width).toBeGreaterThan(pb!.width);
+    await expect
+      .poll(() => halves(page, overlay.locator('[data-rs-anatomy-3d-view]')))
+      .toEqual({ left: true, right: true });
+    await expect(overlay.locator('[data-rs-anatomy-3d-enlarge]')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(overlay).toHaveCount(0);
+    await expect(pane(page).locator('[data-rs-anatomy-3d="inline"]')).toBeVisible();
+    await expect(pane(page).locator('[data-rs-anatomy-3d-enlarge]')).toBeFocused();
+
+    // Enlarged again, the tab's switches reach it: the body cavities shown, see-through.
+    await pane(page).locator('[data-rs-anatomy-3d-enlarge]').click();
+    await expect(overlay).toBeVisible();
+    await cavities.locator('[data-rs-anatomy-task-toggle]').check();
+    await expect.poll(view3d).toMatchObject({ enlarged: true, visibleActors: 3 });
+    if (process.env.RS_E2E_SHOTS) {
+      await page.screenshot({
+        path: path.join(__dirname, 'test-results', 'anatomy-3d-enlarged.png'),
+      });
+    }
+    await cavities.locator('[data-rs-anatomy-task-toggle]').uncheck();
+    // Its × closes it altogether.
+    await overlay.locator('[data-rs-anatomy-3d-close]').click();
+    await expect(overlay).toHaveCount(0);
+    await expect(pane(page).locator('[data-rs-anatomy-3d]')).toHaveCount(0);
+    await expect.poll(view3d).toBeNull();
   });
 }

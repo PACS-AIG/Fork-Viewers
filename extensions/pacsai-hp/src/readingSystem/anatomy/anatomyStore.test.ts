@@ -16,6 +16,7 @@ import {
   gridVolume,
   makeAnatomyDoc,
   makeNifti,
+  makeSurfaces,
 } from './anatomyTestData';
 import { vertebraColor } from './anatomyColors';
 import {
@@ -61,6 +62,13 @@ interface Setup {
   storage?: { value: string | null };
   /** Changes to the document before the test reads it (its sha256 values are set after). */
   mutate?: (raw: ReturnType<typeof makeAnatomyDoc>) => void;
+  /**
+   * Per task: its display surfaces (1.17), served gzipped (or `served` as
+   * given), the document naming the served file's sha256 unless `docSha`.
+   */
+  surfaces?: Partial<
+    Record<string, { fx: ReturnType<typeof makeSurfaces>; served?: Uint8Array; docSha?: string }>
+  >;
 }
 
 function setup(o: Setup = {}) {
@@ -87,9 +95,17 @@ function setup(o: Setup = {}) {
   for (const lm of raw.series[0].labelmaps as Array<{
     task: string;
     sha256: string;
-    labels: Array<{ value: number; voxels: number }>;
+    labels: Array<{ value: number; voxels: number; surface?: unknown }>;
+    surfaces?: unknown;
   }>) {
     lm.sha256 = o.docSha?.[lm.task] ?? sha(files[`0.${lm.task}.labels.nii.gz`]);
+    const surfaces = o.surfaces?.[lm.task];
+    if (surfaces) {
+      const served = surfaces.served ?? new Uint8Array(gzipSync(surfaces.fx.bytes));
+      files[`0.${lm.task}.surfaces.bin.gz`] = served;
+      lm.surfaces = surfaces.fx.describe(surfaces.docSha ?? sha(served));
+      lm.labels.forEach(l => (l.surface = surfaces.fx.index[l.value]));
+    }
     const counts = o.docVoxels?.[lm.task];
     if (counts) {
       lm.labels.forEach(l => (l.voxels = counts[l.value] ?? l.voxels));
@@ -591,6 +607,149 @@ describe('the anatomy layers’ state (RS-36)', () => {
       selected: null,
     });
     expect(store.renderSetFor(SERIES)).toBeNull();
+  });
+
+  it("reads a series' display surfaces (1.17) only when the 3D view asks, once, the shown tasks first; then hands them out by structure", async () => {
+    const organs = makeSurfaces('total', [
+      { value: 1, centre: [-4, -4, 16] },
+      { value: 2, centre: [4, 4, 19], size: 2 },
+    ]);
+    const cavities = makeSurfaces('trunk_cavities', [{ value: 1, centre: [0, 0, 20], size: 10 }]);
+    const { store, client } = setup({
+      surfaces: { total: { fx: organs }, trunk_cavities: { fx: cavities } },
+      mutate: raw => {
+        const lm = raw.series[0].labelmaps as Array<Record<string, unknown>>;
+        lm[2].surfacesWithheld = 'too small for a surface';
+      },
+    });
+    const surfaceReads = () =>
+      client.anatomyFile.mock.calls.map(c => c[1]).filter(b => b.includes('.surfaces.'));
+    const tasks = () =>
+      Object.fromEntries(store.getSnapshot().series[0].tasks.map(t => [t.task, t.surfaces]));
+    store.enter(STUDY);
+    await flush();
+    expect(tasks()).toEqual({
+      total: { status: 'waiting', reason: null, structures: 0, triangles: 0 },
+      vertebrae_pp: {
+        status: 'withheld',
+        reason: 'too small for a surface',
+        structures: 0,
+        triangles: 0,
+      },
+      trunk_cavities: { status: 'waiting', reason: null, structures: 0, triangles: 0 },
+    });
+    // The 2D layers never wait for them.
+    expect(surfaceReads()).toEqual([]);
+    expect(store.surfacesFor(0)).toEqual([]);
+    const revision = store.getSnapshot().revision;
+    store.openSurfaces(0);
+    store.openSurfaces(0);
+    await flush();
+    // Once each, the shown organs before the hidden cavities.
+    expect(surfaceReads()).toEqual(['0.total.surfaces.bin.gz', '0.trunk_cavities.surfaces.bin.gz']);
+    expect(tasks().total).toEqual({ status: 'ready', reason: null, structures: 2, triangles: 8 });
+    expect(tasks().trunk_cavities).toEqual({
+      status: 'ready',
+      reason: null,
+      structures: 1,
+      triangles: 4,
+    });
+    // Nothing on the images changed.
+    expect(store.getSnapshot().revision).toBe(revision);
+    const entries = store.surfacesFor(0).sort((a, b) => a.key.localeCompare(b.key));
+    expect(entries.map(e => [e.key, e.task, e.value, e.points.length, e.triangles.length])).toEqual(
+      [
+        [keyOf('total', 1), 'total', 1, 12, 12],
+        [keyOf('total', 2), 'total', 2, 12, 12],
+        [keyOf('trunk_cavities', 1), 'trunk_cavities', 1, 12, 12],
+      ]
+    );
+    expect(Array.from(entries[1].points.slice(0, 3))).toEqual([6, 6, 21]);
+    store.openSurfaces(0);
+    await flush();
+    expect(surfaceReads()).toHaveLength(2);
+    expect(store.harnessState()).toMatchObject({
+      counts: { surfaceFiles: 2, refusedSurfaces: 0 },
+      tasks: expect.arrayContaining([
+        expect.objectContaining({
+          task: 'total',
+          surfaces: { status: 'ready', structures: 2, triangles: 8 },
+        }),
+      ]),
+    });
+    // A study left lets go of them.
+    store.leave();
+    expect(store.surfacesFor(0)).toEqual([]);
+  });
+
+  it('refuses surfaces that are not the file the document names, not gzip, or fail a check, and draws the labelmaps all the same', async () => {
+    const fx = (task: string) => makeSurfaces(task, [{ value: 1, centre: [0, 0, 16] }]);
+    const truncated = new Uint8Array(gzipSync(fx('vertebrae_pp').bytes.subarray(0, 40)));
+    const { store } = setup({
+      surfaces: {
+        total: {
+          fx: makeSurfaces('total', [{ value: 1, centre: [0, 0, 16] }]),
+          docSha: 'f'.repeat(64),
+        },
+        trunk_cavities: { fx: fx('trunk_cavities'), served: new Uint8Array([0x1f, 0x8b, 8, 0, 1]) },
+        vertebrae_pp: { fx: fx('vertebrae_pp'), served: truncated },
+      },
+    });
+    store.enter(STUDY);
+    await flush();
+    store.openSurfaces(0);
+    await flush();
+    const tasks = Object.fromEntries(
+      store
+        .getSnapshot()
+        .series[0].tasks.map(t => [t.task, [t.status, t.surfaces.status, t.surfaces.reason]])
+    );
+    expect(tasks).toEqual({
+      total: ['ready', 'refused', 'the file is not the one the document names (sha256)'],
+      trunk_cavities: ['ready', 'refused', 'the surfaces are not a complete gzip file'],
+      vertebrae_pp: [
+        'ready',
+        'refused',
+        'the surfaces file holds 40 bytes, not the 96 its counts make',
+      ],
+    });
+    expect(store.surfacesFor(0)).toEqual([]);
+    expect(store.harnessState()).toMatchObject({ counts: { refusedSurfaces: 3 } });
+  });
+
+  it('says why surfaces could not be read, and drops those of a study left while they load', async () => {
+    const { store, client } = setup({
+      surfaces: {
+        total: { fx: makeSurfaces('total', [{ value: 1, centre: [0, 0, 16] }]) },
+        vertebrae_pp: { fx: makeSurfaces('vertebrae_pp', [{ value: 1, centre: [0, 0, 16] }]) },
+      },
+    });
+    store.enter(STUDY);
+    await flush();
+    const original = client.anatomyFile.getMockImplementation()!;
+    let release: () => void = () => {};
+    const gate = new Promise<void>(r => (release = r));
+    client.anatomyFile.mockImplementation(async (s: string, b: string) => {
+      if (b === '0.total.surfaces.bin.gz') {
+        throw new RsHttpError(502, 'surfaces');
+      }
+      await gate;
+      return original(s, b);
+    });
+    store.openSurfaces(0);
+    await flush();
+    const status = (task: string) =>
+      store.getSnapshot().series[0]?.tasks.find(t => t.task === task)?.surfaces;
+    expect(status('total')).toMatchObject({
+      status: 'refused',
+      reason: 'the surfaces could not be read (HTTP 502)',
+    });
+    expect(status('vertebrae_pp')).toMatchObject({ status: 'loading' });
+    store.leave();
+    release();
+    await flush();
+    expect(store.getSnapshot().series).toEqual([]);
+    expect(store.surfacesFor(0)).toEqual([]);
   });
 
   it('drops a study left while its labelmaps load', async () => {
