@@ -610,6 +610,52 @@ describe("the Anatomy tab's 3D view (RS-36, contract 1.17)", () => {
     expect(wrapsOthers({ rawClass: 'skull_base', name: 'skull base' })).toBe(false);
   });
 
+  it('draws the brain see-through while the ventricles inside it are shown, solid without them', () => {
+    const structure = (task: string, value: number, rawClass: string) => ({
+      key: `0/${task}/${value}`,
+      series: 0,
+      task,
+      value,
+      name: rawClass,
+      rawClass,
+      color: [200, 180, 150],
+      visible: true,
+    });
+    const snapWith = (ventricles: boolean) =>
+      ({
+        series: [
+          {
+            index: 0,
+            tasks: [
+              { task: 'total', visible: true },
+              { task: 'ventricle_parts', visible: ventricles },
+            ],
+          },
+        ],
+        structures: {
+          '0/total/1': structure('total', 1, 'brain'),
+          '0/total/2': structure('total', 2, 'skull'),
+          '0/ventricle_parts/1': structure('ventricle_parts', 1, 'lateral_ventricle_left'),
+        },
+        hovered: null,
+        selected: null,
+      }) as unknown as AnatomySnapshot;
+    const keys = ['0/total/1', '0/total/2', '0/ventricle_parts/1'];
+    const opacities = (s: AnatomySnapshot) => looksFor(s, 0, keys).map(l => l.opacity);
+    // The ventricles shown: the brain see-through as the skull is, the ventricles solid inside both.
+    expect(opacities(snapWith(true))).toEqual([CONTAINER_OPACITY, CONTAINER_OPACITY, 1]);
+    // Their task switched off: nothing in the brain to see, so it is solid again.
+    expect(opacities(snapWith(false))).toEqual([1, CONTAINER_OPACITY, 1]);
+    // A ventricle part in the spotlight: solid, the brain and the skull fade.
+    expect(opacities({ ...snapWith(true), hovered: '0/ventricle_parts/1' })).toEqual([
+      OTHERS_OPACITY,
+      OTHERS_OPACITY,
+      1,
+    ]);
+    expect(wrapsOthers({ rawClass: 'brain', name: 'brain' }, true)).toBe(true);
+    expect(wrapsOthers({ rawClass: 'brain', name: 'brain' }, false)).toBe(false);
+  });
+
   it('says so when the page draws no WebGL', async () => {
     const { factory } = fakeScenes(false);
     setSceneFactory(factory);
