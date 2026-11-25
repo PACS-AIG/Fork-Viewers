@@ -35,6 +35,7 @@
   "peerDependencies": {
     "@cornerstonejs/core": "^2.17.2",
     "@cornerstonejs/tools": "^2.17.2",
+    "@kitware/vtk.js": "32.1.1",
     "@ohif/core": "3.10.0-beta.84",
     "@ohif/extension-default": "3.10.0-beta.84",
     "react": "^18.3.1",

@@ -15,6 +15,11 @@
  * ignores fields it does not know. A series whose entry is malformed is kept
  * with the reason and draws nothing: a series never shows part of its set.
  *
+ * Contract 1.17 (D-345) adds, per labelmap, one file of its labels' display
+ * surfaces (or why the run made none), and per label where its surface lies
+ * in it (anatomySurfaces): for the pane's 3D view only. A malformed one is
+ * left out with the reason; the labelmap still draws.
+ *
  * Contract 1.15 (D-342) adds, on the same labels, their radiomics: research
  * features (radiomics_v1, `use` "research"), shown only as such, never as a
  * finding, a measurement or report content (D-277: no stability gate passed;
@@ -36,6 +41,12 @@
  */
 import { checkDocument, type RsEnvelope, type RsMode } from '../rsContract';
 import { det3, type Mat4 } from './anatomyGeometry';
+import {
+  readSurfaceIndex,
+  readSurfaces,
+  type RsAnatomySurfaceIndex,
+  type RsAnatomySurfaces,
+} from './anatomySurfaces';
 
 export const ANATOMY_ARTIFACT = 'anatomy';
 
@@ -88,6 +99,8 @@ export interface RsAnatomyLabel {
   attenuation: RsAnatomyAttenuation | null;
   /** 1.15: its research features, for a measurement-eligible label the run measured. */
   radiomics: RsAnatomyRadiomics | null;
+  /** 1.17: where its display surface lies in its labelmap's surfaces file. */
+  surface: RsAnatomySurfaceIndex | null;
 }
 
 export interface RsAnatomyRadiomics {
@@ -277,6 +290,12 @@ export interface RsAnatomyLabelmap {
   sha256: string;
   datatype: LabelmapDatatype;
   labels: RsAnatomyLabel[];
+  /** 1.17: its labels' display surfaces, one file (null: none). */
+  surfaces: RsAnatomySurfaces | null;
+  /** 1.17: why the run made none, as the document says. */
+  surfacesWithheld: string | null;
+  /** Why this viewer cannot draw its surfaces (malformed), or null: the labelmap itself still draws. */
+  surfacesInvalid: string | null;
 }
 
 export interface RsAnatomyGrid {
@@ -414,6 +433,7 @@ function readLabels(v: unknown, datatype: LabelmapDatatype): RsAnatomyLabel[] | 
       checks: readChecks(raw.checks),
       attenuation: measurementEligible ? readAttenuation(raw.attenuation) : null,
       radiomics: measurementEligible ? readRadiomics(raw.radiomics) : null,
+      surface: readSurfaceIndex(raw.surface),
     });
   }
   return labels;
@@ -444,7 +464,28 @@ function readLabelmap(v: unknown): RsAnatomyLabelmap | string {
   if (typeof labels === 'string') {
     return `the ${task} labelmap: ${labels}`;
   }
-  return { task, file, basename: m[1], sha256, datatype, labels };
+  const surfaces = readSurfaces(v.surfaces);
+  // Its surfaces are its own: the same <n>.<task> as its labelmap's file.
+  const surfacesInvalid =
+    typeof surfaces === 'string'
+      ? surfaces
+      : surfaces && surfaces.basename.split('.surfaces.')[0] !== m[1].split('.labels.')[0]
+        ? 'its surfaces file is named for another labelmap'
+        : null;
+  return {
+    task,
+    file,
+    basename: m[1],
+    sha256,
+    datatype,
+    labels,
+    surfaces: surfacesInvalid || typeof surfaces === 'string' ? null : surfaces,
+    surfacesWithheld:
+      typeof v.surfacesWithheld === 'string' && v.surfacesWithheld.trim()
+        ? v.surfacesWithheld.trim().slice(0, 300)
+        : null,
+    surfacesInvalid,
+  };
 }
 
 /** How many unnamed proposals: a count, or the length of a list, or the sum of a map's counts. */

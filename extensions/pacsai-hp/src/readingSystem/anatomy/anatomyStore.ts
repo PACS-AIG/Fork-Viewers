@@ -14,6 +14,10 @@
  *   - The layer settings: on or off, opacity, fill or outline (the reader's
  *     own, kept in this browser); each task and each structure shown or
  *     hidden (per study). Body cavities start hidden: they contain the organs.
+ *   - A labelmap's display surfaces (1.17) are read only when the pane's 3D
+ *     view opens for its series, one file at a time, each checked as a
+ *     labelmap is (its sha256, then its size, points and triangles:
+ *     anatomySurfaces). They follow the same colours and toggles.
  *   - Selecting a structure shows it and asks the navigator (the overlay) to
  *     bring its largest slice into a viewport, aiming at a point inside it.
  *     While it is selected (or pointed at in the table) it is drawn in the
@@ -56,7 +60,8 @@ import {
 } from './anatomyGeometry';
 import { buildLayer, type AnatomyLayerData, type Yielder } from './anatomyLayer';
 import { labelsAt, packColor, type RenderLayer } from './anatomyRender';
-import { NiftiError, parseNifti, unpackNifti, type Gunzip } from './nifti';
+import { isGzip, NiftiError, parseNifti, unpackNifti, type Gunzip } from './nifti';
+import { decodeSurfaces, type SurfaceMesh, type SurfaceStatus } from './anatomySurfaces';
 
 export type AnatomyPhase = 'idle' | 'loading' | 'ready' | 'none' | 'refused' | 'failed';
 export type AnatomyStyle = 'fill' | 'outline';
@@ -255,6 +260,17 @@ export interface AnatomyTask {
   reason: string | null;
   /** Structure keys: the document's order, then head to feet once read. */
   structures: string[];
+  /** 1.17: its display surfaces for the 3D view, and how many structures and triangles they hold once read. */
+  surfaces: { status: SurfaceStatus; reason: string | null; structures: number; triangles: number };
+}
+
+/** One structure's surface, for the 3D view. */
+export interface AnatomySurfaceEntry {
+  key: string;
+  task: string;
+  value: number;
+  points: Float32Array;
+  triangles: Uint32Array;
 }
 
 export interface AnatomySeriesView {
@@ -362,6 +378,10 @@ export interface AnatomyStore {
   anatomySeries(): string[];
   /** The overlay's count of the other series of a labelmap series' acquisition (anatomyRelated). */
   reportRelated(seriesUID: string, related: number): void;
+  /** Read a series' display surfaces (1.17), unless read or being read: for the 3D view. */
+  openSurfaces(series: number): void;
+  /** A series' surfaces read so far, structure by structure. */
+  surfacesFor(series: number): AnatomySurfaceEntry[];
   harnessState(): Record<string, unknown>;
 }
 
@@ -482,7 +502,19 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
   const fits = new Map<string, GridFit>();
   // `<series UID>` -> how many other series of its acquisition the overlay found.
   const relatedCounts = new Map<string, number>();
-  const counts = { reads: 0, files: 0, refusedFiles: 0, selections: 0, jumps: 0, jumpMisses: 0 };
+  const counts = {
+    reads: 0,
+    files: 0,
+    refusedFiles: 0,
+    selections: 0,
+    jumps: 0,
+    jumpMisses: 0,
+    surfaceFiles: 0,
+    refusedSurfaces: 0,
+  };
+  // `<series>/<task>` -> its surfaces once read; the series whose surfaces are being read.
+  const surfaceMeshes = new Map<string, SurfaceMesh[]>();
+  const surfacesReading = new Set<number>();
   let renderCache: { revision: number; sets: Map<number, AnatomyRenderSet> } = {
     revision: -1,
     sets: new Map(),
@@ -697,6 +729,105 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
     });
   }
 
+  /** One labelmap's surfaces: read, checked as a labelmap is, decoded; or refused with why. */
+  async function loadSurfaces(gen: number, uid: string, sIndex: number, lm: RsAnatomyLabelmap) {
+    const surfaces = lm.surfaces;
+    if (!surfaces) {
+      return;
+    }
+    const patch = (p: Partial<AnatomyTask['surfaces']>) => {
+      const t = state.series[sIndex]?.tasks.find(x => x.task === lm.task);
+      if (t) {
+        set({ series: updateTask(sIndex, lm.task, { surfaces: { ...t.surfaces, ...p } }) }, false);
+      }
+    };
+    const refuse = (why: string) => {
+      counts.refusedSurfaces++;
+      if (gen === generation) {
+        patch({ status: 'refused', reason: why });
+      }
+    };
+    patch({ status: 'loading', reason: null });
+    let bytes: Uint8Array;
+    try {
+      bytes = await deps.client.anatomyFile(uid, surfaces.basename);
+      counts.surfaceFiles++;
+    } catch (e) {
+      return refuse(
+        e instanceof RsHttpError
+          ? `the surfaces could not be read (HTTP ${e.status})`
+          : 'the surfaces could not be read'
+      );
+    }
+    if (gen !== generation) {
+      return;
+    }
+    if (deps.digest) {
+      let sum: string;
+      try {
+        sum = await deps.digest(bytes);
+      } catch (_) {
+        return refuse('their checksum could not be computed');
+      }
+      if (sum !== surfaces.sha256) {
+        return refuse('the file is not the one the document names (sha256)');
+      }
+    }
+    let raw = bytes;
+    if (isGzip(bytes)) {
+      if (!deps.gunzip) {
+        return refuse('this browser cannot read gzip (no DecompressionStream)');
+      }
+      try {
+        raw = await deps.gunzip(bytes);
+      } catch (_) {
+        return refuse('the surfaces are not a complete gzip file');
+      }
+    }
+    if (gen !== generation) {
+      return;
+    }
+    const meshes = decodeSurfaces(raw, surfaces, lm.labels);
+    if (typeof meshes === 'string') {
+      return refuse(meshes);
+    }
+    surfaceMeshes.set(taskKey(sIndex, lm.task), meshes);
+    // The 3D view draws from the store: this tells it there is more.
+    patch({
+      status: 'ready',
+      reason: null,
+      structures: meshes.length,
+      triangles: meshes.reduce((n, m) => n + m.triangles.length / 3, 0),
+    });
+  }
+
+  async function readSurfacesOf(series: number) {
+    const uid = study;
+    const gen = generation;
+    const view = state.series[series];
+    const s = doc?.series[series];
+    if (!uid || !view || !s || surfacesReading.has(series)) {
+      return;
+    }
+    surfacesReading.add(series);
+    try {
+      // Shown tasks first, one file at a time.
+      const waiting = [...view.tasks]
+        .filter(t => t.surfaces.status === 'waiting')
+        .sort((a, b) => Number(b.visible) - Number(a.visible));
+      for (let n = 0; n < waiting.length; n++) {
+        const lm = s.labelmaps.find(l => l.task === waiting[n].task);
+        if (lm && gen === generation) {
+          await loadSurfaces(gen, uid, series, lm);
+        }
+      }
+    } finally {
+      if (gen === generation) {
+        surfacesReading.delete(series);
+      }
+    }
+  }
+
   async function load(uid: string, gen: number) {
     counts.reads++;
     let anatomy: RsAnatomy;
@@ -773,6 +904,18 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
               status: 'waiting',
               reason: null,
               structures: lm.labels.map(l => keyOf(index, lm.task, l.value)),
+              surfaces: lm.surfaces
+                ? { status: 'waiting', reason: null, structures: 0, triangles: 0 }
+                : lm.surfacesInvalid
+                  ? { status: 'invalid', reason: lm.surfacesInvalid, structures: 0, triangles: 0 }
+                  : lm.surfacesWithheld
+                    ? {
+                        status: 'withheld',
+                        reason: lm.surfacesWithheld,
+                        structures: 0,
+                        triangles: 0,
+                      }
+                    : { status: 'none', reason: null, structures: 0, triangles: 0 },
             };
           });
       return {
@@ -817,6 +960,8 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
     generation++;
     doc = null;
     loaded.clear();
+    surfaceMeshes.clear();
+    surfacesReading.clear();
     fits.clear();
     relatedCounts.clear();
     renderCache = { revision: -1, sets: new Map() };
@@ -1048,6 +1193,25 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
             .map(s => s.seriesUID)
         : [];
     },
+    openSurfaces(series) {
+      void readSurfacesOf(series);
+    },
+    surfacesFor(series) {
+      const view = state.series[series];
+      const out: AnatomySurfaceEntry[] = [];
+      for (const t of view?.tasks ?? []) {
+        for (const m of surfaceMeshes.get(taskKey(series, t.task)) ?? []) {
+          out.push({
+            key: keyOf(series, t.task, m.value),
+            task: t.task,
+            value: m.value,
+            points: m.points,
+            triangles: m.triangles,
+          });
+        }
+      }
+      return out;
+    },
     reportRelated(seriesUID, related) {
       relatedCounts.set(seriesUID, Math.max(0, Math.floor(related)));
       const series = withRelated(seriesUID);
@@ -1076,6 +1240,11 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
             status: t.status,
             structures: t.structures.length,
             box: layer ? { origin: layer.data.origin, size: layer.data.size } : null,
+            surfaces: {
+              status: t.surfaces.status,
+              structures: t.surfaces.structures,
+              triangles: t.surfaces.triangles,
+            },
           };
         }),
         related: state.series.map(s => s.related),

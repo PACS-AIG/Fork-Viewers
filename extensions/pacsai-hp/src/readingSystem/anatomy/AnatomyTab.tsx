@@ -22,8 +22,14 @@
  *   - Which other series of the acquisition carry the labelmap, resampled
  *     (the scanner's reformats), and how coarse it is there.
  *   - What was not drawn, and why.
+ *   - A series' structures in 3D (contract 1.17's display surfaces, WeiWei:
+ *     "Yes, build it"), behind a 3D button on its line: in the tab, or
+ *     enlarged over the images beside the report column, with the tab's
+ *     colours and toggles (Anatomy3DView).
  */
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { Anatomy3DView } from './Anatomy3DView';
 import { cssColor } from './anatomyColors';
 import {
   displayName,
@@ -50,6 +56,121 @@ export function resampledNote(s: AnatomySeriesView): string | null {
   return (
     `Also drawn on ${s.related} other series of the same acquisition, resampled from this labelmap` +
     (step ? `: ${where}, their outlines step every ${step} mm.` : '.')
+  );
+}
+
+/** Whether a series has a 3D view: a surfaces file to read, or a description of one that could not be read. */
+export function surfacesOffered(s: AnatomySeriesView): boolean {
+  return s.tasks.some(t => t.surfaces.status !== 'none' && t.surfaces.status !== 'withheld');
+}
+
+/**
+ * Where the enlarged 3D view sits: over the images, on the wider side of the
+ * report column and as tall as it, so the tab's toggles stay at hand; over
+ * the whole window when neither side has room.
+ */
+export function overlayRect(
+  column: { left: number; right: number; top: number; bottom: number },
+  win: { innerWidth: number; innerHeight: number }
+): { left: number; top: number; width: number; height: number } {
+  const gap = 8;
+  const leftRoom = column.left - 2 * gap;
+  const rightRoom = win.innerWidth - column.right - 2 * gap;
+  const top = Math.max(gap, column.top + gap);
+  const height = Math.min(win.innerHeight, column.bottom) - gap - top;
+  if (Math.max(leftRoom, rightRoom) < 320 || height < 200) {
+    return {
+      left: gap,
+      top: gap,
+      width: Math.max(0, win.innerWidth - 2 * gap),
+      height: Math.max(0, win.innerHeight - 2 * gap),
+    };
+  }
+  return leftRoom >= rightRoom
+    ? { left: gap, top, width: leftRoom, height }
+    : { left: column.right + gap, top, width: rightRoom, height };
+}
+
+/** The enlarged view's place now: beside the report column, or the whole window without one. */
+function measureOverlay(doc: Document, column: HTMLElement | null) {
+  const win = {
+    innerWidth: doc.defaultView?.innerWidth ?? 0,
+    innerHeight: doc.defaultView?.innerHeight ?? 0,
+  };
+  const rect = column?.getBoundingClientRect() ?? {
+    left: 0,
+    right: win.innerWidth,
+    top: 0,
+    bottom: win.innerHeight,
+  };
+  return overlayRect(rect, win);
+}
+
+/** A series' 3D view enlarged over the images (a portal: the pane is too small for it). */
+function Enlarged3D({
+  store,
+  series,
+  doc,
+  column,
+  onBack,
+  onClose,
+}: {
+  store: AnatomyStore;
+  series: number;
+  doc: Document;
+  column: HTMLElement | null;
+  onBack: () => void;
+  onClose: () => void;
+}) {
+  const [rect, setRect] = useState(() => measureOverlay(doc, column));
+  const box = useRef<HTMLDivElement>(null);
+  // It follows the window and the report column.
+  useEffect(() => {
+    const win = doc.defaultView;
+    if (!win) {
+      return;
+    }
+    const update = () => setRect(measureOverlay(doc, column));
+    win.addEventListener('resize', update);
+    const RO = (win as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    const observer = column && typeof RO === 'function' ? new RO(update) : null;
+    observer?.observe(column as HTMLElement);
+    return () => {
+      win.removeEventListener('resize', update);
+      observer?.disconnect();
+    };
+  }, [doc, column]);
+  // Keys go to it at once: Esc takes it back to the pane.
+  useEffect(() => {
+    box.current?.querySelector<HTMLElement>('[data-rs-anatomy-3d-enlarge]')?.focus();
+  }, []);
+  return createPortal(
+    <div
+      ref={box}
+      className="prs-3d-overlay"
+      role="dialog"
+      aria-label="Anatomy in 3D"
+      tabIndex={-1}
+      data-rs-anatomy-3d-overlay=""
+      style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+      onKeyDown={e => {
+        if (e.key === 'Escape') {
+          // Only back to the pane: neither OHIF's Esc nor the spotlight's.
+          e.preventDefault();
+          e.stopPropagation();
+          onBack();
+        }
+      }}
+    >
+      <Anatomy3DView
+        store={store}
+        series={series}
+        enlarged
+        onEnlarge={onBack}
+        onClose={onClose}
+      />
+    </div>,
+    doc.body
   );
 }
 
@@ -393,6 +514,21 @@ function Task({
 
 export function AnatomyTab({ store }: { store: AnatomyStore }) {
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  // The series in 3D (one at a time), in the tab or enlarged over the images.
+  const [view3d, setView3d] = useState<{ series: number; enlarged: boolean } | null>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  // Back from enlarged: the keys return to the tab's Enlarge button.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (refocus.current && view3d && !view3d.enlarged) {
+      refocus.current = false;
+      rootEl?.querySelector<HTMLElement>('[data-rs-anatomy-3d-enlarge]')?.focus();
+    }
+  }, [view3d, rootEl]);
+  const back = () => {
+    refocus.current = true;
+    setView3d(v => (v ? { ...v, enlarged: false } : v));
+  };
   if (snap.phase === 'loading' || snap.phase === 'idle') {
     return <div className="prs-empty">Loading the anatomy…</div>;
   }
@@ -411,8 +547,10 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
   }
   const { settings } = snap;
   const percent = Math.round(settings.opacity * 100);
+  const shown3d = view3d && snap.series.some(s => s.index === view3d.series) ? view3d : null;
   return (
     <div
+      ref={setRootEl}
       className="prs-anatomy"
       data-rs-anatomy=""
     >
@@ -466,8 +604,30 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
           className="prs-anatomy-series"
         >
           <div className="prs-anatomy-desc">
-            {snap.series.length > 1 ? `Series ${s.index + 1}: ` : ''}
-            {s.description}
+            <span>
+              {snap.series.length > 1 ? `Series ${s.index + 1}: ` : ''}
+              {s.description}
+            </span>
+            {surfacesOffered(s) ? (
+              <button
+                type="button"
+                className="prs-btn"
+                aria-pressed={shown3d?.series === s.index}
+                data-rs-anatomy-3d-open={s.index}
+                title={
+                  shown3d?.series === s.index
+                    ? 'Close the 3D view'
+                    : 'These structures in 3D, as the tab colours and switches them'
+                }
+                onClick={() =>
+                  setView3d(
+                    shown3d?.series === s.index ? null : { series: s.index, enlarged: false }
+                  )
+                }
+              >
+                3D
+              </button>
+            ) : null}
           </div>
           {resampledNote(s) ? (
             <div
@@ -476,6 +636,30 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
             >
               {resampledNote(s)}
             </div>
+          ) : null}
+          {shown3d?.series === s.index ? (
+            shown3d.enlarged ? (
+              <div
+                className="prs-3d-away"
+                data-rs-anatomy-3d-away=""
+              >
+                Enlarged over the images.
+                <button
+                  type="button"
+                  className="prs-btn"
+                  onClick={back}
+                >
+                  Back to the pane
+                </button>
+              </div>
+            ) : (
+              <Anatomy3DView
+                store={store}
+                series={s.index}
+                onEnlarge={() => setView3d({ series: s.index, enlarged: true })}
+                onClose={() => setView3d(null)}
+              />
+            )
           ) : null}
           {s.tasks.map(t => (
             <Task
@@ -506,6 +690,16 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
         TotalSegmentator anatomy, drawn for orientation: not reviewed, never saved as a
         segmentation.
       </div>
+      {shown3d?.enlarged && rootEl ? (
+        <Enlarged3D
+          store={store}
+          series={shown3d.series}
+          doc={rootEl.ownerDocument}
+          column={rootEl.closest<HTMLElement>('[data-pacsai-rs-pane]')?.parentElement ?? null}
+          onBack={back}
+          onClose={() => setView3d(null)}
+        />
+      ) : null}
     </div>
   );
 }

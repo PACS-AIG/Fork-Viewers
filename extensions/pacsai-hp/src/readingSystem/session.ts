@@ -31,6 +31,7 @@ import {
   type CornerstoneApi,
   type OverlayServices,
 } from './anatomy/anatomyOverlay';
+import { anatomy3dHarness } from './anatomy/Anatomy3DView';
 import { createAnatomyStore, webDigest, type AnatomyStore } from './anatomy/anatomyStore';
 import { platformGunzip } from './anatomy/nifti';
 import type { RsMode } from './rsContract';
@@ -315,6 +316,7 @@ function installHarnessHook(win: Window): void {
                 ...s,
                 anatomy: anatomy?.harnessState() ?? null,
                 anatomyOverlay: overlay?.harnessState() ?? null,
+                anatomy3d: anatomy3dHarness(),
               }
             : null;
         },

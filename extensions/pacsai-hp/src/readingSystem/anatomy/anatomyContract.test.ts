@@ -1,6 +1,6 @@
 import { RsRefused } from '../rsContract';
 import { phraseOf, readAffine, readAnatomy } from './anatomyContract';
-import { AFFINE, SERIES, makeAnatomyDoc } from './anatomyTestData';
+import { AFFINE, SERIES, makeAnatomyDoc, makeSurfaces } from './anatomyTestData';
 
 const series = (over: Record<string, unknown> = {}) =>
   readAnatomy(makeAnatomyDoc({}, over), 'clinical').series[0];
@@ -380,6 +380,55 @@ describe('the anatomy artifact as the pane reads it (RS-36, contract 1.10)', () 
       features: {},
     });
     expect(labels[4].radiomics).toBeNull(); // no state
+  });
+
+  it("reads contract 1.17's surfaces: the labelmap's own file, each label's place in it, or why none were made; a malformed one is left out with the reason", () => {
+    const lm = makeAnatomyDoc().series[0].labelmaps as Array<Record<string, unknown>>;
+    const fx = makeSurfaces('total', [
+      { value: 1, centre: [0, 0, 0] },
+      { value: 2, centre: [5, 5, 5] },
+    ]);
+    const withPlaces = (lm[1].labels as Array<Record<string, unknown>>).map(l => ({
+      ...l,
+      surface: fx.index[l.value as number],
+    }));
+    const [cavities, total, vertebrae] = series({
+      labelmaps: [
+        { ...lm[0], surfacesWithheld: '  containers get no surfaces  ' },
+        { ...lm[1], labels: withPlaces, surfaces: fx.describe('e'.repeat(64)) },
+        // Another labelmap's file (total's, not 0.vertebrae_pp's).
+        { ...lm[2], surfaces: fx.describe('e'.repeat(64)) },
+      ],
+    }).labelmaps;
+    expect(cavities).toMatchObject({
+      surfaces: null,
+      surfacesWithheld: 'containers get no surfaces',
+      surfacesInvalid: null,
+    });
+    expect(total.surfaces).toEqual({
+      file: 'anatomy/0.total.surfaces.bin.gz',
+      basename: '0.total.surfaces.bin.gz',
+      sha256: 'e'.repeat(64),
+      vertices: 8,
+      triangles: 8,
+      triangleBudget: 50000,
+    });
+    expect(total.labels.map(l => l.surface)).toEqual([fx.index[1], fx.index[2]]);
+    expect(vertebrae).toMatchObject({
+      surfaces: null,
+      surfacesInvalid: 'its surfaces file is named for another labelmap',
+    });
+    // Malformed: left out with the reason; the labelmap itself still draws.
+    const bad = series({
+      labelmaps: [{ ...lm[1], surfaces: { ...fx.describe('e'.repeat(64)), use: 'measurement' } }],
+    }).labelmaps[0];
+    expect(bad.surfaces).toBeNull();
+    expect(bad.surfacesInvalid).toMatch(/not for display/);
+    expect(bad.labels).toHaveLength(2);
+    // Before 1.17: none of it.
+    const plain = series().labelmaps[1];
+    expect(plain).toMatchObject({ surfaces: null, surfacesWithheld: null, surfacesInvalid: null });
+    expect(plain.labels[0].surface).toBeNull();
   });
 
   it('takes an affine only as a 4 x 4 whose last row is 0 0 0 1 and whose 3 x 3 is invertible', () => {

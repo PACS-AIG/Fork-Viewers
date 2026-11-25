@@ -115,9 +115,12 @@ describe('the reading system client (RS-36)', () => {
     expect(doc.series[0].labelmaps).toHaveLength(3);
     const bytes = await client.anatomyFile('a b', '0.total.labels.nii.gz');
     expect(Array.from(bytes)).toEqual(Array.from(gz));
+    // 1.17: a labelmap's surfaces, by the same route.
+    await client.anatomyFile('a b', '0.total.surfaces.bin.gz');
     expect(calls.map(c => c.url)).toEqual([
       '/api/reading-system/studies/a%20b/anatomy',
       '/api/reading-system/studies/a%20b/anatomy/0.total.labels.nii.gz',
+      '/api/reading-system/studies/a%20b/anatomy/0.total.surfaces.bin.gz',
     ]);
     calls.forEach(c => {
       expect(c.init?.credentials).toBe('include');
@@ -142,6 +145,9 @@ describe('the reading system client (RS-36)', () => {
       '0.total.labels.nii.gz/..',
       '0.Total.labels.nii.gz',
       'a.total.labels.nii.gz',
+      '0.total.surfaces.bin',
+      '../0.total.surfaces.bin.gz',
+      '0.total.surfaces.bin.gz.labels.nii',
       '',
     ];
     for (let n = 0; n < bad.length; n++) {

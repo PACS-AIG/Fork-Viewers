@@ -105,7 +105,21 @@ const CSS = `
 .prs-seg button { padding: 2px 10px; border: 0; background: #101A26; color: #9AA8B8; font: inherit; cursor: pointer; }
 .prs-seg button[aria-pressed="true"] { background: #15263A; color: #E8EEF5; }
 .prs-seg button:disabled { opacity: 0.5; cursor: default; }
-.prs-anatomy-desc { margin: 2px 0 4px; font-size: 12px; color: #7F8EA0; }
+.prs-anatomy-desc { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; font-size: 12px; color: #7F8EA0; }
+.prs-anatomy-desc > span { flex: 1 1 auto; min-width: 0; }
+.prs-anatomy-desc .prs-btn, .prs-3d-bar .prs-btn, .prs-3d-away .prs-btn { padding: 1px 8px; font: 12px/16px system-ui, -apple-system, "Segoe UI", sans-serif; }
+.prs-3d { display: flex; flex-direction: column; margin: 4px 0 8px; border: 1px solid #1B2735; border-radius: 6px; background: #0A111B; overflow: hidden; }
+.prs-3d-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 4px 6px; border-bottom: 1px solid #1B2735; }
+.prs-3d-status { flex: 1 1 160px; min-width: 0; font-size: 12px; line-height: 16px; color: #9AA8B8; }
+.prs-3d-view { position: relative; height: 200px; min-height: 0; overflow: hidden; }
+.prs-3d-view canvas { display: block; width: 100%; height: 100%; }
+.prs-3d-foot { padding: 3px 8px; font-size: 11px; line-height: 15px; color: #6B7A8C; border-top: 1px solid #1B2735; }
+.prs-3d-away { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; padding: 4px 8px; border: 1px dashed #2B3A4D; border-radius: 6px; font-size: 12px; color: #9AA8B8; }
+/* The enlarged 3D view: over the images, on the dock's layer (DOCK_Z_INDEX), outside the pane's root. */
+.prs-3d-overlay { position: fixed; z-index: 40; display: flex; box-sizing: border-box; color: #E8EEF5; font: 13px/18px system-ui, -apple-system, "Segoe UI", sans-serif; border-radius: 6px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6); outline: none; }
+.prs-3d-overlay * { box-sizing: border-box; }
+.prs-3d-overlay .prs-3d { flex: 1 1 auto; margin: 0; min-width: 0; }
+.prs-3d-overlay .prs-3d-view { flex: 1 1 auto; height: auto; }
 .prs-anatomy-resampled { margin: 0 0 6px; font-size: 11px; line-height: 15px; color: #7F8EA0; }
 .prs-anatomy-task { margin: 4px 0 8px; }
 .prs-anatomy-task header { display: flex; align-items: center; gap: 6px; }

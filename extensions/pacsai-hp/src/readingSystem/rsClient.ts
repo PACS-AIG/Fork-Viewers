@@ -15,7 +15,8 @@
  *   GET  /snapshots/{snapshotId}            (the patient key the events carry)
  *   POST /events                            (one intake event; 200, 409, 422)
  *   GET  /studies/{uid}/anatomy             (the anatomy artifact, contract 1.10)
- *   GET  /studies/{uid}/anatomy/{file}      (one of its labelmaps: NIfTI-1, gzip)
+ *   GET  /studies/{uid}/anatomy/{file}      (one of its labelmaps: NIfTI-1, gzip;
+ *                                            or, 1.17, a labelmap's surfaces: gzip)
  *
  * Each document read is checked against the contract's rules for a consumer
  * (rsContract.checkDocument): this major, this viewer's mode, the artifact.
@@ -34,6 +35,7 @@ import {
 } from './rsContract';
 import type { RsIntakeEvent } from './rsEvents';
 import { readAnatomy, type RsAnatomy } from './anatomy/anatomyContract';
+import { SURFACES_BASENAME } from './anatomy/anatomySurfaces';
 
 export type FetchLike = (
   url: string,
@@ -78,7 +80,7 @@ export interface RsClient {
   postEvent(doc: RsIntakeEvent): Promise<RsIntakeResponse>;
   /** The study's anatomy artifact (404 when it has none). */
   anatomy(study: string): Promise<RsAnatomy>;
-  /** One of its labelmaps' bytes, by its file name under `anatomy/`. */
+  /** One of its labelmaps' bytes, or a labelmap's surfaces (1.17), by its file name under `anatomy/`. */
   anatomyFile(study: string, basename: string): Promise<Uint8Array>;
 }
 
@@ -168,7 +170,7 @@ export function createRsClient({
       return readAnatomy(doc, mode);
     },
     async anatomyFile(uid, basename) {
-      if (!LABELMAP_BASENAME.test(basename)) {
+      if (!LABELMAP_BASENAME.test(basename) && !SURFACES_BASENAME.test(basename)) {
         throw new RsRefused('A labelmap was named outside the contract’s anatomy files.');
       }
       const res = await fetchFn(`${root}${study(uid)}/anatomy/${basename}`, {
