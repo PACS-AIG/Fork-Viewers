@@ -22,6 +22,7 @@ import { vertebraColor } from './anatomyColors';
 import {
   alphasFor,
   createAnatomyStore,
+  isContainerTask,
   readSettings,
   SPOTLIGHT_DIM,
   taskTitle,
@@ -769,5 +770,13 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(store.getSnapshot().phase).toBe('idle');
     expect(store.getSnapshot().series).toEqual([]);
     expect(taskTitle('lung_vessels')).toBe('Lung vessels');
+  });
+
+  it("hides and sinks only the tasks that wrap the body, not a head's glands and cavities", () => {
+    expect(isContainerTask('trunk_cavities')).toBe(true);
+    expect(isContainerTask('body_cavities')).toBe(true);
+    expect(isContainerTask('body')).toBe(true);
+    expect(isContainerTask('head_glands_cavities')).toBe(false);
+    expect(isContainerTask('total')).toBe(false);
   });
 });
