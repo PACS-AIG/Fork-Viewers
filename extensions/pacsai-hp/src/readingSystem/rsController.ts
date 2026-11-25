@@ -40,8 +40,11 @@ import {
 import { draftView, selectionOf, type DraftPassage } from './rsModel';
 
 export type RsPhase = 'idle' | 'loading' | 'ready' | 'not_served' | 'refused' | 'failed';
-/** `anatomy`: the study's anatomy layers (anatomy/AnatomyTab), when it has them. */
-export type RsTab = 'anatomy' | 'draft' | 'inbox' | 'changes';
+/**
+ * `anatomy`: the study's anatomy layers (anatomy/AnatomyTab), when it has them;
+ * `pathgrade`: PathGrade's research showcase on public cases (pathgrade/PathGradeTab).
+ */
+export type RsTab = 'anatomy' | 'draft' | 'inbox' | 'changes' | 'pathgrade';
 
 export interface RsNotice {
   level: 'info' | 'warn' | 'error';

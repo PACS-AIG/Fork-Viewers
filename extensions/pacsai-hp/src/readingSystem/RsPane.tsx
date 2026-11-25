@@ -17,7 +17,9 @@
  *   - Inbox: each material change with its claims, its exact consequence
  *     preview and any patch of the reader's own wording; Accept / Reject;
  *   - Changes: the published draft against the latest evidence, and the
- *     draft's revisions with Undo.
+ *     draft's revisions with Undo;
+ *   - PathGrade (research): PathGrade's showcase on public kidney tumours,
+ *     never this patient (pathgrade/PathGradeTab), read when first opened.
  * The Copilot is a card over the tabs (Escape or its Close button closes it).
  *
  * Rendered with its own React root, outside OHIF's tree, like the dock it sits
@@ -26,6 +28,8 @@
 import React, { useEffect, useRef, useSyncExternalStore } from 'react';
 import { AnatomyTab } from './anatomy/AnatomyTab';
 import type { AnatomySnapshot, AnatomyStore } from './anatomy/anatomyStore';
+import { PathGradeTab } from './pathgrade/PathGradeTab';
+import type { ShowcaseStore } from './pathgrade/showcaseStore';
 import type { RsController, RsSnapshot, RsTab } from './rsController';
 import {
   changeListView,
@@ -135,6 +139,36 @@ const CSS = `
 .prs-research-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .prs-anatomy-notes { margin: 6px 0; padding-left: 18px; color: #F5C36B; }
 .prs-anatomy-foot { margin-top: 8px; font-size: 11px; color: #6B7A8C; }
+.prs-pathgrade { max-width: 1320px; }
+.prs-pg-banner { margin: 2px 0 4px; padding: 6px 8px; border: 1px dashed #4B3F72; border-radius: 6px; background: #120F1F; color: #F5C36B; }
+.prs-pg-credit { font-size: 11px; color: #9AA8B8; }
+.prs-pg-title { margin: 10px 0 2px; font-size: 14px; font-weight: 600; color: #D8D0FA; }
+.prs-pg-section { margin: 10px 0 0; }
+.prs-pg-section h4 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: #E8EEF5; }
+.prs-pg-quiet { margin: 2px 0; color: #9AA8B8; }
+.prs-pg-strips { margin: 2px 0; padding-left: 18px; }
+.prs-pg-finding { margin-right: 6px; color: #B7A8F0; }
+.prs-pg-text p { margin: 0 0 6px; }
+.prs-pg-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px 12px; margin: 2px 0 8px; }
+.prs-pg-facts dt { color: #9AA8B8; }
+.prs-pg-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.prs-pg-tablewrap { overflow-x: auto; margin: 2px 0 8px; }
+.prs-pg-table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.prs-pg-table caption { caption-side: top; text-align: left; padding-bottom: 2px; color: #9AA8B8; }
+.prs-pg-table th, .prs-pg-table td { padding: 2px 8px; border-bottom: 1px solid #1B2735; text-align: left; white-space: nowrap; }
+.prs-pg-table th { color: #9AA8B8; font-weight: 600; }
+.prs-pg-figure { margin: 2px 0 10px; }
+.prs-pg-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.prs-pg-panel { flex: 1 1 160px; max-width: 420px; min-width: 0; margin: 0; }
+.prs-pg-panel figcaption, .prs-pg-figcaption, .prs-pg-larger-caption { margin-top: 2px; font-size: 11px; line-height: 15px; color: #9AA8B8; }
+.prs-pg-picture { display: block; width: 100%; padding: 0; border: 1px solid #2B3A4D; border-radius: 4px; background: #000; cursor: zoom-in; }
+.prs-pg-picture img, .prs-pg-larger img { display: block; width: 100%; height: auto; }
+.prs-pg-placeholder { display: flex; align-items: center; justify-content: center; width: 100%; padding: 6px; border: 1px dashed #2B3A4D; border-radius: 4px; color: #7F8EA0; font-size: 11px; text-align: center; }
+.prs-pg-larger { margin: 8px 0 0; padding: 6px; border: 1px solid #4B3F72; border-radius: 6px; background: #05090F; }
+.prs-pg-larger .prs-btn { margin-top: 6px; }
+.prs-pg-sources { margin-top: 10px; font-size: 11px; color: #7F8EA0; }
+.prs-pg-sources summary { cursor: pointer; }
+.prs-pg-sources ul { margin: 2px 0; padding-left: 18px; }
 `;
 
 function useInjectedStyle(doc: Document | undefined): void {
@@ -155,6 +189,10 @@ const TABS: Array<{ id: RsTab; label: string }> = [
   { id: 'changes', label: 'Changes' },
 ];
 const ANATOMY_TAB: { id: RsTab; label: string } = { id: 'anatomy', label: 'Anatomy' };
+const PATHGRADE_TAB: { id: RsTab; label: string } = {
+  id: 'pathgrade',
+  label: 'PathGrade (research)',
+};
 
 // A pane without an anatomy store: no Anatomy tab.
 const NO_ANATOMY: AnatomySnapshot = {
@@ -520,10 +558,12 @@ export function RsPane({
   controller,
   doc,
   anatomy = null,
+  pathgrade = null,
 }: {
   controller: RsController;
   doc?: Document;
   anatomy?: AnatomyStore | null;
+  pathgrade?: ShowcaseStore | null;
 }) {
   useInjectedStyle(doc ?? (typeof document !== 'undefined' ? document : undefined));
   const snap = useSyncExternalStore(
@@ -546,8 +586,15 @@ export function RsPane({
       controller.offerTab('anatomy');
     }
   }, [anatomyReady, paneReady, controller]);
-  const tabs = withAnatomy ? [ANATOMY_TAB, ...TABS] : TABS;
-  const tab: RsTab = snap.tab === 'anatomy' && !withAnatomy ? 'draft' : snap.tab;
+  const tabs = [
+    ...(withAnatomy ? [ANATOMY_TAB] : []),
+    ...TABS,
+    ...(pathgrade ? [PATHGRADE_TAB] : []),
+  ];
+  const tab: RsTab =
+    (snap.tab === 'anatomy' && !withAnatomy) || (snap.tab === 'pathgrade' && !pathgrade)
+      ? 'draft'
+      : snap.tab;
   const structureCount = Object.keys(anat.structures).length;
   const docs = snap.docs;
   const inboxCount = docs?.inbox.entries.length ?? 0;
@@ -694,6 +741,11 @@ export function RsPane({
           >
             {tab === 'anatomy' && anatomy ? (
               <AnatomyTab store={anatomy} />
+            ) : tab === 'pathgrade' && pathgrade ? (
+              <PathGradeTab
+                store={pathgrade}
+                evidence={docs?.evidence ?? null}
+              />
             ) : tab === 'draft' ? (
               <Draft
                 snap={snap}

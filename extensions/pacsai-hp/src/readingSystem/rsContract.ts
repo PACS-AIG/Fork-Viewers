@@ -279,6 +279,8 @@ export interface RsFindingEvidence {
   } | null;
   classAlternatives?: RsClassAlternative[];
   questions?: RsQuestion[];
+  /** Its reference-case strip (FINAL_SPEC §2.14), shown only from a qualified characterizer. */
+  referenceCaseStrip?: { state: string; reason: string; display: string } | null;
   pending?: unknown[];
   signing?: {
     requiresAcknowledgementAgainstDisplayedRevision?: boolean;
