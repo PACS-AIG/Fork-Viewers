@@ -410,6 +410,26 @@ export function fakeViewerServices(start: { numRows: number; numCols: number; id
             viewportMatchDetails: new Map(stage.ids.map(id => [id, {}])),
           }
         : undefined,
+    /**
+     * OHIF goes back to a stage as it was (its grid kept, the 3D cell in it): the stage, its change,
+     * then that grid again.
+     */
+    restore(
+      at: { ids: string[]; rows: number; cols: number },
+      numRows: number,
+      numCols: number,
+      viewports: Array<Record<string, unknown>>
+    ) {
+      stage = at;
+      emit('protocol');
+      void grid.setLayout({
+        numRows,
+        numCols,
+        isHangingProtocolLayout: true,
+        layoutOptions: viewports.map(v => ({ x: v.x, y: v.y, width: v.width, height: v.height })),
+        findOrCreateViewport: (i: number) => (viewports[i] ? { ...viewports[i] } : undefined),
+      });
+    },
     /** The protocol lays out a stage: its change, then its layout (the grid's own subscriber in OHIF). */
     hang(numRows: number, numCols: number, ids: string[]) {
       stage = { ids, rows: numRows, cols: numCols };
@@ -454,5 +474,8 @@ export function fakeViewerServices(start: { numRows: number; numCols: number; id
       return v ? [v.x, v.y, v.width, v.height].map(n => Math.round(n * 1000) / 1000) : null;
     },
     layoutsSet: () => layouts,
+    /** The grid's viewports as they are (copies), boxes and all. */
+    snapshot: () =>
+      [...state.viewports.values()].map(v => ({ ...v })) as Array<Record<string, unknown>>,
   };
 }
