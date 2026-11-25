@@ -16,6 +16,9 @@
  *     series on it. Out stays out for the study until the button puts it back.
  *   - Off: the cell goes, the stage's layout as the protocol made it; the 3D
  *     button opens the model in the tab, as before.
+ *   - OHIF puts a stage back as it was, the cell in it, when the reader goes
+ *     back to it: the cell keeps each stage's layout to put back (and, for a
+ *     stage it never saw, takes the stage's own shape).
  *   - Never without WebGL: nothing could be drawn.
  *
  * The cell looks at the grid a moment after anything changes (OHIF's grid
@@ -64,7 +67,11 @@ interface Subscription {
 }
 /** What the cell reads of the protocol's active stage. */
 interface ActiveProtocol {
-  stage?: { viewportStructure?: { properties?: { rows?: number; columns?: number } } };
+  stage?: {
+    viewportStructure?: {
+      properties?: { rows?: number; columns?: number; layoutOptions?: Partial<CellBox>[] };
+    };
+  };
   viewportMatchDetails?: Map<string, unknown>;
 }
 export interface CellServices {
@@ -158,7 +165,8 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
   let displaySet: Record<string, unknown> | null = null;
   let sets = 0;
   let cells = 0;
-  let cellViewportId: string | null = null;
+  // The cells' viewports the cell made (OHIF may bring one back: a stage it goes back to, as it was).
+  const cellIds = new Set<string>();
   // Out by the reader (the 3D button, the cell's x, a series dropped on it), for this study.
   let out = false;
   // The 3D button put the cell in: it joins the layout there is, the reader's too.
@@ -167,14 +175,15 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
   let expected: string | null = null;
   let expectedAt = 0;
   let expectedShown = false;
-  // The stage's layout before the cell, to put back.
-  let base: {
+  // Each stage's layout before the cell, by its viewports, to put back (OHIF keeps a stage as it was, the
+  // cell in it, when the reader goes back to it).
+  type Base = {
     numRows: number;
     numCols: number;
     layoutOptions: CellBox[];
-    viewportIds: string[];
     activeViewportId: string | null;
-  } | null = null;
+  };
+  const bases = new Map<string, Base>();
   let webglOk: boolean | null = null;
   let changes = 0;
   let destroyed = false;
@@ -246,6 +255,33 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
     );
   };
 
+  /** The protocol's own layout for these viewports, when they are its stage's (in its order). */
+  const stageLayout = (vps: GridViewport[]): Base | null => {
+    let active: ActiveProtocol | undefined;
+    try {
+      active = hp.getActiveProtocol?.();
+    } catch (_) {
+      return null;
+    }
+    const ids = active?.viewportMatchDetails ? [...active.viewportMatchDetails.keys()] : [];
+    const props = active?.stage?.viewportStructure?.properties;
+    if (
+      !props?.rows ||
+      !props.columns ||
+      ids.length !== vps.length ||
+      ids.some((id, i) => vps[i].viewportId !== id)
+    ) {
+      return null;
+    }
+    const given = props.layoutOptions ?? [];
+    const layoutOptions =
+      given.length === vps.length &&
+      given.every(o => [o.x, o.y, o.width, o.height].every(n => typeof n === 'number'))
+        ? (given as CellBox[]).map(o => ({ x: o.x, y: o.y, width: o.width, height: o.height }))
+        : gridBoxes(props.rows, props.columns, vps.length);
+    return { numRows: props.rows, numCols: props.columns, layoutOptions, activeViewportId: null };
+  };
+
   const ensureDisplaySet = (): Record<string, unknown> | null => {
     const u = uid();
     if (displaySet && u && services.displaySetService.getDisplaySetByUID(u)) {
@@ -304,17 +340,16 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
       return;
     }
     const boxes = vps.map(boxOf);
-    base = {
+    bases.set(vps.map(v => v.viewportId).join(','), {
       numRows: state.layout.numRows,
       numCols: state.layout.numCols,
       layoutOptions: boxes,
-      viewportIds: vps.map(v => v.viewportId),
       activeViewportId: state.activeViewportId ?? null,
-    };
-    const next = withAnatomy3dCell(base.numRows, base.numCols, boxes);
+    });
+    const next = withAnatomy3dCell(state.layout.numRows, state.layout.numCols, boxes);
     cells++;
     const cellId = `pacsai-anatomy-3d-${cells}`;
-    cellViewportId = cellId;
+    cellIds.add(cellId);
     setLayout(
       {
         numRows: next.numRows,
@@ -342,13 +377,12 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
     if (rest.length === vps.length) {
       return;
     }
-    const sameAsBase =
-      base !== null &&
-      base.viewportIds.length === rest.length &&
-      base.viewportIds.every((id, i) => rest[i]?.viewportId === id);
+    // The layout these viewports had before the cell; else, being the stage's, the stage's own shape;
+    // else a grid as square as it goes.
+    const known = bases.get(rest.map(v => v.viewportId).join(',')) ?? stageLayout(rest);
     let layout: { numRows: number; numCols: number; layoutOptions: CellBox[] };
-    if (sameAsBase && base) {
-      layout = base;
+    if (known) {
+      layout = known;
     } else {
       const cols = Math.max(1, Math.ceil(Math.sqrt(rest.length)));
       const rows = Math.max(1, Math.ceil(rest.length / cols));
@@ -361,8 +395,8 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
         numRows: layout.numRows,
         numCols: layout.numCols,
         layoutOptions: layout.layoutOptions,
-        activeViewportId: (activeIsCell ? base?.activeViewportId : active) ?? undefined,
-        isHangingProtocolLayout: sameAsBase,
+        activeViewportId: (activeIsCell ? known?.activeViewportId : active) ?? undefined,
+        isHangingProtocolLayout: Boolean(known),
         findOrCreateViewport: (position: number) =>
           position < rest.length ? copyOf(rest[position]) : undefined,
       },
@@ -394,12 +428,13 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
         return;
       }
     }
-    // A series dropped on the cell: the reader's choice, out until the 3D button.
-    const dropped = cellViewportId ? state.viewports.get(cellViewportId) : undefined;
-    if (dropped && !isCell(dropped)) {
-      out = true;
-      forced = false;
-      cellViewportId = null;
+    // A series dropped on a cell: the reader's choice, out until the 3D button.
+    for (const v of viewportsOf(state)) {
+      if (cellIds.has(v.viewportId) && !isCell(v)) {
+        cellIds.delete(v.viewportId);
+        out = true;
+        forced = false;
+      }
     }
     const isShown = viewportsOf(state).some(isCell);
     if (want()) {
@@ -437,8 +472,8 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
       out = false;
       forced = false;
       displaySet = null;
-      base = null;
-      cellViewportId = null;
+      bases.clear();
+      cellIds.clear();
       later();
       notify();
     },
@@ -447,8 +482,8 @@ export function createAnatomy3dCell(deps: Anatomy3dCellDeps): Anatomy3dCell {
       out = false;
       forced = false;
       displaySet = null;
-      base = null;
-      cellViewportId = null;
+      bases.clear();
+      cellIds.clear();
       notify();
     },
     setting,

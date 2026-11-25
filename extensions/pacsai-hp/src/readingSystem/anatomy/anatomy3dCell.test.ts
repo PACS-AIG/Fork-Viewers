@@ -145,6 +145,40 @@ describe("the 3D anatomy cell in the viewer's grid (RS-36)", () => {
     expect(cell.harnessState()).toMatchObject({ fromProtocol: true, shown: true });
   });
 
+  it("comes back with a stage OHIF puts back as it was, and goes out to that stage's own layout", async () => {
+    const { v, cell } = setup();
+    made.push(cell);
+    cell.enter('study-1');
+    await flush();
+    v.hp.hang(1, 3, ['ax', 'cor', 'sag']);
+    await flush();
+    expect(v.layout()).toBe('2x2');
+    const first = v.snapshot();
+    v.hp.hang(1, 2, ['cur', 'pri']);
+    await flush();
+    expect(v.layout()).toBe('1x3');
+    // Back to the first stage, which OHIF puts back as it was: its three viewports and the cell.
+    v.hp.restore({ ids: ['ax', 'cor', 'sag'], rows: 1, cols: 3 }, 2, 2, first);
+    await flush();
+    expect([v.layout(), cell.shown()]).toEqual(['2x2', true]);
+    // The 3D button: that stage's own 1x3, not the other stage's layout, nor a square grid.
+    cell.toggle();
+    await flush();
+    expect([v.layout(), v.ids()]).toEqual(['1x3', ['ax', 'cor', 'sag']]);
+    expect(v.boxOf('sag')).toEqual([0.667, 0, 0.333, 1]);
+    cell.toggle();
+    await flush();
+    expect(v.layout()).toBe('2x2');
+    // A series dropped on the cell OHIF brought back takes it out, as on any cell.
+    v.hp.hang(1, 2, ['cur', 'pri']);
+    await flush();
+    v.hp.restore({ ids: ['ax', 'cor', 'sag'], rows: 1, cols: 3 }, 2, 2, first);
+    await flush();
+    v.grid.drop(v.ids()[3], 'ds-other');
+    await flush();
+    expect(cell.harnessState()).toMatchObject({ shown: false, out: true });
+  });
+
   it('goes with the setting off, the stage as the protocol laid it out, and comes back with it on', async () => {
     const { v, cell, kept } = setup();
     made.push(cell);
