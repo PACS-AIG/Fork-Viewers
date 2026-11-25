@@ -55,6 +55,9 @@ import {
   enterReadingSystem,
   setReadingSystemUser,
   setReadingSystemServices,
+  readingSystemMenuOptions,
+  ANATOMY3D_SOP_CLASS_HANDLER_ID,
+  ANATOMY3D_VIEWPORT_NAMESPACE,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 
@@ -157,6 +160,8 @@ const arrangeMenuOptions = () =>
 // (milestone 7) Arrange there too in a narrow window.
 const readingMenuOptions = () => [
   ...(currentReadingDock()?.menuOptions() ?? []),
+  // RS-36 (25 Nov): the 3D anatomy in the viewports, on or off (the reading system's).
+  ...readingSystemMenuOptions(),
   ...arrangeMenuOptions(),
   ...sessionStudyMenuOptions(),
 ];
@@ -304,6 +309,15 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
               // The series rail (phase 1 PR 4): the study browser as one narrow,
               // fixed-width column, closed again if the reader closed it.
               ...railLayoutProps(),
+              // RS-36 (25 Nov): the reading system's 3D anatomy cell in the grid shows
+              // its own display set in its own viewport.
+              viewports: [
+                ...(((layout.props as { viewports?: unknown[] }).viewports ?? []) as unknown[]),
+                {
+                  namespace: ANATOMY3D_VIEWPORT_NAMESPACE,
+                  displaySetsToDisplay: [ANATOMY3D_SOP_CLASS_HANDLER_ID],
+                },
+              ],
               // 18 Oct: the report's settings and its quiet_workspace switch in
               // the viewer's gear menu (the report's own header row folds away).
               headerMenuOptions: readingMenuOptions,

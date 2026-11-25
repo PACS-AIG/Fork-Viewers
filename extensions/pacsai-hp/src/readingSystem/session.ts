@@ -32,6 +32,13 @@ import {
   type OverlayServices,
 } from './anatomy/anatomyOverlay';
 import { anatomy3dHarness } from './anatomy/Anatomy3DView';
+import {
+  ANATOMY3D_SETTING_KEY,
+  createAnatomy3dCell,
+  type Anatomy3dCell,
+  type CellServices,
+} from './anatomy/anatomy3dCell';
+import { webglAvailable } from './anatomy/webgl';
 import { createAnatomyStore, webDigest, type AnatomyStore } from './anatomy/anatomyStore';
 import { platformGunzip } from './anatomy/nifti';
 import type { RsMode } from './rsContract';
@@ -138,6 +145,7 @@ let host: RsHost | null = null;
 let offDock: (() => void) | null = null;
 let anatomy: AnatomyStore | null = null;
 let overlay: AnatomyOverlay | null = null;
+let anatomy3dCell: Anatomy3dCell | null = null;
 let offAnatomyFollow: (() => void) | null = null;
 // The study the pane was entered for (the anatomy follows it once it is served).
 let enteredStudy: string | null = null;
@@ -237,6 +245,78 @@ function ensureOverlay(win: Window): void {
   });
 }
 
+/**
+ * The 3D anatomy cell in the viewer's grid (one per document): needs the
+ * viewer's grid, hanging protocol and display set services.
+ */
+function ensureAnatomy3dCell(win: Window): void {
+  if (!anatomy || anatomy3dCell?.store === anatomy) {
+    return;
+  }
+  anatomy3dCell?.destroy();
+  anatomy3dCell = null;
+  const s = viewerServices as unknown as Partial<CellServices> | null;
+  const grid = s?.viewportGridService;
+  const hp = s?.hangingProtocolService;
+  const dss = s?.displaySetService;
+  if (
+    typeof grid?.subscribe !== 'function' ||
+    typeof grid.setLayout !== 'function' ||
+    typeof grid.getState !== 'function' ||
+    !grid.EVENTS ||
+    typeof hp?.subscribe !== 'function' ||
+    !hp.EVENTS ||
+    typeof dss?.addDisplaySets !== 'function' ||
+    typeof dss.getDisplaySetByUID !== 'function'
+  ) {
+    return;
+  }
+  anatomy3dCell = createAnatomy3dCell({
+    services: { viewportGridService: grid, hangingProtocolService: hp, displaySetService: dss },
+    store: anatomy,
+    storage: {
+      get: () => {
+        try {
+          return win.localStorage.getItem(ANATOMY3D_SETTING_KEY);
+        } catch (_) {
+          return null;
+        }
+      },
+      set: value => {
+        try {
+          win.localStorage.setItem(ANATOMY3D_SETTING_KEY, value);
+        } catch (_) {
+          /* a private window */
+        }
+      },
+    },
+    webgl: () => webglAvailable(win.document),
+  });
+}
+
+/**
+ * The reading system's items for the viewer's gear menu (radcopilot's): the
+ * 3D anatomy in the viewports, on or off. None while the pane is not entered.
+ */
+export function readingSystemMenuOptions(): Array<{
+  title: string;
+  icon: string;
+  onClick: () => void;
+}> {
+  const cell = anatomy3dCell;
+  if (!cell) {
+    return [];
+  }
+  const on = cell.setting();
+  return [
+    {
+      title: `3D anatomy in the viewports: ${on ? 'On' : 'Off'}`,
+      icon: 'settings',
+      onClick: () => cell.setSetting(!on),
+    },
+  ];
+}
+
 /** This document's anatomy layers, while the reading system is configured and entered. */
 export function currentAnatomy(): AnatomyStore | null {
   return anatomy;
@@ -265,6 +345,7 @@ export function enterReadingSystem(
   }
   const c = ensureController(win, cfg);
   ensureOverlay(win);
+  ensureAnatomy3dCell(win);
   if (!host || host.column !== column) {
     host?.destroy();
     offDock?.();
@@ -273,6 +354,7 @@ export function enterReadingSystem(
       column,
       controller: c,
       anatomy,
+      anatomy3dCell,
       setInset: px => dock.setReadingSystemInset(px),
     });
     offDock = dock.subscribe(() => {
@@ -283,6 +365,7 @@ export function enterReadingSystem(
   }
   if (study) {
     c.enter(study);
+    anatomy3dCell?.enter(study);
   }
 }
 
@@ -294,6 +377,8 @@ export function leaveReadingSystem(): void {
   host = null;
   overlay?.destroy();
   overlay = null;
+  anatomy3dCell?.destroy();
+  anatomy3dCell = null;
   enteredStudy = null;
   controller?.leave();
   anatomy?.leave();
@@ -317,6 +402,7 @@ function installHarnessHook(win: Window): void {
                 anatomy: anatomy?.harnessState() ?? null,
                 anatomyOverlay: overlay?.harnessState() ?? null,
                 anatomy3d: anatomy3dHarness(),
+                anatomy3dCell: anatomy3dCell?.harnessState() ?? null,
               }
             : null;
         },

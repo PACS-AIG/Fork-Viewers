@@ -32,6 +32,7 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { Anatomy3DView } from './Anatomy3DView';
+import type { Anatomy3dCell } from './anatomy3dCell';
 import { cssColor } from './anatomyColors';
 import {
   displayName,
@@ -514,8 +515,21 @@ function Task({
   );
 }
 
-export function AnatomyTab({ store }: { store: AnatomyStore }) {
+const noCell = { subscribe: () => () => {}, version: () => 0 };
+
+export function AnatomyTab({
+  store,
+  cell = null,
+}: {
+  store: AnatomyStore;
+  /** The 3D anatomy cell in the viewer's grid: while it is on, the 3D button works it. */
+  cell?: Anatomy3dCell | null;
+}) {
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const cellSource = cell ?? noCell;
+  useSyncExternalStore(cellSource.subscribe, cellSource.version, cellSource.version);
+  // On (the gear menu's setting) and drawable: the model is in the viewports, not in the tab.
+  const inGrid = Boolean(cell?.inGrid());
   // The series in 3D (one at a time), in the tab or enlarged over the images.
   const [view3d, setView3d] = useState<{ series: number; enlarged: boolean } | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
@@ -551,7 +565,8 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
   }
   const { settings } = snap;
   const percent = Math.round(settings.opacity * 100);
-  const shown3d = view3d && snap.series.some(s => s.index === view3d.series) ? view3d : null;
+  const shown3d =
+    !inGrid && view3d && snap.series.some(s => s.index === view3d.series) ? view3d : null;
   // The structure picked out: selected and shown, so the others fade on the images and in 3D.
   const sel = snap.selected ? snap.structures[snap.selected] : undefined;
   const picked =
@@ -634,7 +649,23 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
               {snap.series.length > 1 ? `Series ${s.index + 1}: ` : ''}
               {s.description}
             </span>
-            {surfacesOffered(s) ? (
+            {surfacesOffered(s) && inGrid && cell ? (
+              <button
+                type="button"
+                className="prs-btn"
+                aria-pressed={cell.shown()}
+                data-rs-anatomy-3d-open={s.index}
+                data-rs-anatomy-3d-grid=""
+                title={
+                  cell.shown()
+                    ? 'Take the 3D model out of the viewports'
+                    : 'The 3D model in the viewports, as the tab colours and switches it'
+                }
+                onClick={() => cell.toggle()}
+              >
+                3D
+              </button>
+            ) : surfacesOffered(s) ? (
               <button
                 type="button"
                 className="prs-btn"

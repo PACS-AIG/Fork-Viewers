@@ -17,6 +17,7 @@
  */
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { Anatomy3dCell } from './anatomy/anatomy3dCell';
 import type { AnatomyStore } from './anatomy/anatomyStore';
 import type { RsController, RsSnapshot } from './rsController';
 import { RsPane } from './RsPane';
@@ -85,6 +86,7 @@ export function createRsHost({
   column,
   controller,
   anatomy = null,
+  anatomy3dCell = null,
   setInset,
 }: {
   win: Window;
@@ -92,6 +94,8 @@ export function createRsHost({
   controller: RsController;
   /** The study's anatomy layers (the Anatomy tab), when the reading system serves them. */
   anatomy?: AnatomyStore | null;
+  /** The 3D anatomy cell in the viewer's grid, which the tab's 3D button works when it is on. */
+  anatomy3dCell?: Anatomy3dCell | null;
   /** The dock's: the island and its cover start this far below the column's top. */
   setInset: (px: number) => void;
 }): RsHost {
@@ -117,6 +121,7 @@ export function createRsHost({
       controller={controller}
       doc={doc}
       anatomy={anatomy}
+      cell={anatomy3dCell}
     />
   );
 

@@ -1,4 +1,6 @@
 import { act, fireEvent } from '@testing-library/react';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
 import { createHash } from 'crypto';
 import { gunzipSync, gzipSync } from 'zlib';
 import type { RsController, RsSnapshot } from '../rsController';
@@ -13,6 +15,8 @@ import {
   surfaceStatusLine,
   type SceneFactory,
 } from './Anatomy3DView';
+import { Anatomy3DViewport } from './Anatomy3DViewport';
+import { createAnatomy3dCell, type Anatomy3dCell } from './anatomy3dCell';
 import { readAnatomy } from './anatomyContract';
 import { createAnatomyStore, type AnatomyClient, type AnatomyTask } from './anatomyStore';
 import { overlayRect, surfacesOffered } from './AnatomyTab';
@@ -23,6 +27,7 @@ import {
   ORGANS,
   STUDY,
   VERTEBRAE,
+  fakeViewerServices,
   makeAnatomyDoc,
   makeNifti,
   makeSurfaces,
@@ -133,7 +138,11 @@ function store(plain = false) {
 }
 
 /** The pane in a report column on the window's right (the dock's place), 400 px wide below a 48 px header. */
-function mount(controller: RsController, anatomy: ReturnType<typeof createAnatomyStore>) {
+function mount(
+  controller: RsController,
+  anatomy: ReturnType<typeof createAnatomyStore>,
+  anatomy3dCell: Anatomy3dCell | null = null
+) {
   const column = document.createElement('section');
   document.body.append(column);
   column.getBoundingClientRect = () =>
@@ -150,7 +159,14 @@ function mount(controller: RsController, anatomy: ReturnType<typeof createAnatom
     }) as DOMRect;
   let host: ReturnType<typeof createRsHost> | null = null;
   act(() => {
-    host = createRsHost({ win: window, column, controller, anatomy, setInset: () => {} });
+    host = createRsHost({
+      win: window,
+      column,
+      controller,
+      anatomy,
+      anatomy3dCell,
+      setInset: () => {},
+    });
   });
   return { column, destroy: () => act(() => host?.destroy()) };
 }
@@ -436,6 +452,107 @@ describe("the Anatomy tab's 3D view (RS-36, contract 1.17)", () => {
     expect(column.querySelector('[data-rs-anatomy-3d-away]')).toBeNull();
     expect(made.every(m => m.disposed)).toBe(true);
     destroy();
+  });
+
+  it("puts the model in the viewer's grid while the cell is on: the 3D button works the cell, whose viewport draws it", async () => {
+    const { made, factory } = fakeScenes();
+    setSceneFactory(factory);
+    const s = store();
+    const v = fakeViewerServices({ numRows: 1, numCols: 1, ids: ['ax'] });
+    let kept: string | null = null;
+    const cell = createAnatomy3dCell({
+      services: v.services,
+      store: s,
+      storage: { get: () => kept, set: value => (kept = value) },
+      webgl: () => true,
+      lookMs: 0,
+    });
+    const { column, destroy } = mount(fakeController(), s, cell);
+    await act(async () => {
+      s.enter(STUDY);
+      cell.enter(STUDY);
+      await flush();
+    });
+    // The surfaces are offered: the protocol's layout gains the cell.
+    expect(v.layout()).toBe('1x2');
+    const open = column.querySelector('[data-rs-anatomy-3d-open="0"]') as HTMLButtonElement;
+    expect(open.hasAttribute('data-rs-anatomy-3d-grid')).toBe(true);
+    expect(open.getAttribute('aria-pressed')).toBe('true');
+    expect(open.title).toBe('Take the 3D model out of the viewports');
+    // The 3D button takes it out (no view in the tab), and puts it back.
+    await act(async () => {
+      fireEvent.click(open);
+      await flush();
+    });
+    expect(v.layout()).toBe('1x1');
+    expect(open.getAttribute('aria-pressed')).toBe('false');
+    expect(column.querySelector('[data-rs-anatomy-3d]')).toBeNull();
+    await act(async () => {
+      fireEvent.click(open);
+      await flush();
+    });
+    expect(v.layout()).toBe('1x2');
+
+    // The cell's viewport, as OHIF's grid mounts it in a pane: the model, no Enlarge, never the pane's.
+    const paneEl = document.createElement('div');
+    document.body.append(paneEl);
+    const paneSaw: string[] = [];
+    const root = createRoot(paneEl);
+    await act(async () => {
+      root.render(
+        <div
+          onPointerDown={() => paneSaw.push('pointerdown')}
+          onClick={() => paneSaw.push('click')}
+          onDoubleClick={() => paneSaw.push('dblclick')}
+          onWheel={() => paneSaw.push('wheel')}
+        >
+          <Anatomy3DViewport />
+        </div>
+      );
+      await flush();
+    });
+    const view = paneEl.querySelector('[data-rs-anatomy-3d="viewport"]') as HTMLElement;
+    expect(view).not.toBeNull();
+    expect(view.querySelector('[data-rs-anatomy-3d-enlarge]')).toBeNull();
+    expect(made.at(-1)?.meshes.size).toBe(3);
+    expect(anatomy3dHarness()).toMatchObject({
+      open: true,
+      where: 'viewport',
+      webgl: true,
+      actors: 3,
+    });
+    const inCell = paneEl.querySelector('[data-rs-anatomy-3d-view]') as HTMLElement;
+    fireEvent.pointerDown(inCell);
+    fireEvent.click(inCell);
+    fireEvent.doubleClick(inCell);
+    fireEvent.wheel(inCell);
+    expect(paneSaw).toEqual([]);
+    // Its x takes the cell out of the grid.
+    const x = view.querySelector('[data-rs-anatomy-3d-close]') as HTMLButtonElement;
+    expect(x.getAttribute('aria-label')).toBe('Take the 3D model out of the viewports');
+    await act(async () => {
+      fireEvent.click(x);
+      await flush();
+    });
+    expect(v.layout()).toBe('1x1');
+    expect(cell.harnessState()).toMatchObject({ shown: false, out: true });
+    act(() => root.unmount());
+
+    // Switched off: the 3D button opens the model in the tab, as before.
+    await act(async () => {
+      cell.setSetting(false);
+      await flush();
+    });
+    expect(kept).toBe('off');
+    expect(open.hasAttribute('data-rs-anatomy-3d-grid')).toBe(false);
+    await act(async () => {
+      fireEvent.click(open);
+      await flush();
+    });
+    expect(column.querySelector('[data-rs-anatomy-3d="inline"]')).not.toBeNull();
+    expect(v.layout()).toBe('1x1');
+    destroy();
+    cell.destroy();
   });
 
   it('says so when the page draws no WebGL', async () => {

@@ -479,6 +479,41 @@ async function drawnHalves(page: Page, el: Locator): Promise<{ left: number; rig
     return { left, right };
   }, png);
 }
+/**
+ * Drawn pixels (as drawnHalves counts them) near the sides of an element's
+ * middle rows (the model is centred; the page's notices may cover the bottom
+ * of a viewport), two columns in from each side (the viewport pane's border
+ * may show in the outermost): the model clipped at its sides.
+ */
+async function drawnEdges(page: Page, el: Locator, cols = 3): Promise<number> {
+  const png = (await el.screenshot()).toString('base64');
+  return page.evaluate(
+    async ([b64, n]) => {
+      const bytes = Uint8Array.from(atob(b64 as string), ch => ch.charCodeAt(0));
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const c = document.createElement('canvas');
+      c.width = bitmap.width;
+      c.height = bitmap.height;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(bitmap, 0, 0);
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      let edge = 0;
+      for (let y = Math.floor(c.height * 0.2); y < Math.ceil(c.height * 0.8); y++) {
+        for (let x = 2; x < c.width - 2; x++) {
+          if (x >= 2 + (n as number) && x < c.width - 2 - (n as number)) {
+            continue;
+          }
+          const q = (y * c.width + x) * 4;
+          if (Math.abs(d[q] - 10) + Math.abs(d[q + 1] - 17) + Math.abs(d[q + 2] - 27) > 40) {
+            edge++;
+          }
+        }
+      }
+      return edge;
+    },
+    [png, cols]
+  );
+}
 const MANY = 200;
 const halves = async (page: Page, el: Locator) => {
   const h = await drawnHalves(page, el);
@@ -544,6 +579,14 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
   }) => {
     const unknown: string[] = [];
     await serveArchiveAndAnatomy(context, unknown);
+    // The model in the tab, as before: the grid's 3D cell switched off here (rsAnatomyGrid has it on).
+    await context.addInitScript(() => {
+      try {
+        window.localStorage.setItem('pacsai.anatomy3dViewport', 'off');
+      } catch (_) {
+        /* no storage: the cell stays on, and the 3D steps below say so */
+      }
+    });
     await openStudy(page, RICH);
 
     // The anatomy is read (both labelmaps checked) and its tab offered first.
@@ -806,5 +849,113 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
     await expect(overlay).toHaveCount(0);
     await expect(pane(page).locator('[data-rs-anatomy-3d]')).toHaveCount(0);
     await expect.poll(view3d).toBeNull();
+  });
+}
+
+/** The gear menu's item named so, the menu open (tries each header menu, the gear among them). */
+async function gearMenuItem(page: Page, name: RegExp): Promise<Locator | null> {
+  const triggers = page.locator('button[aria-haspopup="menu"]');
+  for (let i = (await triggers.count()) - 1; i >= 0; i--) {
+    await triggers.nth(i).click();
+    const item = page.getByRole('menuitem', { name });
+    if (await item.count()) {
+      return item;
+    }
+    await page.keyboard.press('Escape');
+  }
+  return null;
+}
+
+/**
+ * RS-36 (WeiWei, 25 Nov 2026): the 3D model in a cell of the viewer's grid,
+ * the gear menu's setting on (the default). With SwiftShader's WebGL; skipped
+ * where the browser still gives none.
+ */
+export function defineAnatomyGridTest(): void {
+  test("the 3D anatomy in a cell of the viewer's grid: the protocol's layout grows by one, the 3D button and the gear menu take it out", async ({
+    page,
+    context,
+  }) => {
+    const unknown: string[] = [];
+    await serveArchiveAndAnatomy(context, unknown);
+    await openStudy(page, RICH);
+    const grid = async () =>
+      ((await paneState(page))?.anatomy3dCell ?? null) as Record<string, unknown> | null;
+    const view3d = async () =>
+      ((await paneState(page))?.anatomy3d ?? null) as Record<string, unknown> | null;
+    await expect
+      .poll(async () => {
+        const s = (await paneState(page))?.anatomyOverlay as {
+          viewports?: Array<{ anatomy: boolean }>;
+        } | null;
+        return Boolean(s?.viewports?.some(v => v.anatomy));
+      })
+      .toBe(true);
+    const rendering = await renderingOf(page);
+    test.skip(rendering !== 'gpu', 'this browser gives no WebGL, so there is no 3D cell');
+
+    // The protocol's one viewport, and the cell beside it once the surfaces are offered.
+    await expect.poll(grid).toMatchObject({
+      setting: true,
+      shown: true,
+      out: false,
+      fromProtocol: true,
+      layout: '1x2',
+      panes: 2,
+      cellPane: 1,
+    });
+    const cell = page.locator('[data-rs-anatomy-3d-cell]');
+    await expect(cell).toBeVisible();
+    await expect
+      .poll(view3d)
+      .toMatchObject({ open: true, where: 'viewport', webgl: true, actors: 3, visibleActors: 2 });
+    await expect(cell.locator('[data-rs-anatomy-3d-status]')).toHaveText(
+      '3 structures, 36 triangles'
+    );
+    await expect(cell.locator('[data-rs-anatomy-3d-enlarge]')).toHaveCount(0);
+    // From the front in the cell: the liver on the left, the kidney on the right.
+    await expect
+      .poll(() => halves(page, cell.locator('[data-rs-anatomy-3d-view]')))
+      .toEqual({ left: true, right: true });
+    // The cell is narrower than it is tall: the front view fits the model's sides too.
+    expect(await drawnEdges(page, cell.locator('[data-rs-anatomy-3d-view] canvas'))).toBe(0);
+    // The image keeps its labels beside it.
+    const cellBox = await cell.boundingBox();
+    const layerBox = await page.locator('canvas[data-pacsai-anatomy-layer]').first().boundingBox();
+    expect(layerBox!.x + layerBox!.width).toBeLessThanOrEqual(cellBox!.x + 1);
+    if (process.env.RS_E2E_SHOTS) {
+      await page.screenshot({ path: path.join(__dirname, 'test-results', 'anatomy-3d-grid.png') });
+    }
+
+    // The tab's 3D button works the cell: out (the protocol's 1x1 back), and in again.
+    const open3d = pane(page).locator('[data-rs-anatomy-3d-open="0"]');
+    await expect(open3d).toHaveAttribute('data-rs-anatomy-3d-grid', '');
+    await expect(open3d).toHaveAttribute('aria-pressed', 'true');
+    await open3d.click();
+    await expect.poll(grid).toMatchObject({ shown: false, out: true, layout: '1x1' });
+    await expect(cell).toHaveCount(0);
+    await expect(pane(page).locator('[data-rs-anatomy-3d]')).toHaveCount(0);
+    await open3d.click();
+    await expect.poll(grid).toMatchObject({ shown: true, out: false, layout: '1x2' });
+    // The cell's x takes it out too.
+    await cell.locator('[data-rs-anatomy-3d-close]').click();
+    await expect.poll(grid).toMatchObject({ shown: false, layout: '1x1' });
+    await open3d.click();
+    await expect.poll(grid).toMatchObject({ shown: true, layout: '1x2' });
+
+    // The gear menu's switch: off, the cell goes and the 3D button opens the model in the tab.
+    const off = await gearMenuItem(page, /^3D anatomy in the viewports: On$/);
+    expect(off, "the gear menu's 3D anatomy item").not.toBeNull();
+    await off!.click();
+    await expect.poll(grid).toMatchObject({ setting: false, shown: false, layout: '1x1' });
+    await expect(open3d).not.toHaveAttribute('data-rs-anatomy-3d-grid', '');
+    await open3d.click();
+    await expect(pane(page).locator('[data-rs-anatomy-3d="inline"]')).toBeVisible();
+    await open3d.click();
+    // On again: the cell back in the protocol's layout.
+    const on = await gearMenuItem(page, /^3D anatomy in the viewports: Off$/);
+    await on!.click();
+    await expect.poll(grid).toMatchObject({ setting: true, shown: true, layout: '1x2' });
+    expect(unknown, 'archive requests the test does not serve').toEqual([]);
   });
 }
