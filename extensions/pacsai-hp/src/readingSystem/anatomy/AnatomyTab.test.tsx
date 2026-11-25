@@ -285,6 +285,66 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     destroy();
   });
 
+  it("lets a picked-out structure go with Show all, in the layers' row", async () => {
+    const { s } = await store();
+    const { column, destroy } = mount(fakeController(), s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    const row = (k: string) => column.querySelector(`[data-rs-structure="${k}"]`) as HTMLElement;
+    const showAll = () =>
+      column.querySelector(
+        '.prs-anatomy-controls [data-rs-anatomy-show-all]'
+      ) as HTMLButtonElement | null;
+    expect(showAll()).toBeNull();
+    // Pointing at a row brings its structure out, but picks nothing out.
+    act(() => {
+      fireEvent.mouseEnter(row('total/1'));
+    });
+    expect(showAll()).toBeNull();
+    act(() => {
+      fireEvent.mouseLeave(row('total/1'));
+    });
+    // Its name clicked, the liver is picked out: Show all, whose title names it.
+    act(() => {
+      fireEvent.click(row('total/1').querySelector('.prs-structure')!);
+    });
+    expect(showAll()?.textContent).toBe('Show all');
+    expect(showAll()?.title).toBe(
+      'Stop picking out Liver: every structure in full again, on the images and in 3D'
+    );
+    // Show all lets it go; the button goes with it, the keys staying in the row.
+    act(() => {
+      showAll()!.focus();
+      fireEvent.click(showAll()!);
+    });
+    expect(s.getSnapshot().selected).toBeNull();
+    expect(row('total/1').getAttribute('aria-selected')).toBe('false');
+    expect(showAll()).toBeNull();
+    expect(document.activeElement?.hasAttribute('data-rs-anatomy-enabled')).toBe(true);
+    // A selected structure switched off, or its task, is picked out no more: no button.
+    act(() => {
+      fireEvent.click(row('total/2').querySelector('.prs-structure')!);
+    });
+    expect(showAll()).not.toBeNull();
+    const box = () => row('total/2').querySelector('input[type="checkbox"]')!;
+    act(() => {
+      fireEvent.click(box());
+    });
+    expect(s.getSnapshot().selected).toBe('0/total/2');
+    expect(showAll()).toBeNull();
+    act(() => {
+      fireEvent.click(box());
+    });
+    expect(showAll()).not.toBeNull();
+    act(() => {
+      fireEvent.click(column.querySelector('[data-rs-anatomy-task-toggle="total"]')!);
+    });
+    expect(showAll()).toBeNull();
+    destroy();
+  });
+
   it('has no Anatomy tab for a study without anatomy, and says why when its anatomy is refused', async () => {
     const none = await store(async () => Promise.reject(new RsHttpError(404, 'anatomy')));
     const a = mount(fakeController(), none.s);

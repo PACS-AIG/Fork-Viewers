@@ -99,6 +99,7 @@ const CSS = `
 .prs-copilot h5 { margin: 8px 0 2px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #7F8EA0; }
 .prs-btn[aria-pressed="true"] { border-color: #8AB4F8; color: #8AB4F8; }
 .prs-anatomy-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 2px 0 8px; margin-bottom: 6px; border-bottom: 1px solid #1B2735; }
+.prs-show-all { margin-left: auto; padding: 2px 10px; }
 .prs-anatomy-controls label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .prs-opacity input[type="range"] { width: 96px; height: 14px; accent-color: #8AB4F8; color-scheme: dark; }
 .prs-seg { display: inline-flex; border: 1px solid #2B3A4D; border-radius: 6px; overflow: hidden; }

@@ -3,7 +3,9 @@
  * run session: the pane is "to show the user what we can do by our software,
  * more on the visual side").
  *
- *   - The layers' switch for the images, their opacity, fill or outline.
+ *   - The layers' switch for the images, their opacity, fill or outline; and,
+ *     while a structure is picked out (the others faded on the images and in
+ *     3D), Show all, which lets it go.
  *   - Per task (organs, vertebrae, body cavities): shown or hidden, and its
  *     structures from head to feet, each with its colour, a switch, its slice
  *     extent and, for a measurement-eligible structure only (FINAL_SPEC §2.3),
@@ -519,6 +521,8 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   // Back from enlarged: the keys return to the tab's Enlarge button.
   const refocus = useRef(false);
+  // Where the keys go when Show all, gone with the selection, had them.
+  const enabledBox = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (refocus.current && view3d && !view3d.enlarged) {
       refocus.current = false;
@@ -548,6 +552,12 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
   const { settings } = snap;
   const percent = Math.round(settings.opacity * 100);
   const shown3d = view3d && snap.series.some(s => s.index === view3d.series) ? view3d : null;
+  // The structure picked out: selected and shown, so the others fade on the images and in 3D.
+  const sel = snap.selected ? snap.structures[snap.selected] : undefined;
+  const picked =
+    sel && sel.visible && snap.series[sel.series]?.tasks.some(t => t.task === sel.task && t.visible)
+      ? sel
+      : null;
   return (
     <div
       ref={setRootEl}
@@ -557,6 +567,7 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
       <div className="prs-anatomy-controls">
         <label>
           <input
+            ref={enabledBox}
             type="checkbox"
             checked={settings.enabled}
             data-rs-anatomy-enabled=""
@@ -597,6 +608,21 @@ export function AnatomyTab({ store }: { store: AnatomyStore }) {
             </button>
           ))}
         </div>
+        {picked ? (
+          <button
+            type="button"
+            className="prs-btn prs-show-all"
+            data-rs-anatomy-show-all=""
+            title={`Stop picking out ${displayName(picked.name)}: every structure in full again, on the images and in 3D`}
+            onClick={() => {
+              store.select(null);
+              // The button goes with the selection: the keys stay in this row.
+              enabledBox.current?.focus();
+            }}
+          >
+            Show all
+          </button>
+        ) : null}
       </div>
       {snap.series.map(s => (
         <div

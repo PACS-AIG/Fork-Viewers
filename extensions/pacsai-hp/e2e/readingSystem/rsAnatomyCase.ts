@@ -694,6 +694,28 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
       .poll(async () => (await page.evaluate(measure))?.centre.right?.a ?? null)
       .toBe(fill);
     await expect(organs.nth(0)).toHaveAttribute('aria-selected', 'false');
+    // Picked out again, Show all in the layers' row lets it go the same way, the keys staying in
+    // the row.
+    const showAll = pane(page).locator('.prs-anatomy-controls [data-rs-anatomy-show-all]');
+    await expect(showAll).toHaveCount(0);
+    await organs.nth(0).locator('.prs-structure').click();
+    await expect(name).toBeVisible();
+    await expect(showAll).toHaveText('Show all');
+    if (process.env.RS_E2E_SHOTS) {
+      await pane(page).screenshot({
+        path: path.join(__dirname, 'test-results', `anatomy-show-all-${rendering}.png`),
+      });
+    }
+    await showAll.click();
+    await expect(name).toBeHidden();
+    await expect
+      .poll(async () => (await page.evaluate(measure))?.centre.right?.a ?? null)
+      .toBe(fill);
+    expect(
+      ((await paneState(page))?.anatomy as { selected?: unknown } | null)?.selected
+    ).toBeNull();
+    await expect(showAll).toHaveCount(0);
+    await expect(pane(page).locator('[data-rs-anatomy-enabled]')).toBeFocused();
 
     // Hovering the liver names it.
     const b = at.drawn.left!;
