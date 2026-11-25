@@ -28,6 +28,7 @@
  */
 import React, { useEffect, useRef, useSyncExternalStore } from 'react';
 import { AnatomyTab } from './anatomy/AnatomyTab';
+import type { Anatomy3dCell } from './anatomy/anatomy3dCell';
 import type { AnatomySnapshot, AnatomyStore } from './anatomy/anatomyStore';
 import { heldStrips, PathGradeTab } from './pathgrade/PathGradeTab';
 import type { RsController, RsSnapshot, RsTab } from './rsController';
@@ -121,6 +122,10 @@ const CSS = `
 .prs-3d-overlay * { box-sizing: border-box; }
 .prs-3d-overlay .prs-3d { flex: 1 1 auto; margin: 0; min-width: 0; }
 .prs-3d-overlay .prs-3d-view { flex: 1 1 auto; height: auto; }
+.prs-3d-cell { position: relative; pointer-events: auto; display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; background: #0A111B; color: #E8EEF5; font: 13px/18px system-ui, -apple-system, "Segoe UI", sans-serif; }
+.prs-3d-cell .prs-3d { flex: 1 1 auto; min-height: 0; margin: 0; border: 0; border-radius: 0; }
+.prs-3d-cell .prs-3d-view { flex: 1 1 auto; height: auto; }
+.prs-3d-cell-empty { display: flex; align-items: center; justify-content: center; height: 100%; padding: 12px; color: #7F8EA0; text-align: center; }
 .prs-anatomy-resampled { margin: 0 0 6px; font-size: 11px; line-height: 15px; color: #7F8EA0; }
 .prs-anatomy-task { margin: 4px 0 8px; }
 .prs-anatomy-task header { display: flex; align-items: center; gap: 6px; }
@@ -158,16 +163,19 @@ const CSS = `
 .prs-pg-finding { margin-right: 6px; color: #B7A8F0; }
 `;
 
+/** The pane's style in a document, once (the 3D anatomy cell in the viewer's grid uses it too). */
+export function ensurePaneStyle(doc: Document | undefined): void {
+  if (!doc || doc.getElementById(STYLE_ID)) {
+    return;
+  }
+  const el = doc.createElement('style');
+  el.id = STYLE_ID;
+  el.textContent = CSS;
+  doc.head.appendChild(el);
+}
+
 function useInjectedStyle(doc: Document | undefined): void {
-  useEffect(() => {
-    if (!doc || doc.getElementById(STYLE_ID)) {
-      return;
-    }
-    const el = doc.createElement('style');
-    el.id = STYLE_ID;
-    el.textContent = CSS;
-    doc.head.appendChild(el);
-  }, [doc]);
+  useEffect(() => ensurePaneStyle(doc), [doc]);
 }
 
 const TABS: Array<{ id: RsTab; label: string }> = [
@@ -542,10 +550,13 @@ export function RsPane({
   controller,
   doc,
   anatomy = null,
+  cell = null,
 }: {
   controller: RsController;
   doc?: Document;
   anatomy?: AnatomyStore | null;
+  /** The 3D anatomy cell in the viewer's grid (the Anatomy tab's 3D button works it when it is on). */
+  cell?: Anatomy3dCell | null;
 }) {
   useInjectedStyle(doc ?? (typeof document !== 'undefined' ? document : undefined));
   const snap = useSyncExternalStore(
@@ -727,7 +738,10 @@ export function RsPane({
             data-rs-panel={tab}
           >
             {tab === 'anatomy' && anatomy ? (
-              <AnatomyTab store={anatomy} />
+              <AnatomyTab
+                store={anatomy}
+                cell={cell}
+              />
             ) : tab === 'pathgrade' && withPathgrade ? (
               <PathGradeTab evidence={docs?.evidence ?? null} />
             ) : tab === 'draft' ? (

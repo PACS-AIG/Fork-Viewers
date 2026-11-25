@@ -53,7 +53,13 @@ import {
   currentAnatomy,
   onReadingSystemSelection,
   readingSystemEnabled,
+  readingSystemMenuOptions,
 } from './readingSystem/session';
+import { Anatomy3DViewport } from './readingSystem/anatomy/Anatomy3DViewport';
+import {
+  ANATOMY3D_SOP_CLASS_HANDLER_ID,
+  ANATOMY3D_VIEWPORT_NAMESPACE,
+} from './readingSystem/anatomy/anatomy3dCell';
 import type { CornerstoneApi } from './readingSystem/anatomy/anatomyOverlay';
 import {
   Enums as CsEnums,
@@ -192,6 +198,12 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
   getCommandsModule,
   getToolbarModule,
   getPanelModule,
+  // RS-36: the 3D anatomy cell in the viewer's grid (anatomy3dCell): its viewport, and the
+  // handler its display set names (it makes no display sets: the cell's is built by the viewer).
+  getViewportModule: () => [{ name: 'anatomy3d', component: Anatomy3DViewport }],
+  getSopClassHandlerModule: () => [
+    { name: 'anatomy3d', sopClassUids: [], getDisplaySetsFromSeries: () => [] },
+  ],
 };
 
 export default pacsaiHpExtension;
@@ -243,4 +255,7 @@ export {
   currentAnatomy,
   onReadingSystemSelection,
   readingSystemEnabled,
+  readingSystemMenuOptions,
+  ANATOMY3D_SOP_CLASS_HANDLER_ID,
+  ANATOMY3D_VIEWPORT_NAMESPACE,
 };

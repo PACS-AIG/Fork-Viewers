@@ -64,6 +64,11 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
   // PR 2: the reader's hanging presets, read at the case's entry.
   hangingCaseEntered: jest.fn(),
   hangingCaseLeft: jest.fn(),
+  // RS-36 (25 Nov): the 3D anatomy cell's viewport and the handler its display set names.
+  ANATOMY3D_SOP_CLASS_HANDLER_ID: jest.requireActual('../readingSystem/anatomy/anatomy3dCell')
+    .ANATOMY3D_SOP_CLASS_HANDLER_ID,
+  ANATOMY3D_VIEWPORT_NAMESPACE: jest.requireActual('../readingSystem/anatomy/anatomy3dCell')
+    .ANATOMY3D_VIEWPORT_NAMESPACE,
 }));
 
 import longitudinal from '@ohif/mode-longitudinal';
@@ -188,6 +193,14 @@ describe('the radcopilot mode', () => {
       leftPanelClosed: false,
       // 22 Oct: the header's patient line gives way in a row too narrow for it (200 % zoom).
       headerPatientInfoShrinks: true,
+      // 25 Nov (RS-36): the reading system's 3D anatomy cell: its own viewport, for its own display set.
+      viewports: [
+        ...(off.props.viewports ?? []),
+        {
+          namespace: '@ohif/extension-pacsai-hp.viewportModule.anatomy3d',
+          displaySetsToDisplay: ['@ohif/extension-pacsai-hp.sopClassHandlerModule.anatomy3d'],
+        },
+      ],
     });
     expect(off.props.headerPatientInfoShrinks).toBeUndefined();
     expect(typeof onLeftPanelClosedChange).toBe('function');

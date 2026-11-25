@@ -102,15 +102,19 @@ export function Anatomy3DView({
   store,
   series,
   enlarged = false,
+  inViewport = false,
   onEnlarge,
   onClose,
 }: {
   store: AnatomyStore;
   series: number;
   enlarged?: boolean;
+  /** In a cell of the viewer's grid (anatomy3dCell), not in the pane. */
+  inViewport?: boolean;
   onEnlarge?: () => void;
   onClose?: () => void;
 }) {
+  const where = inViewport ? 'viewport' : enlarged ? 'enlarged' : 'inline';
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const box = useRef<HTMLDivElement>(null);
   const scene = useRef<SurfaceScene | null>(null);
@@ -154,6 +158,7 @@ export function Anatomy3DView({
       harness = {
         open: true,
         enlarged,
+        where,
         webgl: webgl === 'pending' ? null : false,
         ...(webgl === 'failed' ? { failed: true } : {}),
       };
@@ -168,8 +173,8 @@ export function Anatomy3DView({
         entries.map(e => e.key)
       )
     );
-    harness = { open: true, enlarged, webgl: true, ...sc.stats() };
-  }, [snap, webgl, store, series, enlarged]);
+    harness = { open: true, enlarged, where, webgl: true, ...sc.stats() };
+  }, [snap, webgl, store, series, enlarged, where]);
 
   // The window follows its box's size.
   useEffect(() => {
@@ -193,7 +198,7 @@ export function Anatomy3DView({
   return (
     <div
       className="prs-3d"
-      data-rs-anatomy-3d={enlarged ? 'enlarged' : 'inline'}
+      data-rs-anatomy-3d={where}
     >
       <div className="prs-3d-bar">
         <span
@@ -227,7 +232,7 @@ export function Anatomy3DView({
           <button
             type="button"
             className="prs-btn"
-            aria-label="Close the 3D view"
+            aria-label={inViewport ? 'Take the 3D model out of the viewports' : 'Close the 3D view'}
             data-rs-anatomy-3d-close=""
             onClick={onClose}
           >

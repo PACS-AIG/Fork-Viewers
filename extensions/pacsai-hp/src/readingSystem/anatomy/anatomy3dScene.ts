@@ -21,6 +21,7 @@ import vtkCellArray from '@kitware/vtk.js/Common/Core/CellArray';
 import vtkPolyDataNormals from '@kitware/vtk.js/Filters/Core/PolyDataNormals';
 import type { Rgb } from './anatomyColors';
 import { vtkPolys } from './anatomySurfaces';
+import { webglAvailable } from './webgl';
 
 export interface SceneMesh {
   key: string;
@@ -49,16 +50,10 @@ export interface SurfaceScene {
 }
 
 const BACKGROUND: [number, number, number] = [10 / 255, 17 / 255, 27 / 255];
+/** The front view's vertical angle (vtk's default), set again at each front view. */
+const VIEW_ANGLE = 30;
 
-/** Whether this page can draw WebGL at all (a browser without it gets none). */
-export function webglAvailable(doc: Document): boolean {
-  try {
-    const canvas = doc.createElement('canvas');
-    return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl'));
-  } catch (_) {
-    return false;
-  }
-}
+export { webglAvailable };
 
 /** The scene in this container, or null when the page cannot draw WebGL. */
 export function createSurfaceScene(container: HTMLElement): SurfaceScene | null {
@@ -92,7 +87,16 @@ export function createSurfaceScene(container: HTMLElement): SurfaceScene | null 
     // LPS: the patient's front is -y, the head +z; seen from the front, the patient's left (+x) is on the right.
     camera.setPosition(0, -1, 0);
     camera.setViewUp(0, 0, 1);
+    camera.setViewAngle(VIEW_ANGLE);
     renderer.resetCamera();
+    // resetCamera fits what is shown in the view's height: in a view narrower than it is tall (a
+    // cell of the viewer's grid), the angle widens so that its sides fit too.
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    if (w > 0 && h > 0 && w < h) {
+      camera.zoom(w / h);
+    }
+    renderer.resetCameraClippingRange();
   };
 
   return {

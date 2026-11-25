@@ -51,11 +51,17 @@ const NON_IMAGE_MODALITIES = new Set([
  */
 export function isNonImageDisplaySet(
   ds:
-    | { isDerivedDisplaySet?: boolean; isOverlayDisplaySet?: boolean; Modality?: unknown }
+    | {
+        isDerivedDisplaySet?: boolean;
+        isOverlayDisplaySet?: boolean;
+        isAnatomy3D?: boolean;
+        Modality?: unknown;
+      }
     | null
     | undefined
 ): boolean {
-  if (ds?.isDerivedDisplaySet || ds?.isOverlayDisplaySet) {
+  // RS-36: the 3D anatomy cell's display set (anatomy3dCell) has no images at all.
+  if (ds?.isDerivedDisplaySet || ds?.isOverlayDisplaySet || ds?.isAnatomy3D) {
     return true;
   }
   return NON_IMAGE_MODALITIES.has(String(ds?.Modality ?? '').toUpperCase());

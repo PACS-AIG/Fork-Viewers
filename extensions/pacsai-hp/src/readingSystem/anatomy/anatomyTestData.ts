@@ -286,3 +286,173 @@ export function makeSurfaces(
     }),
   };
 }
+
+/**
+ * RS-36: stand-ins for the viewer's grid, hanging protocol and display set
+ * services, as the 3D anatomy cell uses them (anatomy3dCell). The grid lays
+ * panes out as OHIF's store does (a box per pane, `findOrCreateViewport` per
+ * position); like OHIF's (React state), its state changes a moment after
+ * `setLayout`, and it tells its listeners after that (a timeout later).
+ * `hang` is the protocol: its stage (the active protocol's viewports, rows
+ * and columns), its change, then its layout.
+ */
+export function fakeViewerServices(start: { numRows: number; numCols: number; ids: string[] }) {
+  type Listener = (...args: unknown[]) => void;
+  const listeners = new Map<string, Set<Listener>>();
+  const subscribe = (event: string, fn: Listener) => {
+    const set = listeners.get(event) ?? new Set<Listener>();
+    set.add(fn);
+    listeners.set(event, set);
+    return { unsubscribe: () => set.delete(fn) };
+  };
+  const emit = (event: string) => listeners.get(event)?.forEach(fn => fn());
+  type Viewport = {
+    viewportId: string;
+    displaySetInstanceUIDs?: string[];
+    viewportOptions?: Record<string, unknown>;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    [k: string]: unknown;
+  };
+  type State = {
+    layout: { numRows: number; numCols: number };
+    viewports: Map<string, Viewport>;
+    activeViewportId: string | null;
+    isHangingProtocolLayout: boolean;
+  };
+  const boxes = (rows: number, cols: number) => {
+    const out: Array<{ x: number; y: number; width: number; height: number }> = [];
+    for (let i = 0; i < rows * cols; i++) {
+      out.push({
+        x: (i % cols) / cols,
+        y: Math.floor(i / cols) / rows,
+        width: 1 / cols,
+        height: 1 / rows,
+      });
+    }
+    return out;
+  };
+  const viewportFor = (id: string) => ({
+    displaySetInstanceUIDs: [`ds-${id}`],
+    viewportOptions: { viewportId: id },
+  });
+  let state: State = {
+    layout: { numRows: 0, numCols: 0 },
+    viewports: new Map(),
+    activeViewportId: null,
+    isHangingProtocolLayout: false,
+  };
+  let stage: { ids: string[]; rows: number; cols: number } | null = null;
+  let layouts = 0;
+  const grid = {
+    EVENTS: { LAYOUT_CHANGED: 'layout', GRID_STATE_CHANGED: 'grid' },
+    getState: () => state,
+    subscribe,
+    setLayout: async (o: Record<string, unknown>) => {
+      const numRows = o.numRows as number;
+      const numCols = o.numCols as number;
+      const opts =
+        (o.layoutOptions as Array<{ x: number; y: number; width: number; height: number }>) ?? [];
+      const find = o.findOrCreateViewport as (
+        i: number,
+        positionId: string,
+        options: object
+      ) => Record<string, unknown> | undefined;
+      const panes = opts.length ? opts : boxes(numRows, numCols);
+      const viewports = new Map<string, Viewport>();
+      panes.forEach((b, i) => {
+        const v = find(i, String(i), {});
+        if (!v) {
+          return;
+        }
+        const id = String(
+          (v.viewportOptions as { viewportId?: string } | undefined)?.viewportId ?? `auto-${i}`
+        );
+        viewports.set(id, { ...(v as object), viewportId: id, ...b } as Viewport);
+      });
+      const active = (o.activeViewportId as string | undefined) ?? state.activeViewportId;
+      const next: State = {
+        layout: { numRows, numCols },
+        viewports,
+        activeViewportId:
+          active && viewports.has(active) ? active : ([...viewports.keys()][0] ?? null),
+        isHangingProtocolLayout: Boolean(o.isHangingProtocolLayout),
+      };
+      // A render later, as OHIF's grid state (React's) changes.
+      await Promise.resolve();
+      state = next;
+      layouts++;
+      setTimeout(() => {
+        emit('layout');
+        emit('grid');
+      }, 0);
+    },
+    /** A series dropped on a viewport (OHIF's setDisplaySetsForViewports). */
+    drop(viewportId: string, ds: string) {
+      const viewports = new Map(state.viewports);
+      const v = viewports.get(viewportId);
+      if (v) {
+        viewports.set(viewportId, { ...v, displaySetInstanceUIDs: [ds] });
+      }
+      state = { ...state, viewports };
+      setTimeout(() => emit('grid'), 0);
+    },
+  };
+  const hp = {
+    EVENTS: { PROTOCOL_CHANGED: 'protocol' },
+    subscribe,
+    getActiveProtocol: () =>
+      stage
+        ? {
+            stage: { viewportStructure: { properties: { rows: stage.rows, columns: stage.cols } } },
+            viewportMatchDetails: new Map(stage.ids.map(id => [id, {}])),
+          }
+        : undefined,
+    /** The protocol lays out a stage: its change, then its layout (the grid's own subscriber in OHIF). */
+    hang(numRows: number, numCols: number, ids: string[]) {
+      stage = { ids, rows: numRows, cols: numCols };
+      emit('protocol');
+      void grid.setLayout({
+        numRows,
+        numCols,
+        isHangingProtocolLayout: true,
+        findOrCreateViewport: (i: number) => (ids[i] ? viewportFor(ids[i]) : undefined),
+      });
+    },
+  };
+  const sets = new Map<string, Record<string, unknown>>();
+  const displaySetService = {
+    addDisplaySets: (...ds: unknown[]) =>
+      ds.forEach(d =>
+        sets.set(
+          String((d as Record<string, unknown>).displaySetInstanceUID),
+          d as Record<string, unknown>
+        )
+      ),
+    getDisplaySetByUID: (uid: string) => sets.get(uid),
+  };
+  if (start.ids.length) {
+    stage = { ids: start.ids, rows: start.numRows, cols: start.numCols };
+    void grid.setLayout({
+      numRows: start.numRows,
+      numCols: start.numCols,
+      isHangingProtocolLayout: true,
+      findOrCreateViewport: (i: number) => (start.ids[i] ? viewportFor(start.ids[i]) : undefined),
+    });
+  }
+  return {
+    services: { viewportGridService: grid, hangingProtocolService: hp, displaySetService },
+    grid,
+    hp,
+    sets,
+    layout: () => `${state.layout.numRows}x${state.layout.numCols}`,
+    ids: () => [...state.viewports.keys()],
+    boxOf: (id: string) => {
+      const v = state.viewports.get(id);
+      return v ? [v.x, v.y, v.width, v.height].map(n => Math.round(n * 1000) / 1000) : null;
+    },
+    layoutsSet: () => layouts,
+  };
+}
