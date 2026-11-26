@@ -17,7 +17,7 @@ import type { CornerstoneApi } from '../anatomy/anatomyOverlay';
 import { renderLabels, type RenderLayer } from '../anatomy/anatomyRender';
 import type { PreparedTarget } from './refineHit';
 import { maskLayer } from './refineMask';
-import { CURRENT_RGB, PREVIEW_RGB, type RefineStore } from './refineStore';
+import { CURRENT_RGB, MARK_RGB, PREVIEW_RGB, type RefineStore } from './refineStore';
 import {
   canvasOf,
   imageWorld,
@@ -201,7 +201,7 @@ export function createRefineOverlay({
     }
     const ctx = a.ctx;
     ctx.save();
-    ctx.strokeStyle = `rgb(${PREVIEW_RGB.join(', ')})`;
+    ctx.strokeStyle = `rgb(${MARK_RGB.join(', ')})`;
     ctx.lineWidth = 1.5;
     ctx.setLineDash(view.phase === 'drawing' ? [] : [4, 3]);
     if (view.mark.type === 'box') {

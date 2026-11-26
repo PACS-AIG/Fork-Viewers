@@ -20,15 +20,18 @@ const at = (c: number, r: number, k: number) => worldAt(affine, c, r, k);
 const shown = { seriesUID: SERIES, frameOfReferenceUID: FOR };
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
-const applied = (revision = 5): RsIntakeResponse => ({
+const intake = (over: Partial<RsIntakeResponse> = {}): RsIntakeResponse => ({
   contractVersion: 'pacsai.reading/1.18',
   artifact: 'intake_response',
   eventId: 'e',
   studyUID: STUDY,
   status: 'applied',
   httpStatus: 200,
-  revision,
+  revision: 5,
+  ...over,
 });
+const okAnswer = (over: Record<string, unknown> = {}) =>
+  readSegmentAnswer(200, segmentOk(disc([10, 12], 3, [2, 3]), over), SHAPE) as SegmentAnswer;
 
 function setup(over: Partial<RefineStoreDeps> = {}) {
   const timers: Array<{ fn: () => void; ms: number; live: boolean }> = [];
@@ -36,10 +39,10 @@ function setup(over: Partial<RefineStoreDeps> = {}) {
     makeTarget({ entryId: 'entry-1', kind: 'finding' }, disc([10, 12], 2.2, [2])),
   ]);
   const requests: SegmentRequest[] = [];
-  let answer: () => Promise<SegmentAnswer> = async () =>
-    readSegmentAnswer(200, segmentOk(disc([10, 12], 3, [2, 3])), SHAPE) as SegmentAnswer;
-  const keeps: unknown[] = [];
-  let keepAnswer: RsIntakeResponse | null = applied();
+  let answer: () => Promise<SegmentAnswer> = async () => okAnswer();
+  const keeps: string[] = [];
+  const discards: string[] = [];
+  const keepAnswers: Array<RsIntakeResponse | null> = [];
   const selected: string[] = [];
   let reads = 0;
   const deps: RefineStoreDeps = {
@@ -54,9 +57,13 @@ function setup(over: Partial<RefineStoreDeps> = {}) {
       },
     },
     reader: () => ({ id: 'reader@example.test', role: 'radiologist' }),
-    keep: async k => {
-      keeps.push(k);
-      return keepAnswer;
+    keep: async resultId => {
+      keeps.push(resultId);
+      return keepAnswers.length ? (keepAnswers.shift() as RsIntakeResponse | null) : intake();
+    },
+    discard: async resultId => {
+      discards.push(resultId);
+      return intake({ status: 'recorded' });
     },
     selectEntry: id => selected.push(id),
     now: () => 1000,
@@ -76,6 +83,8 @@ function setup(over: Partial<RefineStoreDeps> = {}) {
     store,
     requests,
     keeps,
+    discards,
+    keepAnswers,
     selected,
     reads: () => reads,
     setTargets: (t: typeof targets) => {
@@ -83,9 +92,6 @@ function setup(over: Partial<RefineStoreDeps> = {}) {
     },
     setAnswer: (fn: () => Promise<SegmentAnswer>) => {
       answer = fn;
-    },
-    setKeepAnswer: (a: RsIntakeResponse | null) => {
-      keepAnswer = a;
     },
     fireTimers: () =>
       timers
@@ -97,8 +103,8 @@ function setup(over: Partial<RefineStoreDeps> = {}) {
   };
 }
 
-async function ready() {
-  const s = setup();
+async function ready(over: Partial<RefineStoreDeps> = {}) {
+  const s = setup(over);
   s.store.enter(STUDY);
   await flush();
   s.store.setArmed(true);
@@ -122,10 +128,16 @@ describe('refine store', () => {
     expect(s.store.getView().targets).toHaveLength(1);
 
     const none = setup();
-    none.setTargets(makeTargets([]));
+    none.setTargets({
+      ...makeTargets([]),
+      withheld: [
+        { observationId: 'obs-9', entryId: null, reason: 'no SAM2CT backend is registered' },
+      ],
+    });
     none.store.enter(STUDY);
     await flush();
     expect(none.store.getView().targetsState).toBe('none');
+    expect(none.store.getView().withheld).toHaveLength(1);
 
     const notServed = setup({
       client: {
@@ -161,7 +173,10 @@ describe('refine store', () => {
     s.store.moveMark(at(12.2, 10, 2), 2);
     expect(s.store.getView().mark?.type).toBe('point');
     s.store.moveMark(at(16, 14, 2), 12);
-    expect(s.store.getView().mark).toEqual({ type: 'box', world: [at(12, 10, 2), at(16, 14, 2)] });
+    expect(s.store.getView().mark).toEqual({
+      type: 'box',
+      world: [at(12, 10, 2), at(16, 14, 2)],
+    });
   });
 
   it('sends the lesion’s refine, then shows SAM2CT’s outline beside the current one', async () => {
@@ -174,13 +189,39 @@ describe('refine store', () => {
       prompt: { type: 'box' },
       reader: { id: 'reader@example.test' },
     });
-    expect(s.selected).toEqual(['entry-1']);
     const v = s.store.getView();
     expect(v.phase).toBe('preview');
     expect(v.viewportId).toBe('vp-1');
     expect(v.preview?.resultId).toBe('attempt-1');
+    expect(v.preview?.keep).toEqual({ possible: true, reason: null });
+    expect(v.preview?.against).toEqual({
+      seriesRevision: 3,
+      observationRevision: 7,
+      maskRevision: 1,
+    });
     expect(v.preview?.unpacked.slices).toEqual([2, 3]);
     expect(v.message?.text).toMatch(/^SAM2CT’s outline: \d+ voxels on 2 slices\.$/);
+  });
+
+  it('selects the lesion in the pane only when the report renders it', async () => {
+    const quiet = await ready();
+    await boxAround(quiet);
+    expect(quiet.selected).toEqual([]);
+
+    const reported = setup();
+    reported.setTargets(
+      makeTargets([
+        makeTarget(
+          { entryId: 'entry-1', kind: 'finding', reported: true },
+          disc([10, 12], 2.2, [2])
+        ),
+      ])
+    );
+    reported.store.enter(STUDY);
+    await flush();
+    reported.store.setArmed(true);
+    await boxAround(reported);
+    expect(reported.selected).toEqual(['entry-1']);
   });
 
   it('says why when a mark names nothing, and lets the note fade', async () => {
@@ -196,12 +237,12 @@ describe('refine store', () => {
     expect(s.store.getView()).toMatchObject({ phase: 'missed', viewportId: 'vp-2' });
   });
 
-  it('keeps it through the pane, then reads the targets again', async () => {
+  it('keeps it by accepting the attempt, then reads the targets again', async () => {
     const s = await ready();
     await boxAround(s);
     const readsBefore = s.reads();
     await s.store.keep();
-    expect(s.keeps).toEqual([{ resultId: 'attempt-1', observationId: 'obs-1', maskRevision: 2 }]);
+    expect(s.keeps).toEqual(['attempt-1']);
     expect(s.reads()).toBe(readsBefore + 1);
     const v = s.store.getView();
     expect(v.phase).toBe('kept');
@@ -211,42 +252,94 @@ describe('refine store', () => {
     expect(s.store.getView().phase).toBe('idle');
   });
 
-  it('keeps the preview, and says so, when the keep did not apply', async () => {
+  it('offers no keep for an outline the answer says cannot be kept, and says why', async () => {
+    const s = await ready();
+    const reason = 'Its outline failed QC (partial volume), so it cannot be kept.';
+    s.setAnswer(async () => okAnswer({ keep: { possible: false, reason } }));
+    await boxAround(s);
+    expect(s.store.getView().message?.level).toBe('warn');
+    expect(s.store.getView().message?.text.endsWith(`. ${reason}`)).toBe(true);
+    await s.store.keep();
+    expect(s.keeps).toEqual([]);
+    s.store.discard();
+    expect(s.discards).toEqual([]);
+  });
+
+  it('sends a keep answered 409 again when only the published revision moved', async () => {
     const s = await ready();
     await boxAround(s);
-    s.setKeepAnswer(null);
+    s.keepAnswers.push(
+      intake({ status: 'conflict', httpStatus: 409, currentRevision: 6, reason: 'base 5 -> 6' })
+    );
+    await s.store.keep();
+    expect(s.keeps).toEqual(['attempt-1', 'attempt-1']);
+    expect(s.store.getView().phase).toBe('kept');
+  });
+
+  it('asks for a new mark when a keep is answered 409 because the attempt’s evidence moved', async () => {
+    const s = await ready();
+    await boxAround(s);
+    s.keepAnswers.push(
+      intake({
+        status: 'conflict',
+        httpStatus: 409,
+        reason: 'base_mask_revision 1 -> 2: draw again',
+      })
+    );
+    await s.store.keep();
+    expect(s.keeps).toEqual(['attempt-1']);
+    expect(s.store.getView()).toMatchObject({ phase: 'answered', preview: null, canRetry: false });
+    expect(s.store.getView().message?.text).toMatch(/mark it again\.$/);
+
+    // The same when the targets read again hold other revisions, whatever the reason says.
+    const moved = await ready();
+    await boxAround(moved);
+    moved.setTargets(
+      makeTargets([
+        makeTarget(
+          { entryId: 'entry-1', kind: 'finding', maskRevision: 2 },
+          disc([10, 12], 2.2, [2])
+        ),
+      ])
+    );
+    moved.keepAnswers.push(
+      intake({ status: 'conflict', httpStatus: 409, reason: 'base revision moved' })
+    );
+    await moved.store.keep();
+    expect(moved.keeps).toHaveLength(1);
+    expect(moved.store.getView().phase).toBe('answered');
+  });
+
+  it('says so when the keep did not apply', async () => {
+    const s = await ready();
+    await boxAround(s);
+    s.keepAnswers.push(null);
     await s.store.keep();
     expect(s.store.getView().phase).toBe('preview');
     expect(s.store.getView().message?.text).toMatch(/^Not kept: the change did not go/);
-    s.setKeepAnswer({ ...applied(), status: 'conflict', httpStatus: 409 });
-    await s.store.keep();
-    expect(s.store.getView().message?.text).toBe(
-      'Not kept: the record moved before this reached it. Mark the lesion again.'
+    s.keepAnswers.push(
+      intake({ status: 'rejected', httpStatus: 422, reason: 'the study is not open for editing' })
     );
-    s.setKeepAnswer({
-      ...applied(),
-      status: 'rejected',
-      httpStatus: 422,
-      reason: 'not an attempt of this lesion',
-    });
     await s.store.keep();
-    expect(s.store.getView().message?.text).toBe('Not kept: not an attempt of this lesion.');
+    expect(s.store.getView().message?.text).toBe('Not kept: the study is not open for editing.');
+    s.keepAnswers.push(
+      intake({
+        status: 'rejected',
+        httpStatus: 422,
+        reason: 'refine-0123456789abcdef0123 is not an open proposal',
+      })
+    );
+    await s.store.keep();
+    expect(s.store.getView()).toMatchObject({ phase: 'answered', preview: null, canRetry: true });
+    expect(s.store.getView().message?.text).toMatch(/^This outline can no longer be kept/);
   });
 
-  it('cannot keep an outline the service kept no attempt of', async () => {
+  it('discards a keepable outline by rejecting its attempt', async () => {
     const s = await ready();
-    s.setAnswer(
-      async () =>
-        readSegmentAnswer(
-          200,
-          segmentOk(disc([10, 12], 3, [2]), { resultId: undefined }),
-          SHAPE
-        ) as SegmentAnswer
-    );
     await boxAround(s);
-    await s.store.keep();
-    expect(s.keeps).toHaveLength(0);
-    expect(s.store.getView().message?.text).toMatch(/keeps no refine attempts yet/);
+    s.store.discard();
+    expect(s.discards).toEqual(['attempt-1']);
+    expect(s.store.getView()).toMatchObject({ phase: 'idle', preview: null, mark: null });
   });
 
   it('reads the targets again when the lesion moved on (stale), and asks for a new mark', async () => {
@@ -276,6 +369,7 @@ describe('refine store', () => {
       status: 'unavailable',
       reasons: ['the backend is not pinned'],
       resultId: null,
+      keep: { possible: false, reason: null },
       maskRevision: null,
       mask: null,
       qc: null,
@@ -294,22 +388,22 @@ describe('refine store', () => {
     expect(s.store.getView().message?.text).toBe(
       'The CT analysis service did not answer in time. Try again.'
     );
-    s.setAnswer(
-      async () => readSegmentAnswer(200, segmentOk(disc([10, 12], 3, [2])), SHAPE) as SegmentAnswer
-    );
+    s.setAnswer(async () => okAnswer());
     await s.store.retry();
     expect(s.store.getView().phase).toBe('preview');
     expect(s.requests.at(-1)?.prompt).toEqual(s.requests[0].prompt);
   });
 
-  it('discards SAM2CT’s outline, and leaves nothing behind on leave', async () => {
+  it('leaves nothing behind on leave', async () => {
     const s = await ready();
     await boxAround(s);
-    s.store.discard();
-    expect(s.store.getView()).toMatchObject({ phase: 'idle', preview: null, mark: null });
-    await boxAround(s);
     s.store.leave();
-    expect(s.store.getView()).toMatchObject({ phase: 'idle', targetsState: 'idle', targets: [] });
+    expect(s.store.getView()).toMatchObject({
+      phase: 'idle',
+      targetsState: 'idle',
+      targets: [],
+      withheld: [],
+    });
   });
 
   it('drops an answer that comes after the study changed', async () => {
@@ -321,7 +415,7 @@ describe('refine store', () => {
     s.store.endMark(shown);
     expect(s.store.getView().phase).toBe('sending');
     s.store.enter('another-study');
-    release(readSegmentAnswer(200, segmentOk(disc([10, 12], 3, [2])), SHAPE) as SegmentAnswer);
+    release(okAnswer());
     await flush();
     expect(s.store.getView().phase).toBe('idle');
   });
@@ -348,6 +442,8 @@ describe('refine store', () => {
         passed: false,
         failures: ['partial_volume'],
       },
+      keep: { possible: false, reason: 'x' },
+      against: { seriesRevision: 1, observationRevision: 1, maskRevision: 1 },
     });
     expect(s).toBe(
       '1 voxel on 1 slice; 2 pieces; partial volume (under two slices); cut off at the edge of what SAM2CT saw; QC failed: partial_volume'
@@ -361,6 +457,7 @@ describe('refine store', () => {
     expect(h).toMatchObject({
       study: 'study-ref',
       phase: 'preview',
+      keepPossible: true,
       target: { kind: 'finding', label: 'liver lesion' },
     });
     expect(JSON.stringify(h)).not.toContain(STUDY);

@@ -521,10 +521,8 @@ describe('the reading-system pane state (RS-36)', () => {
   });
 });
 
-describe('the refine tool’s keep (RS-38)', () => {
-  const keep = { resultId: 'attempt-1', observationId: 'obs-1', maskRevision: 2 };
-
-  it('posts a refine_keep event through the pane and gives back the intake’s answer', async () => {
+describe('the refine tool’s keep and discard (RS-38, D-347)', () => {
+  it('keeps by accepting the attempt (a proposal named by its result id), as a draft change', async () => {
     const t = setup();
     t.set({ versions: makeVersions({ opened: true }) });
     t.controller.enter(STUDY);
@@ -537,24 +535,41 @@ describe('the refine tool’s keep (RS-38)', () => {
         studyUID: STUDY,
         status: 'applied',
         httpStatus: 200,
-        revision: 4,
+        revision: 5,
         contractVersion: 'x',
       };
     });
-    const answer = await t.controller.keepRefine(keep);
+    const answer = await t.controller.keepRefine('refine-0123456789abcdef0123');
     expect(answer?.status).toBe('applied');
     const event = t.posted.at(-1) as RsIntakeEvent;
-    expect(event.event).toEqual({ type: 'refine_keep', ...keep });
+    expect(event.event).toEqual({
+      type: 'accept',
+      target: { kind: 'proposal', id: 'refine-0123456789abcdef0123' },
+    });
+    expect(event.baseRevision).toBe(4);
+    expect(event.capture?.reportRevision).toBe(4);
     expect(event.reader).toEqual({ id: 'reader-a', role: 'radiologist' });
     expect(t.controller.getSnapshot().notice).toEqual({
       level: 'info',
-      text: 'Kept the new outline: the draft is at revision 4.',
+      text: 'Kept the new outline: the draft is at revision 5.',
+    });
+  });
+
+  it('discards by rejecting the attempt', async () => {
+    const t = setup();
+    t.set({ versions: makeVersions({ opened: true }) });
+    t.controller.enter(STUDY);
+    await flush();
+    await t.controller.discardRefine('refine-0123456789abcdef0123');
+    expect((t.posted.at(-1) as RsIntakeEvent).event).toEqual({
+      type: 'reject',
+      target: { kind: 'proposal', id: 'refine-0123456789abcdef0123' },
     });
   });
 
   it('answers null when the service did not answer, and nothing is sent before the study is read', async () => {
     const before = setup();
-    expect(await before.controller.keepRefine(keep)).toBeNull();
+    expect(await before.controller.keepRefine('refine-1')).toBeNull();
     expect(before.client.postEvent).not.toHaveBeenCalled();
 
     const t = setup();
@@ -564,7 +579,7 @@ describe('the refine tool’s keep (RS-38)', () => {
     t.client.postEvent.mockImplementationOnce(async () => {
       throw new Error('no answer');
     });
-    expect(await t.controller.keepRefine(keep)).toBeNull();
+    expect(await t.controller.keepRefine('refine-1')).toBeNull();
     expect(t.controller.getSnapshot().notice?.level).toBe('error');
   });
 });

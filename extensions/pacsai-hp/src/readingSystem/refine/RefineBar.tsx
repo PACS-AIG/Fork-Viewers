@@ -73,6 +73,9 @@ export function RefineBar({
               aria-hidden="true"
             />
             {view.target?.mask ? 'The current one.' : 'It has no outline yet.'}
+            {view.preview.keep.possible
+              ? ''
+              : ` ${view.preview.keep.reason ?? 'It cannot be kept.'}`}
             {view.message.level !== 'info' && !view.message.text.startsWith('SAM2CT’s outline')
               ? ` ${view.message.text}`
               : ''}
@@ -83,18 +86,20 @@ export function RefineBar({
       </span>
       {view.phase === 'preview' || view.phase === 'keeping' ? (
         <>
-          <button
-            type="button"
-            className="prs-btn"
-            data-primary="true"
-            disabled={busy}
-            onClick={e => {
-              e.stopPropagation();
-              void store.keep();
-            }}
-          >
-            Keep
-          </button>
+          {view.preview?.keep.possible ? (
+            <button
+              type="button"
+              className="prs-btn"
+              data-primary="true"
+              disabled={busy}
+              onClick={e => {
+                e.stopPropagation();
+                void store.keep();
+              }}
+            >
+              Keep
+            </button>
+          ) : null}
           <button
             type="button"
             className="prs-btn"

@@ -1,198 +1,99 @@
 /**
- * RS-38: the refine tool end to end in the viewer, Chrome launched without
- * WebGL (cornerstone's CPU path, where a mark's points need the half pixel
- * taken off).
+ * RS-38: the refine tool end to end in the viewer, against the reading
+ * system's own refine routes in fixture mode (ct-analysis-system's D-347,
+ * output contract 1.18). Chrome is launched without WebGL (cornerstone's CPU
+ * path, where a mark's points need the half pixel taken off).
  *
- * The archive is rsAnatomyCase's synthetic CT (20 axial slices of 64 x 64, 4 mm
- * pixels, 5 mm apart, its grid stored with the rows flipped). The study's
- * refine targets, POST /segment and the keep (a `refine_keep` event) are this
- * test's own: one made-up liver lesion on slice 10, and SAM2CT's answer a
- * larger disc on slices 10 and 11. Until ct-analysis-system serves them in
- * fixture mode (the refine plan's step 1), these routes stand in for it; every
- * other route is the served API's, as in the other tests.
+ * The study is the fixture `refine` (snapshot fx-refine). Its series is
+ * rsAnatomyCase's synthetic CT: 20 axial slices of 64 x 64, 4 mm pixels, 5 mm
+ * apart. The archive serves it through this test's routes, as for the anatomy
+ * tests. Its one candidate, "liver", is outlined as the bright block (slices 8
+ * to 12, rows 20 to 35, columns 8 to 23). The fixture SAM2CT answers any mark
+ * with the block grown by one voxel in plane (1,620 voxels on 5 slices).
+ * Everything else, including refine_targets, POST /segment and the keep (an
+ * accept of the attempt's proposal), is the served API's.
  *
- * What it checks: the toolbar's Refine outline button arms the tool; a box
- * drawn around the lesion on its slice sends one refine naming the lesion's
- * revisions, with the box put exactly on the slice; SAM2CT's outline is drawn
- * over the lesion beside the current one, with the bar's Keep / Discard /
- * Try again; Keep sends the keep and reads the targets again; a click sends
- * one positive point; a mark far from the lesion names nothing; a stale or
- * refused answer is said; and nothing becomes a measurement.
+ * What it checks:
+ * - the toolbar's Refine outline button arms the tool;
+ * - a box drawn around the lesion on its slice sends one refine naming the
+ *   lesion's revisions as the targets give them, with the box put exactly on
+ *   the slice;
+ * - SAM2CT's outline is drawn over the lesion beside the current one, and the
+ *   bar offers Keep;
+ * - Keep accepts the attempt, and the targets read again show outline
+ *   revision 2;
+ * - a click sends one positive point, and Discard rejects that attempt;
+ * - a mark far from the lesion names nothing;
+ * - the server's stale (409) and refused (422) answers to /segment, provoked by
+ *   altering one request in flight, are said;
+ * - a keep against a published revision that moved is sent again and kept;
+ * - nothing becomes a measurement, and another tool disarms it.
  */
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { packBox } from '../../src/readingSystem/refine/refineTestData';
+import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
 import {
-  AFFINE,
   CPU_ARGS,
   FRAME_OF_REFERENCE,
   PIXEL_MM,
-  RICH,
   SERIES,
-  SIZE,
-  SLICES,
   ipp,
   renderingOf,
   serveArchiveAndAnatomy,
 } from './rsAnatomyCase';
-import { openStudy, paneState } from './rsE2e';
+import { doc, expectOpened, openStudy, pane, paneState } from './rsE2e';
 
 test.use({ launchOptions: { args: CPU_ARGS } });
 
-/** The liver's middle slice, where the lesion is. */
+const FIXTURE = 'refine';
+/** The block's middle slice. */
 const K = 10;
-type Index = [number, number, number];
+/** The fixture SAM2CT's outline: the block grown by one voxel in plane, slices 8 to 12. */
+const SAM2CT_VOXELS = 1620;
 
-/** Grid index (slice, row, column) of image pixel (u, v) on slice k: the grid stores the rows flipped. */
-const indexOf = (u: number, v: number, k: number): Index => [k, SIZE - 1 - v, u];
 /** Image pixel (u, v) on slice k, LPS mm. */
 const worldOf = (u: number, v: number, k: number): [number, number, number] => {
   const p = ipp(k);
   return [p[0] + u * PIXEL_MM, p[1] + v * PIXEL_MM, p[2]];
 };
 
-function discVoxels(u0: number, v0: number, radius: number, slices: number[]): Index[] {
-  const out: Index[] = [];
-  for (const k of slices) {
-    for (let v = v0 - radius; v <= v0 + radius; v++) {
-      for (let u = u0 - radius; u <= u0 + radius; u++) {
-        if ((u - u0) ** 2 + (v - v0) ** 2 <= radius * radius) {
-          out.push(indexOf(u, v, k));
-        }
-      }
-    }
-  }
-  return out;
-}
-
-function maskJson(voxels: Index[], digest: string) {
-  const lo: Index = [0, 1, 2].map(a => Math.min(...voxels.map(x => x[a]))) as Index;
-  const hi: Index = [0, 1, 2].map(a => Math.max(...voxels.map(x => x[a])) + 1) as Index;
-  return { box: [lo, hi], bits: packBox(lo, hi, voxels), digest, voxels: voxels.length };
-}
-
-const CURRENT = discVoxels(15, 27, 3, [K]);
-const SAM2CT = discVoxels(15, 27, 4, [K, K + 1]);
-
-const targetJson = (maskRevision: number, voxels: Index[]) => ({
-  observationId: 'obs-e2e-1',
-  findingId: 'finding-e2e-1',
-  entryId: null,
-  kind: 'candidate',
-  label: 'liver lesion',
-  seriesRef: SERIES,
-  seriesUID: SERIES,
-  frameOfReferenceUID: FRAME_OF_REFERENCE,
-  grid: { shape: [SLICES, SIZE, SIZE], affineRAS: AFFINE },
-  seriesRevision: 1,
-  observationRevision: 1,
-  maskRevision,
-  mask: maskJson(voxels, `digest-${maskRevision}`),
-  geometry: null,
-  task: 'hepatic_lesion_boundary',
-  recipeId: 'sam2ct@pinned',
-  promptTypes: ['line', 'arrow', 'box', 'point'],
-});
-
 interface SentRefine extends Record<string, unknown> {
-  prompt: { type: string; world_mm: number[][]; polarity?: string[] };
+  prompt: { type: string; world_mm: number[][]; polarity?: string[]; frameOfReferenceUID: string };
   base_mask_revision: number | null;
 }
 
-interface Routes {
-  targetsReads: number;
+interface Traffic {
   segments: SentRefine[];
-  keeps: Array<Record<string, unknown>>;
-  answer: 'ok' | 'stale' | 'refused';
-  kept: boolean;
+  events: Array<{ event: { type: string; target?: { kind: string; id: string } } }>;
+  /** Alter the next refine's body before it goes (to provoke the server's 409 or 422). */
+  alterSegment: ((body: Record<string, unknown>) => Record<string, unknown>) | null;
+  /** Alter the next keep's (an accept's) body before it goes. */
+  alterKeep: ((body: Record<string, unknown>) => Record<string, unknown>) | null;
 }
 
-const asJson = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
-
-async function serveRefine(context: BrowserContext, s: Routes) {
-  await context.route(
-    url => /^\/rs-api\/studies\/[^/]+\/refine_targets$/.test(url.pathname),
-    route => {
-      s.targetsReads++;
-      return route.fulfill({
-        status: 200,
-        ...asJson({
-          contractVersion: 'pacsai.reading/1.18',
-          artifact: 'refine_targets',
-          snapshotId: null,
-          studyUID: 'e2e',
-          bundleHash: 'e2e',
-          mode: 'fixture',
-          targets: [s.kept ? targetJson(2, SAM2CT) : targetJson(1, CURRENT)],
-        }),
-      });
-    }
-  );
+async function watchTraffic(context: BrowserContext, t: Traffic) {
   await context.route(
     url => url.pathname === '/rs-api/segment',
-    route => {
-      s.segments.push(route.request().postDataJSON());
-      if (s.answer === 'stale') {
-        return route.fulfill({
-          status: 409,
-          ...asJson({
-            status: 'stale',
-            reason: 'the mask revision moved',
-            current: { mask_revision: 2 },
-          }),
-        });
-      }
-      if (s.answer === 'refused') {
-        return route.fulfill({
-          status: 422,
-          ...asJson({ status: 'refused', reason: 'sam2ct@pinned takes a box on one slice' }),
-        });
-      }
-      return route.fulfill({
-        status: 200,
-        ...asJson({
-          result: {
-            status: 'ok',
-            reasons: [],
-            mask_revision: 2,
-            qc: {
-              truncated_at: [],
-              truncated_at_crop: false,
-              truncated_at_volume_edge: false,
-              slices: 2,
-              partial_volume: false,
-              components: 1,
-              failures: [],
-              passed: true,
-            },
-            timing: { started_s: 0, runtime_s: 1.2, passes: 1 },
-          },
-          mask: { shape: [SLICES, SIZE, SIZE], ...maskJson(SAM2CT, 'digest-2') },
-          resultId: 'attempt-e2e-1',
-        }),
-      });
+    (route: Route) => {
+      const body = route.request().postDataJSON();
+      t.segments.push(body);
+      const alter = t.alterSegment;
+      t.alterSegment = null;
+      return alter ? route.continue({ postData: JSON.stringify(alter(body)) }) : route.fallback();
     }
   );
   await context.route(
     url => url.pathname === '/rs-api/events',
-    route => {
+    (route: Route) => {
       const body = route.request().postDataJSON();
-      if (body?.event?.type !== 'refine_keep') {
-        return route.fallback();
+      t.events.push(body);
+      const alter =
+        body?.event?.type === 'accept' && body?.event?.target?.kind === 'proposal'
+          ? t.alterKeep
+          : null;
+      if (alter) {
+        t.alterKeep = null;
+        return route.continue({ postData: JSON.stringify(alter(body)) });
       }
-      s.keeps.push(body.event);
-      s.kept = true;
-      return route.fulfill({
-        status: 200,
-        ...asJson({
-          contractVersion: body.contractVersion,
-          artifact: 'intake_response',
-          eventId: body.eventId,
-          studyUID: body.studyUID,
-          status: 'applied',
-          httpStatus: 200,
-          revision: 1,
-        }),
-      });
+      return route.fallback();
     }
   );
 }
@@ -201,15 +102,14 @@ type Refine = {
   armed?: boolean;
   phase?: string;
   targetsState?: string;
-  message?: string | null;
-  target?: { label: string } | null;
-  counts?: Record<string, number>;
+  keepPossible?: boolean | null;
+  target?: { label: string; maskRevision: number | null } | null;
 };
 const refineState = async (page: Page): Promise<Refine> =>
   ((await paneState(page))?.refine as Refine | null) ?? {};
 const phase = async (page: Page) => (await refineState(page)).phase;
 
-/** The synthetic series' stack viewport: shows slice k, and gives image pixel (u, v)'s place on the page. */
+/** The synthetic series' stack viewport shows slice k. */
 async function onSlice(page: Page, k: number): Promise<void> {
   await expect
     .poll(() =>
@@ -250,12 +150,8 @@ async function onSlice(page: Page, k: number): Promise<void> {
     .toBe(true);
 }
 
-async function pageAt(
-  page: Page,
-  u: number,
-  v: number,
-  k: number
-): Promise<{ x: number; y: number }> {
+/** Image pixel (u, v) on slice K: where it is on the page. */
+async function pageAt(page: Page, u: number, v: number): Promise<{ x: number; y: number }> {
   const p = await page.evaluate(
     ([series, world]) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -276,15 +172,15 @@ async function pageAt(
       }
       return null;
     },
-    [SERIES, worldOf(u, v, k)] as const
+    [SERIES, worldOf(u, v, K)] as const
   );
   expect(p, 'the synthetic series is on a viewport').not.toBeNull();
   return p as { x: number; y: number };
 }
 
 async function box(page: Page, from: [number, number], to: [number, number]) {
-  const a = await pageAt(page, from[0], from[1], K);
-  const b = await pageAt(page, to[0], to[1], K);
+  const a = await pageAt(page, from[0], from[1]);
+  const b = await pageAt(page, to[0], to[1]);
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 4 });
@@ -293,12 +189,16 @@ async function box(page: Page, from: [number, number], to: [number, number]) {
 }
 
 async function click(page: Page, u: number, v: number) {
-  const p = await pageAt(page, u, v, K);
+  const p = await pageAt(page, u, v);
   await page.mouse.click(p.x, p.y);
 }
 
-/** SAM2CT's outline on the refine layer: its yellow pixels' centre, and the lesion centre's place there (CSS px). */
-function previewCentre(world: number[]) {
+/**
+ * SAM2CT's outline on the refine layer: its yellow pixels' box, and where the
+ * outline's voxel edges are on that canvas (CSS px). `edges` are the outline's
+ * first and last column and row, in image pixels.
+ */
+function previewBox(edges: { u0: number; u1: number; v0: number; v1: number; k: number }) {
   const layer = document.querySelector(
     'canvas[data-pacsai-refine-layer]'
   ) as HTMLCanvasElement | null;
@@ -310,33 +210,49 @@ function previewCentre(world: number[]) {
     return null;
   }
   const { data } = layer.getContext('2d')!.getImageData(0, 0, layer.width, layer.height);
-  let n = 0;
-  let sx = 0;
-  let sy = 0;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
   for (let y = 0; y < layer.height; y++) {
     for (let x = 0; x < layer.width; x++) {
       const p = (y * layer.width + x) * 4;
       if (data[p + 3] > 0 && data[p] === 255 && data[p + 1] === 216 && data[p + 2] === 77) {
-        n++;
-        sx += x;
-        sy += y;
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
       }
     }
   }
-  // Where the image shows the lesion's centre (on the CPU path, half a pixel past its world).
-  const shift = vp.useCPURendering ? [2, 2, 0] : [0, 0, 0];
-  const c = vp.worldToCanvas([world[0] + shift[0], world[1] + shift[1], world[2]]);
-  const one = vp.worldToCanvas([world[0] + shift[0] + 4, world[1] + shift[1], world[2]]);
-  return n
-    ? { n, x: sx / n, y: sy / n, expected: { x: c[0], y: c[1] }, voxelPx: Math.abs(one[0] - c[0]) }
-    : null;
+  if (x1 < 0) {
+    return null;
+  }
+  // Image pixel (u, v)'s centre on the canvas (on the CPU path, half a pixel past its world).
+  const shift = vp.useCPURendering ? 2 : 0;
+  const at = (u: number, v: number) =>
+    vp.worldToCanvas([-128 + 4 * u + shift, -128 + 4 * v + shift, -50 + 5 * edges.k]);
+  const a = at(edges.u0 - 0.5, edges.v0 - 0.5);
+  const b = at(edges.u1 + 0.5, edges.v1 + 0.5);
+  const one = Math.abs(at(1, 0)[0] - at(0, 0)[0]);
+  return {
+    drawn: { x0, y0, x1, y1 },
+    expected: { x0: a[0], y0: a[1], x1: b[0], y1: b[1] },
+    voxelPx: one,
+  };
 }
 
-test('the refine tool: mark a lesion, see SAM2CT’s outline, keep it', async ({ page, context }) => {
+const status = (page: Page) => page.locator('[data-rs-refine-bar] [role="status"]');
+
+test('the refine tool, against the served refine routes: mark a lesion, see SAM2CT’s outline, keep it', async ({
+  page,
+  context,
+  request,
+}) => {
   const unknown: string[] = [];
   await serveArchiveAndAnatomy(context, unknown);
-  const routes: Routes = { targetsReads: 0, segments: [], keeps: [], answer: 'ok', kept: false };
-  await serveRefine(context, routes);
+  const traffic: Traffic = { segments: [], events: [], alterSegment: null, alterKeep: null };
+  await watchTraffic(context, traffic);
   await context.addInitScript(() => {
     try {
       window.localStorage.setItem('pacsai.anatomy3dViewport', 'off');
@@ -344,7 +260,8 @@ test('the refine tool: mark a lesion, see SAM2CT’s outline, keep it', async ({
       /* no storage */
     }
   });
-  await openStudy(page, RICH);
+  await openStudy(page, FIXTURE);
+  await expectOpened(request, FIXTURE);
   await expect.poll(async () => (await refineState(page)).targetsState).toBe('ready');
   expect(await renderingOf(page).catch(() => null)).not.toBe('gpu');
   await onSlice(page, K);
@@ -354,6 +271,21 @@ test('the refine tool: mark a lesion, see SAM2CT’s outline, keep it', async ({
       () => (window as any).services?.measurementService?.getMeasurements?.()?.length ?? 0
     );
   const before = await measurements();
+  type Targets = {
+    targets: Array<{
+      observationId: string;
+      seriesRevision: number;
+      observationRevision: number;
+      maskRevision: number | null;
+      label: string;
+      recipeId: string;
+      task: string;
+    }>;
+  };
+  const served = await doc<Targets>(request, FIXTURE, 'refine_targets');
+  expect(served.targets).toHaveLength(1);
+  const lesion = served.targets[0];
+  expect(lesion).toMatchObject({ label: 'liver', maskRevision: 1, recipeId: 'sam2ct@pinned' });
 
   // The button arms the tool.
   const button = page.locator('[data-cy="PacsaiRefine"]');
@@ -361,26 +293,26 @@ test('the refine tool: mark a lesion, see SAM2CT’s outline, keep it', async ({
   await button.click();
   await expect.poll(async () => (await refineState(page)).armed).toBe(true);
 
-  // A box around the lesion on its slice: one refine, naming the lesion, on the slice.
-  await box(page, [9, 21], [21, 33]);
+  // A box around the lesion on its slice: one refine naming it as the targets give it, on the slice.
+  await box(page, [6, 18], [25, 37]);
   await expect.poll(() => phase(page)).toBe('preview');
-  expect(routes.segments).toHaveLength(1);
-  const sent = routes.segments[0];
+  expect(traffic.segments).toHaveLength(1);
+  const sent = traffic.segments[0];
   expect(sent).toMatchObject({
     mode: 'refine',
     seriesRef: SERIES,
-    series_revision: 1,
-    parent_observation_id: 'obs-e2e-1',
-    parent_observation_revision: 1,
+    series_revision: lesion.seriesRevision,
+    parent_observation_id: lesion.observationId,
+    parent_observation_revision: lesion.observationRevision,
     base_mask_revision: 1,
-    recipe_id: 'sam2ct@pinned',
-    task: 'hepatic_lesion_boundary',
-    alternative: false,
+    recipe_id: lesion.recipeId,
+    task: lesion.task,
     budget: { max_passes: 1, timeout_s: 45 },
     reader: { role: 'radiologist' },
     prompt: { type: 'box', frameOfReferenceUID: FRAME_OF_REFERENCE },
   });
   expect(sent).not.toHaveProperty('trigger');
+  expect(sent).not.toHaveProperty('alternative');
   const corners = sent.prompt.world_mm;
   expect(corners).toHaveLength(2);
   for (const c of corners) {
@@ -388,15 +320,18 @@ test('the refine tool: mark a lesion, see SAM2CT’s outline, keep it', async ({
   }
   // In plane, within a pixel of where it was drawn (the CPU path's half pixel taken off).
   const xs = corners.map(c => c[0]).sort((p, q) => p - q);
-  expect(Math.abs(xs[0] - worldOf(9, 0, K)[0])).toBeLessThanOrEqual(PIXEL_MM);
-  expect(Math.abs(xs[1] - worldOf(21, 0, K)[0])).toBeLessThanOrEqual(PIXEL_MM);
+  expect(Math.abs(xs[0] - worldOf(6, 0, K)[0])).toBeLessThanOrEqual(PIXEL_MM);
+  expect(Math.abs(xs[1] - worldOf(25, 0, K)[0])).toBeLessThanOrEqual(PIXEL_MM);
 
-  // SAM2CT's outline is drawn over the lesion, beside the current one; the bar offers Keep.
-  const bar = page.locator('[data-rs-refine-bar]');
-  await expect(bar).toHaveAttribute('data-rs-refine-bar', 'preview');
-  await expect(bar.locator('[role="status"]')).toHaveText(
-    `SAM2CT’s outline: ${SAM2CT.length} voxels on 2 slices. The current one.`
+  // SAM2CT's outline is drawn over the lesion beside the current one; the bar offers Keep.
+  await expect(page.locator('[data-rs-refine-bar]')).toHaveAttribute(
+    'data-rs-refine-bar',
+    'preview'
   );
+  await expect(status(page)).toHaveText(
+    `SAM2CT’s outline: ${SAM2CT_VOXELS} voxels on 5 slices. The current one.`
+  );
+  expect((await refineState(page)).keepPossible).toBe(true);
   await expect
     .poll(async () => {
       const o = (await paneState(page))?.refineOverlay as {
@@ -405,54 +340,71 @@ test('the refine tool: mark a lesion, see SAM2CT’s outline, keep it', async ({
       return Boolean(o?.viewports?.some(v => v.preview && v.outlines === 1));
     })
     .toBe(true);
-  const drawn = await page.evaluate(previewCentre, worldOf(15, 27, K));
+  // Its edges lie on the outline's voxels (columns 7 to 24, rows 19 to 36), within a pixel and its width.
+  const drawn = await page.evaluate(previewBox, { u0: 7, u1: 24, v0: 19, v1: 36, k: K });
   expect(drawn, 'SAM2CT’s outline on the refine layer').not.toBeNull();
-  expect(Math.abs(drawn!.x - drawn!.expected.x)).toBeLessThanOrEqual(drawn!.voxelPx);
-  expect(Math.abs(drawn!.y - drawn!.expected.y)).toBeLessThanOrEqual(drawn!.voxelPx);
+  const near = (got: number, want: number) =>
+    expect(Math.abs(got - want), JSON.stringify(drawn)).toBeLessThanOrEqual(3);
+  near(drawn!.drawn.x0, drawn!.expected.x0);
+  near(drawn!.drawn.y0, drawn!.expected.y0);
+  near(drawn!.drawn.x1, drawn!.expected.x1);
+  near(drawn!.drawn.y1, drawn!.expected.y1);
 
-  // Keep: the keep goes as a refine_keep event, then the targets are read again.
-  const readsBefore = routes.targetsReads;
+  // Keep: the attempt is accepted, and the targets read again hold outline revision 2.
+  const bar = page.locator('[data-rs-refine-bar]');
   await bar.getByRole('button', { name: 'Keep' }).click();
   await expect.poll(() => phase(page)).toBe('kept');
-  expect(routes.keeps).toEqual([
-    { type: 'refine_keep', resultId: 'attempt-e2e-1', observationId: 'obs-e2e-1', maskRevision: 2 },
-  ]);
-  expect(routes.targetsReads).toBeGreaterThan(readsBefore);
-  await expect(bar.locator('[role="status"]')).toHaveText(
-    'Kept: the liver lesion’s outline is the new one.'
-  );
+  const accept = traffic.events.filter(e => e.event.type === 'accept');
+  expect(accept).toHaveLength(1);
+  expect(accept[0].event.target).toMatchObject({ kind: 'proposal' });
+  expect(accept[0].event.target?.id).toMatch(/^refine-[0-9a-f]{20}$/);
+  await expect(status(page)).toHaveText('Kept: the liver’s outline is the new one.');
+  expect((await refineState(page)).target?.maskRevision).toBe(2);
+  expect((await doc<Targets>(request, FIXTURE, 'refine_targets')).targets[0].maskRevision).toBe(2);
+  await expect(pane(page)).toContainText('Kept the new outline');
 
-  // A click inside the lesion: one positive point.
+  // A click inside the lesion: one positive point against revision 2; Discard rejects that attempt.
   await click(page, 15, 27);
   await expect.poll(() => phase(page)).toBe('preview');
-  expect(routes.segments[1].prompt).toMatchObject({ type: 'point', polarity: ['positive'] });
-  expect(routes.segments[1].base_mask_revision).toBe(2);
+  expect(traffic.segments[1].prompt).toMatchObject({ type: 'point', polarity: ['positive'] });
+  expect(traffic.segments[1].base_mask_revision).toBe(2);
   await bar.getByRole('button', { name: 'Discard' }).click();
   await expect.poll(() => phase(page)).toBe('idle');
+  await expect.poll(() => traffic.events.filter(e => e.event.type === 'reject').length).toBe(1);
+  expect(traffic.events.find(e => e.event.type === 'reject')?.event.target?.kind).toBe('proposal');
   await expect(page.locator('[data-rs-refine-bar]')).toHaveCount(0);
 
   // Far from the lesion: nothing is sent, and the bar says why.
-  await click(page, 50, 12);
+  await click(page, 50, 8);
   await expect.poll(() => phase(page)).toBe('missed');
-  await expect(page.locator('[data-rs-refine-bar="missed"] [role="status"]')).toHaveText(
-    'No lesion the system found is here.'
-  );
-  expect(routes.segments).toHaveLength(2);
+  await expect(status(page)).toHaveText('No lesion the system found is here.');
+  expect(traffic.segments).toHaveLength(2);
 
-  // A stale answer reads the targets again and asks for a new mark; a refused one says why.
-  routes.answer = 'stale';
-  const readsAtStale = routes.targetsReads;
-  await box(page, [9, 21], [21, 33]);
+  // The server's stale answer (the request altered to name outline revision 7): said, and the targets read again.
+  traffic.alterSegment = body => ({ ...body, base_mask_revision: 7 });
+  await box(page, [6, 18], [25, 37]);
   await expect.poll(() => phase(page)).toBe('answered');
-  await expect(page.locator('[data-rs-refine-bar] [role="status"]')).toContainText(
-    'changed since this page read it'
-  );
-  await expect.poll(() => routes.targetsReads).toBeGreaterThan(readsAtStale);
-  routes.answer = 'refused';
-  await box(page, [9, 21], [21, 33]);
-  await expect(page.locator('[data-rs-refine-bar] [role="status"]')).toHaveText(
-    'Not refined: sam2ct@pinned takes a box on one slice.'
-  );
+  await expect(status(page)).toContainText('changed since this page read it');
+  // Its refused answer (a frame of reference that is not the series').
+  traffic.alterSegment = body => ({
+    ...body,
+    prompt: { ...(body.prompt as Record<string, unknown>), frameOfReferenceUID: '2.25.999' },
+  });
+  await box(page, [6, 18], [25, 37]);
+  await expect(status(page)).toHaveText(/^Not refined: .+\.$/);
+
+  // A keep made against a published revision that moved (altered in flight) is answered 409, then sent again and kept.
+  await box(page, [6, 18], [25, 37]);
+  await expect.poll(() => phase(page)).toBe('preview');
+  traffic.alterKeep = body => ({
+    ...body,
+    baseRevision: 0,
+    capture: { ...(body.capture as Record<string, unknown>), reportRevision: 0 },
+  });
+  await bar.getByRole('button', { name: 'Keep' }).click();
+  await expect.poll(() => phase(page)).toBe('kept');
+  expect(traffic.events.filter(e => e.event.type === 'accept')).toHaveLength(3);
+  expect((await refineState(page)).target?.maskRevision).toBe(3);
 
   // Nothing the tool did became a measurement, and another tool disarms it.
   expect(await measurements()).toBe(before);

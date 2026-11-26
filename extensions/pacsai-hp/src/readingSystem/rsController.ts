@@ -124,15 +124,13 @@ export interface RsController {
   setCollapsed(collapsed: boolean): void;
   accept(inboxEntryId: string): Promise<void>;
   /**
-   * RS-38: keep a refine's outline as the lesion's next one (a `refine_keep`
-   * event). The intake's answer, or null when nothing was sent (no study, a
-   * post already running) or the service did not answer.
+   * RS-38: keep a refine's outline as the lesion's next one: accept its attempt,
+   * a proposal named by its result id (D-347). The intake's answer, or null when
+   * nothing was sent (no study, a post already running) or no answer came.
    */
-  keepRefine(keep: {
-    resultId: string;
-    observationId: string;
-    maskRevision: number | null;
-  }): Promise<RsIntakeResponse | null>;
+  keepRefine(resultId: string): Promise<RsIntakeResponse | null>;
+  /** RS-38: discard it: reject the attempt (optional: an attempt left alone stays recorded). */
+  discardRefine(resultId: string): Promise<RsIntakeResponse | null>;
   reject(inboxEntryId: string): Promise<void>;
   undo(revisionId: string): Promise<void>;
   retry(): Promise<void>;
@@ -627,7 +625,16 @@ export function createRsController(deps: RsControllerDeps): RsController {
     accept: id => send({ type: 'accept', target: { kind: 'inbox_entry', id } }, 'Accepted'),
     reject: id => send({ type: 'reject', target: { kind: 'inbox_entry', id } }, 'Rejected'),
     undo: revisionId => send({ type: 'undo', revisionId }, 'Undone'),
-    keepRefine: keep => sendForAnswer({ type: 'refine_keep', ...keep }, 'Kept the new outline'),
+    keepRefine: resultId =>
+      sendForAnswer(
+        { type: 'accept', target: { kind: 'proposal', id: resultId } },
+        'Kept the new outline'
+      ),
+    discardRefine: resultId =>
+      sendForAnswer(
+        { type: 'reject', target: { kind: 'proposal', id: resultId } },
+        'Discarded SAM2CT’s outline'
+      ),
     retry() {
       if (!lastFailed || state.busy) {
         return Promise.resolve();

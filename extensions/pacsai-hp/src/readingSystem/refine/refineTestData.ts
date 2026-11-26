@@ -92,7 +92,9 @@ export function targetJson(
     findingId: 'finding-1',
     entryId: null,
     kind: 'candidate',
+    reported: false,
     label: 'liver lesion',
+    location: { organOfOrigin: 'liver' },
     seriesRef: SERIES,
     seriesUID: SERIES,
     frameOfReferenceUID: FOR,
@@ -120,7 +122,9 @@ export function targetsDoc(
     studyUID: 'study-under-test',
     bundleHash: 'bundle-under-test',
     mode: 'fixture',
+    revision: 4,
     targets,
+    withheld: [],
     ...over,
   };
 }
@@ -131,8 +135,16 @@ export function makeTarget(
   voxels?: IndexTriple[]
 ): RefineTarget {
   const json = targetJson(over, voxels);
+  const loc = json.location as Record<string, string | undefined> | null;
   return {
     ...(json as unknown as RefineTarget),
+    location: loc
+      ? {
+          organOfOrigin: loc.organOfOrigin ?? null,
+          laterality: loc.laterality ?? null,
+          third: loc.third ?? null,
+        }
+      : null,
     geometry: (json.geometry as RefineTarget['geometry']) ?? null,
   };
 }
@@ -145,7 +157,9 @@ export function makeTargets(targets: RefineTarget[]): RefineTargets {
     studyUID: 'study-under-test',
     bundleHash: 'bundle-under-test',
     mode: 'fixture',
+    revision: 4,
     targets,
+    withheld: [],
     dropped: 0,
   };
 }
@@ -194,6 +208,7 @@ export function segmentOk(
       digest: 'digest-2',
     },
     resultId: 'attempt-1',
+    keep: { possible: true, reason: null },
     ...over,
   };
 }

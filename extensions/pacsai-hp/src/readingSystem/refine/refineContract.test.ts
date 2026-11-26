@@ -31,6 +31,10 @@ describe('refine targets document', () => {
       [3, 13, 15],
     ]);
     expect(t.promptTypes).toContain('box');
+    expect(t.reported).toBe(false);
+    expect(t.location).toEqual({ organOfOrigin: 'liver', laterality: null, third: null });
+    expect(doc.revision).toBe(4);
+    expect(doc.withheld).toEqual([]);
   });
 
   it('refuses another mode, another artifact and a document with no target list', () => {
@@ -111,6 +115,26 @@ describe('refine targets document', () => {
   });
 });
 
+describe('withheld lesions', () => {
+  it('reads why a lesion cannot be refined now, and leaves out what it cannot read', () => {
+    const doc = readRefineTargets(
+      targetsDoc([], {
+        withheld: [
+          { observationId: 'obs-9', entryId: null, reason: 'no SAM2CT backend is registered' },
+          { observationId: 'obs-8', entryId: 'F2', reason: 'a later outline waits in the inbox' },
+          { observationId: '', reason: 'x' },
+          'not an entry',
+        ],
+      }),
+      'fixture'
+    );
+    expect(doc.withheld).toEqual([
+      { observationId: 'obs-9', entryId: null, reason: 'no SAM2CT backend is registered' },
+      { observationId: 'obs-8', entryId: 'F2', reason: 'a later outline waits in the inbox' },
+    ]);
+  });
+});
+
 describe('packed outlines', () => {
   it('measures base64 exactly', () => {
     expect(base64Length('AAAA')).toBe(3);
@@ -163,11 +187,11 @@ describe('refine request', () => {
       },
       recipe_id: 'sam2ct@pinned',
       task: 'hepatic_lesion_boundary',
-      alternative: false,
       budget: { ...REFINE_BUDGET },
       reader,
     });
     expect(req).not.toHaveProperty('trigger');
+    expect(req).not.toHaveProperty('alternative');
   });
 
   it('sends a click as one positive point, and a lesion with no outline with a null base', () => {
@@ -199,9 +223,31 @@ describe('refine answer', () => {
       kind: 'result',
       status: 'ok',
       resultId: 'attempt-1',
+      keep: { possible: true, reason: null },
       maskRevision: 2,
       runtimeS: 2.5,
       qc: { slices: 2, components: 1, partialVolume: false, truncated: false, passed: true },
+    });
+  });
+
+  it('says whether the attempt can be kept, and why not', () => {
+    const qcFailed = segmentOk(disc([10, 12], 3, [2]), {
+      keep: {
+        possible: false,
+        reason: 'Its outline failed QC (partial volume), so it cannot be kept.',
+      },
+    });
+    expect(readSegmentAnswer(200, qcFailed, SHAPE)).toMatchObject({
+      keep: {
+        possible: false,
+        reason: 'Its outline failed QC (partial volume), so it cannot be kept.',
+      },
+    });
+    const silent = segmentOk(disc([10, 12], 3, [2]), { keep: undefined });
+    expect(readSegmentAnswer(200, silent, SHAPE)).toMatchObject({ keep: { possible: false } });
+    const noOutline = segmentOk(disc([10, 12], 3, [2]), { mask: null });
+    expect(readSegmentAnswer(200, noOutline, SHAPE)).toMatchObject({
+      keep: { possible: false, reason: 'There is no outline to keep.' },
     });
   });
 

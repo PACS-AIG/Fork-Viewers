@@ -99,16 +99,20 @@ export default function getToolbarModule({ commandsManager, servicesManager }: w
       // evaluator decides the rest.
       name: REFINE_AVAILABLE_EVALUATOR,
       evaluate: () => {
-        const state = currentRefineStore()?.getView().targetsState;
+        const view = currentRefineStore()?.getView();
+        const state = view?.targetsState;
         if (state === 'ready') {
           return {};
         }
+        const withheld = view?.withheld[0]?.reason;
         return {
           disabled: true,
           disabledText:
             state === 'loading'
               ? 'Reading the lesions to refine…'
-              : 'No lesion the CT analysis system found to refine in this study',
+              : withheld
+                ? `No lesion can be refined now: ${withheld}`
+                : 'No lesion the CT analysis system found to refine in this study',
         };
       },
     },

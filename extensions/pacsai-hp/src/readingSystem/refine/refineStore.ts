@@ -10,9 +10,13 @@
  * is the hit test's (refineHit); its request names the lesion's live
  * revisions (refineContract.buildSegmentRequest). SAM2CT's outline is shown
  * beside the current one until the reader keeps it, discards it, or marks
- * again. A keep goes through the pane's controller (a `refine_keep` event),
- * and the targets are read again after it, so the kept outline is the one the
- * record now holds.
+ * again. A keep goes through the pane's controller: the 1.1 accept of the
+ * attempt, a proposal named by its result id (D-347); a discard rejects it.
+ * Only an attempt the answer says can be kept is offered for keeping. After a
+ * keep the targets are read again, so the kept outline is the one the record
+ * now holds. A keep answered 409 is sent again when only the published
+ * revision moved (the targets still hold the revisions it was drawn against),
+ * else the reader is asked to mark the lesion again.
  *
  * Pure: the client, the clock, the timers and the keep are handed in.
  */
@@ -20,12 +24,14 @@ import type { Vec3 } from '../anatomy/anatomyGeometry';
 import type { RsIntakeResponse } from '../rsContract';
 import {
   buildSegmentRequest,
+  type RefineKeep,
   type RefineMask,
   type RefinePrompt,
   type RefinePromptType,
   type RefineQc,
   type RefineTarget,
   type RefineTargets,
+  type RefineWithheld,
   type SegmentAnswer,
   type SegmentRequest,
   type IndexTriple,
@@ -36,6 +42,8 @@ import { unpackMask, type UnpackedMask } from './refineMask';
 /** The current outline's colour, and SAM2CT's (the overlay draws in these, the bar keys them). */
 export const CURRENT_RGB: [number, number, number] = [255, 255, 255];
 export const PREVIEW_RGB: [number, number, number] = [255, 216, 77];
+/** The reader's mark (the box or click being drawn, or sent): the pane's blue, apart from both outlines. */
+export const MARK_RGB: [number, number, number] = [138, 180, 248];
 
 /** A drag shorter than this (canvas pixels) is a click. */
 export const MIN_BOX_PX = 4;
@@ -65,11 +73,17 @@ export interface RefinePreview {
   resultId: string | null;
   maskRevision: number | null;
   qc: RefineQc | null;
+  /** Whether it can be kept, and if not, why (the answer's). */
+  keep: RefineKeep;
+  /** The lesion's revisions it was drawn against. */
+  against: { seriesRevision: number; observationRevision: number; maskRevision: number | null };
 }
 
 export interface RefineView {
   targetsState: TargetsState;
   targets: PreparedTarget[];
+  /** Lesions that cannot be refined now, with why (the server's). */
+  withheld: RefineWithheld[];
   /** Entries the viewer could not read (left out). */
   dropped: number;
   /** The tool is the active mouse tool. */
@@ -96,13 +110,11 @@ export interface RefineClient {
 export interface RefineStoreDeps {
   client: RefineClient;
   reader: () => { id: string; role: string };
-  /** The pane's keep (RsController.keepRefine). */
-  keep: (keep: {
-    resultId: string;
-    observationId: string;
-    maskRevision: number | null;
-  }) => Promise<RsIntakeResponse | null>;
-  /** Select a report finding in the pane, when the lesion is one. */
+  /** The pane's keep (RsController.keepRefine: accept the attempt). */
+  keep: (resultId: string) => Promise<RsIntakeResponse | null>;
+  /** The pane's discard (RsController.discardRefine: reject the attempt). */
+  discard?: (resultId: string) => Promise<RsIntakeResponse | null>;
+  /** Select a finding in the pane, when the report renders its sentence. */
   selectEntry?: (entryId: string) => void;
   now: () => number;
   setTimer: (fn: () => void, ms: number) => unknown;
@@ -195,10 +207,13 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
     failures: 0,
     keeps: 0,
     kept: 0,
+    conflicts: 0,
+    discards: 0,
   };
   let view: RefineView = {
     targetsState: 'idle',
     targets: [],
+    withheld: [],
     dropped: 0,
     armed: false,
     ...idleFields,
@@ -247,6 +262,7 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
       set({
         targetsState: targets.length ? 'ready' : 'none',
         targets,
+        withheld: doc.withheld,
         dropped: doc.dropped + (doc.targets.length - targets.length),
       });
     } catch (e) {
@@ -255,7 +271,12 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
       }
       counts.readFailures++;
       const status = (e as { status?: number }).status;
-      set({ targetsState: status === 404 ? 'none' : 'failed', targets: [], dropped: 0 });
+      set({
+        targetsState: status === 404 ? 'none' : 'failed',
+        targets: [],
+        withheld: [],
+        dropped: 0,
+      });
     }
   }
 
@@ -314,16 +335,24 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
         resultId: answer.resultId,
         maskRevision: answer.maskRevision,
         qc: answer.qc,
+        keep: answer.keep,
+        against: {
+          seriesRevision: target.seriesRevision,
+          observationRevision: target.observationRevision,
+          maskRevision: target.maskRevision,
+        },
       };
       set({
         phase: 'preview',
         startedAt: null,
         preview,
         canRetry: true,
-        message: {
-          level: preview.qc?.passed === false ? 'warn' : 'info',
-          text: `SAM2CT’s outline: ${describePreview(preview)}.`,
-        },
+        message: preview.keep.possible
+          ? { level: 'info', text: `SAM2CT’s outline: ${describePreview(preview)}.` }
+          : {
+              level: 'warn',
+              text: `SAM2CT’s outline: ${describePreview(preview)}. ${preview.keep.reason ?? 'It cannot be kept.'}`,
+            },
       });
       return;
     }
@@ -366,7 +395,14 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
       clearNote();
       study = next;
       down = null;
-      view = { ...view, ...idleFields, targetsState: 'idle', targets: [], dropped: 0 };
+      view = {
+        ...view,
+        ...idleFields,
+        targetsState: 'idle',
+        targets: [],
+        withheld: [],
+        dropped: 0,
+      };
       notify();
       void load(generation);
     },
@@ -375,7 +411,14 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
       clearNote();
       study = null;
       down = null;
-      view = { ...view, ...idleFields, targetsState: 'idle', targets: [], dropped: 0 };
+      view = {
+        ...view,
+        ...idleFields,
+        targetsState: 'idle',
+        targets: [],
+        withheld: [],
+        dropped: 0,
+      };
       notify();
     },
     refresh: () => load(generation),
@@ -438,7 +481,7 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
         fadeTo('missed');
         return;
       }
-      if (hit.target.entryId) {
+      if (hit.target.reported && hit.target.entryId) {
         deps.selectEntry?.(hit.target.entryId);
       }
       void send(hit.target, hit.prompt, viewportId);
@@ -457,25 +500,50 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
       if (view.phase !== 'preview' || !p || !target) {
         return;
       }
-      if (!p.resultId) {
-        set({
-          message: {
-            level: 'warn',
-            text: 'The CT analysis service keeps no refine attempts yet, so this outline cannot be saved.',
-          },
-        });
+      if (!p.keep.possible || !p.resultId) {
+        set({ message: { level: 'warn', text: p.keep.reason ?? 'This outline cannot be kept.' } });
         return;
       }
+      const resultId = p.resultId;
       const gen = generation;
       counts.keeps++;
       set({ phase: 'keeping', message: { level: 'info', text: 'Keeping the new outline…' } });
-      const answer = await deps.keep({
-        resultId: p.resultId,
-        observationId: target.observationId,
-        maskRevision: p.maskRevision,
-      });
+      let answer = await deps.keep(resultId);
       if (gen !== generation) {
         return;
+      }
+      if (answer?.status === 'conflict') {
+        // The published revision moved (any edit since: the attempt may still hold), or the
+        // attempt's evidence did ("... draw again"): the targets read again say which.
+        counts.conflicts++;
+        await load(gen);
+        if (gen !== generation) {
+          return;
+        }
+        const now = currentOf(target);
+        const unchanged =
+          !!now &&
+          now.seriesRevision === p.against.seriesRevision &&
+          now.observationRevision === p.against.observationRevision &&
+          now.maskRevision === p.against.maskRevision &&
+          !/draw again\.?$/i.test(answer.reason ?? '');
+        if (!unchanged) {
+          set({
+            phase: 'answered',
+            preview: null,
+            target: now ?? target,
+            canRetry: false,
+            message: {
+              level: 'warn',
+              text: 'The lesion changed since SAM2CT drew this outline. Its outline is shown as it is now: mark it again.',
+            },
+          });
+          return;
+        }
+        answer = await deps.keep(resultId);
+        if (gen !== generation) {
+          return;
+        }
       }
       if (answer?.status === 'applied') {
         counts.kept++;
@@ -494,15 +562,24 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
         fadeTo('kept');
         return;
       }
+      if (answer?.status === 'rejected' && /is not an open proposal/.test(answer.reason ?? '')) {
+        set({
+          phase: 'answered',
+          preview: null,
+          canRetry: true,
+          message: {
+            level: 'warn',
+            text: 'This outline can no longer be kept: it was kept, discarded or closed. Try again for a new one.',
+          },
+        });
+        return;
+      }
       const text = !answer
         ? 'Not kept: the change did not go (the pane was busy, or the service did not answer). Try Keep again.'
         : answer.status === 'conflict'
-          ? 'Not kept: the record moved before this reached it. Mark the lesion again.'
+          ? 'Not kept: the record moved again before this reached it. Try Keep again.'
           : `Not kept: ${answer.reason ?? answer.status}.`;
       set({ phase: 'preview', message: { level: answer ? 'warn' : 'error', text } });
-      if (answer?.status === 'conflict') {
-        void load(gen);
-      }
     },
     discard() {
       if (
@@ -511,6 +588,13 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
         view.phase === 'missed' ||
         view.phase === 'kept'
       ) {
+        const p = view.preview;
+        // Only an attempt that could be kept is open (a proposal): rejecting it records the
+        // reader's discard. Optional: an attempt left alone stays recorded.
+        if (view.phase === 'preview' && p?.resultId && p.keep.possible && deps.discard) {
+          counts.discards++;
+          void deps.discard(p.resultId);
+        }
         clearNote();
         set({ ...idleFields });
       }
@@ -538,12 +622,20 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
       study: study ? deps.studyRef(study) : null,
       targetsState: view.targetsState,
       targets: view.targets.length,
+      withheld: view.withheld.length,
       dropped: view.dropped,
       armed: view.armed,
       phase: view.phase,
       mark: view.mark?.type ?? null,
-      target: view.target ? { kind: view.target.kind, label: view.target.label } : null,
+      target: view.target
+        ? {
+            kind: view.target.kind,
+            label: view.target.label,
+            maskRevision: view.target.maskRevision,
+          }
+        : null,
       previewVoxels: view.preview?.unpacked.voxels ?? null,
+      keepPossible: view.preview ? view.preview.keep.possible : null,
       message: view.message?.text ?? null,
       counts: { ...counts },
     }),

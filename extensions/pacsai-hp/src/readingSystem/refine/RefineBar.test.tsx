@@ -112,9 +112,28 @@ describe('refine bar', () => {
       fireEvent.click(s.button('Keep') as HTMLButtonElement);
     });
     await flush();
-    expect(s.keeps).toEqual([{ resultId: 'attempt-1', observationId: 'obs-1', maskRevision: 2 }]);
+    expect(s.keeps).toEqual(['attempt-1']);
     expect(s.bar()?.getAttribute('data-rs-refine-bar')).toBe('kept');
     expect(s.status()).toBe('Kept: the liver lesion’s outline is the new one.');
+    act(() => s.host.destroy());
+  });
+
+  it('offers no Keep for an outline that cannot be kept, and says why', async () => {
+    const s = await setup();
+    const reason = 'Its outline failed QC (partial volume), so it cannot be kept.';
+    s.setAnswer(
+      async () =>
+        readSegmentAnswer(
+          200,
+          segmentOk(disc([10, 12], 3, [2]), { keep: { possible: false, reason } }),
+          SHAPE
+        ) as SegmentAnswer
+    );
+    await s.mark();
+    expect(s.bar()?.getAttribute('data-rs-refine-bar')).toBe('preview');
+    expect(s.status()?.endsWith(`The current one. ${reason}`)).toBe(true);
+    expect(s.button('Keep')).toBeUndefined();
+    expect(s.button('Discard')).toBeDefined();
     act(() => s.host.destroy());
   });
 

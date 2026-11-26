@@ -10,16 +10,18 @@
  *   GET  /studies/{uid}/refine_targets   the lesions a reader may refine: each
  *        one's observation, its series and grid, the revisions a request
  *        names, and its current outline (in the packed form /segment answers);
+ *        and those withheld now, with why;
  *   POST /segment                        one refine (mode "refine"): 200 with
- *        the result (ok, failed or unavailable), its mask and its id; 409 stale
- *        (with the current revision); 422 refused (the reason); 503 when the
- *        archive did not give the series' pixels;
- *   POST /events  refine_keep            the reader keeps a result by its id.
+ *        the result (ok, failed or unavailable), its mask, its attempt's id and
+ *        whether it can be kept (and if not, why); 409 stale (with the current
+ *        revision); 422 refused (the reason); 503 when the archive did not give
+ *        the series' pixels;
+ *   POST /events  accept / reject        Keep and Discard: the 1.1 accept or
+ *        reject of the attempt, a proposal named by its result id.
  *
- * The routes and fields follow the refine plan's proposal to ct-analysis-system
- * (26 Nov 2026); that repository's contract note settles them. A reader of an
- * older minor ignores fields it does not know; an entry this viewer cannot read
- * is left out (counted), never drawn.
+ * As ct-analysis-system's D-347 settled them (output contract 1.18, 26 Nov
+ * 2026). A reader of an older minor ignores fields it does not know; an entry
+ * this viewer cannot read is left out (counted), never drawn.
  *
  * Pure: no window, React or OHIF here.
  */
@@ -60,14 +62,23 @@ export interface RefineGeometry {
   world: Vec3[];
 }
 
+export interface RefineLocation {
+  organOfOrigin: string | null;
+  laterality: string | null;
+  third: string | null;
+}
+
 export interface RefineTarget {
   observationId: string;
   findingId: string | null;
-  /** The report entry it is, or null for a candidate the report does not name. */
+  /** The published draft's entry for it (kind `finding`), or null (kind `candidate`). */
   entryId: string | null;
   kind: 'finding' | 'candidate';
+  /** Whether the report renders its sentence: only then is it selected in the pane. */
+  reported: boolean;
   /** What the reader is told it is: its organ or location, never a model's class. */
   label: string;
+  location: RefineLocation | null;
   seriesRef: string;
   seriesUID: string;
   frameOfReferenceUID: string;
@@ -83,9 +94,19 @@ export interface RefineTarget {
   promptTypes: string[];
 }
 
+/** A lesion that cannot be refined now, and why (in the server's words). */
+export interface RefineWithheld {
+  observationId: string;
+  entryId: string | null;
+  reason: string;
+}
+
 export interface RefineTargets extends RsEnvelope {
   artifact: 'refine_targets';
+  /** The published revision it was read at. */
+  revision: number | null;
   targets: RefineTarget[];
+  withheld: RefineWithheld[];
   /** Entries this viewer could not read: left out, never drawn. */
   dropped: number;
 }
@@ -231,12 +252,21 @@ export function readTarget(v: unknown): RefineTarget | null {
   if ((mask === null) !== (maskRevision === null)) {
     return null;
   }
+  const loc = isObject(v.location) ? v.location : null;
   return {
     observationId,
     findingId,
     entryId,
     kind: v.kind,
+    reported: v.reported === true,
     label: text(v.label) ?? 'lesion',
+    location: loc
+      ? {
+          organOfOrigin: text(loc.organOfOrigin),
+          laterality: text(loc.laterality),
+          third: text(loc.third),
+        }
+      : null,
     seriesRef,
     seriesUID,
     frameOfReferenceUID,
@@ -268,7 +298,23 @@ export function readRefineTargets(doc: unknown, mode: RsMode): RefineTargets {
       dropped++;
     }
   }
-  return { ...d, artifact: 'refine_targets', targets, dropped };
+  const raw = d as unknown as { revision?: unknown; withheld?: unknown };
+  const withheld: RefineWithheld[] = [];
+  for (const w of Array.isArray(raw.withheld) ? raw.withheld : []) {
+    const observationId = isObject(w) ? text(w.observationId) : null;
+    const reason = isObject(w) ? text(w.reason) : null;
+    if (isObject(w) && observationId && reason) {
+      withheld.push({ observationId, entryId: text(w.entryId), reason });
+    }
+  }
+  return {
+    ...d,
+    artifact: 'refine_targets',
+    revision: revision(raw.revision),
+    targets,
+    withheld,
+    dropped,
+  };
 }
 
 /** Whether a target's recipe takes this tool's mark. */
@@ -298,7 +344,6 @@ export interface SegmentRequest {
   };
   recipe_id: string;
   task: string;
-  alternative: false;
   budget: { max_passes: number; timeout_s: number };
   /** Who asked: the app's proxy writes the signed-in reader's id here. */
   reader: { id: string; role: string };
@@ -306,7 +351,8 @@ export interface SegmentRequest {
 
 /**
  * A reader's refine of this target: the task's own recipe, not an alternate
- * (none can run yet), with the reader's mark; a click is one positive point.
+ * (none can run yet: `alternative` and `trigger` are left out, as D-347 asks),
+ * with the reader's mark; a click is one positive point.
  */
 export function buildSegmentRequest(
   target: RefineTarget,
@@ -333,7 +379,6 @@ export function buildSegmentRequest(
     },
     recipe_id: target.recipeId,
     task: target.task,
-    alternative: false,
     budget: { ...REFINE_BUDGET },
     reader: { id: reader.id, role: reader.role },
   };
@@ -350,13 +395,20 @@ export interface RefineQc {
   failures: string[];
 }
 
+/** Whether the attempt can be kept, and if not, why (one sentence for the bar). */
+export interface RefineKeep {
+  possible: boolean;
+  reason: string | null;
+}
+
 export type SegmentAnswer =
   | {
       kind: 'result';
       status: 'ok' | 'failed' | 'unavailable';
       reasons: string[];
-      /** The attempt's id, which a keep names (null: the server keeps no attempts). */
+      /** The attempt's id: the proposal a keep accepts. */
       resultId: string | null;
+      keep: RefineKeep;
       maskRevision: number | null;
       mask: RefineMask | null;
       qc: RefineQc | null;
@@ -413,7 +465,11 @@ export function readSegmentAnswer(
     return { kind: 'refused', reason: text(b.reason) ?? 'the CT analysis service refused it' };
   }
   if (status === 503) {
-    return { kind: 'no_pixels', reason: 'the archive did not give the series’ images' };
+    const b = isObject(body) ? body : {};
+    return {
+      kind: 'no_pixels',
+      reason: text(b.reason) ?? 'the archive did not give the series’ images',
+    };
   }
   if (status !== 200 || !isObject(body) || !isObject(body.result)) {
     return null;
@@ -428,11 +484,19 @@ export function readSegmentAnswer(
   }
   const timing = isObject(r.timing) ? r.timing : {};
   const okWithoutOutline = r.status === 'ok' && !mask;
+  const resultId = text(body.resultId);
+  const keep: RefineKeep = isObject(body.keep)
+    ? { possible: body.keep.possible === true, reason: text(body.keep.reason) }
+    : { possible: false, reason: 'The CT analysis service did not say this outline can be kept.' };
   return {
     kind: 'result',
     status: okWithoutOutline ? 'failed' : r.status,
     reasons: okWithoutOutline ? ['no outline came back'] : strings(r.reasons),
-    resultId: text(body.resultId),
+    resultId,
+    keep:
+      keep.possible && (!resultId || okWithoutOutline || r.status !== 'ok')
+        ? { possible: false, reason: 'There is no outline to keep.' }
+        : keep,
     maskRevision: revision(r.mask_revision),
     mask,
     qc: readQc(r.qc),

@@ -243,7 +243,8 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
   refine = createRefineStore({
     client,
     reader: () => ({ id: readerId(), role: READER_ROLE }),
-    keep: k => c.keepRefine(k),
+    keep: resultId => c.keepRefine(resultId),
+    discard: resultId => c.discardRefine(resultId),
     selectEntry: entryId => selectEntry(c, entryId),
     now: () => Date.now(),
     setTimer: (fn, ms) => win.setTimeout(fn, ms),
