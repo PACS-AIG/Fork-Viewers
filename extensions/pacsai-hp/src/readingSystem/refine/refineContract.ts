@@ -421,6 +421,16 @@ export type SegmentAnswer =
 const strings = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
 
+/** A reason as the bar gives it: one sentence, with its capital and its full stop. */
+function sentence(s: string | null): string | null {
+  const t = s?.trim();
+  if (!t) {
+    return null;
+  }
+  const capital = t.charAt(0).toUpperCase() + t.slice(1);
+  return /[.!?…]$/.test(capital) ? capital : `${capital}.`;
+}
+
 function readQc(v: unknown): RefineQc | null {
   if (!isObject(v)) {
     return null;
@@ -485,18 +495,33 @@ export function readSegmentAnswer(
   const timing = isObject(r.timing) ? r.timing : {};
   const okWithoutOutline = r.status === 'ok' && !mask;
   const resultId = text(body.resultId);
-  const keep: RefineKeep = isObject(body.keep)
-    ? { possible: body.keep.possible === true, reason: text(body.keep.reason) }
-    : { possible: false, reason: 'The CT analysis service did not say this outline can be kept.' };
+  // What the answer says of keeping the attempt; its reason is one sentence for the reader (D-347).
+  const said: RefineKeep | null = isObject(body.keep)
+    ? { possible: body.keep.possible === true, reason: sentence(text(body.keep.reason)) }
+    : null;
+  let keep: RefineKeep;
+  if (r.status !== 'ok' || okWithoutOutline) {
+    // No outline, so nothing to keep; the bar says why in the answer's words when it gives them.
+    keep = { possible: false, reason: said && !said.possible ? said.reason : null };
+  } else if (!said) {
+    keep = {
+      possible: false,
+      reason: 'The CT analysis service did not say this outline can be kept.',
+    };
+  } else if (said.possible && !resultId) {
+    keep = {
+      possible: false,
+      reason: 'The CT analysis service gave this outline no id, so it cannot be kept.',
+    };
+  } else {
+    keep = said;
+  }
   return {
     kind: 'result',
     status: okWithoutOutline ? 'failed' : r.status,
     reasons: okWithoutOutline ? ['no outline came back'] : strings(r.reasons),
     resultId,
-    keep:
-      keep.possible && (!resultId || okWithoutOutline || r.status !== 'ok')
-        ? { possible: false, reason: 'There is no outline to keep.' }
-        : keep,
+    keep,
     maskRevision: revision(r.mask_revision),
     mask,
     qc: readQc(r.qc),

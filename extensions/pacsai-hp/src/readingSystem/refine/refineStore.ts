@@ -359,9 +359,12 @@ export function createRefineStore(deps: RefineStoreDeps): RefineStore {
     let message: RefineMessage;
     if (answer.kind === 'result') {
       counts.failures++;
+      // No outline: the answer's own reason for the reader when it gives one (D-347), else SAM2CT's words.
       message = {
         level: 'warn',
-        text: `SAM2CT gave no outline (${answer.status}${answer.reasons.length ? `: ${answer.reasons.join('; ')}` : ''}).`,
+        text:
+          answer.keep.reason ??
+          `SAM2CT gave no outline (${answer.status}${answer.reasons.length ? `: ${answer.reasons.join('; ')}` : ''}).`,
       };
     } else if (answer.kind === 'stale') {
       counts.stale++;
