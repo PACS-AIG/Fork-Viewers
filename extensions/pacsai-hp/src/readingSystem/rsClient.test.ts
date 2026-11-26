@@ -170,3 +170,74 @@ describe('the reading system client (RS-36)', () => {
     await expect(fixture.anatomy('s')).rejects.toThrow(/clinical documents/);
   });
 });
+
+describe('the reading system client: the refine routes (RS-38)', () => {
+  const shape: [number, number, number] = [6, 20, 24];
+
+  it("reads a study's refine targets under the base, with the page credentials", async () => {
+    const { targetsDoc, targetJson } = jest.requireActual('./refine/refineTestData');
+    const { calls, fetchFn } = fakeFetch(() => ({ status: 200, body: targetsDoc([targetJson()]) }));
+    const client = createRsClient({ base: '/rs-api', mode: 'fixture', fetchFn });
+    const doc = await client.refineTargets('a b');
+    expect(doc.targets).toHaveLength(1);
+    expect(calls[0].url).toBe('/rs-api/studies/a%20b/refine_targets');
+    expect(calls[0].init).toMatchObject({ credentials: 'include', cache: 'no-store' });
+    expect(JSON.stringify(calls[0].init)).not.toMatch(/authorization|bearer/i);
+  });
+
+  it('says a study has no refine targets by its status', async () => {
+    const { fetchFn } = fakeFetch(() => ({ status: 404, body: { detail: 'no' } }));
+    const client = createRsClient({ base: '/rs-api', mode: 'fixture', fetchFn });
+    await expect(client.refineTargets('s')).rejects.toMatchObject({
+      name: 'RsHttpError',
+      status: 404,
+    });
+  });
+
+  it('posts one refine to /segment and reads its answer on the target’s grid', async () => {
+    const { segmentOk, disc } = jest.requireActual('./refine/refineTestData');
+    const { calls, fetchFn } = fakeFetch(() => ({
+      status: 200,
+      body: segmentOk(disc([10, 12], 2, [2])),
+    }));
+    const client = createRsClient({ base: '/rs-api', mode: 'fixture', fetchFn });
+    const request = { mode: 'refine' } as unknown as Parameters<typeof client.segment>[0];
+    const answer = await client.segment(request, shape);
+    expect(answer).toMatchObject({ kind: 'result', status: 'ok', resultId: 'attempt-1' });
+    expect(calls[0].url).toBe('/rs-api/segment');
+    expect(calls[0].init).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      body: JSON.stringify(request),
+    });
+  });
+
+  it('takes 409, 422 and 503 as answers, and throws on anything else or a body that is no refine answer', async () => {
+    const request = { mode: 'refine' } as unknown as Parameters<
+      ReturnType<typeof createRsClient>['segment']
+    >[0];
+    const answering = (status: number, body: unknown) =>
+      createRsClient({
+        base: '',
+        mode: 'fixture',
+        fetchFn: fakeFetch(() => ({ status, body })).fetchFn,
+      });
+    await expect(
+      answering(409, { status: 'stale', reason: 'moved' }).segment(request, shape)
+    ).resolves.toMatchObject({
+      kind: 'stale',
+    });
+    await expect(
+      answering(422, { status: 'refused', reason: 'no' }).segment(request, shape)
+    ).resolves.toMatchObject({
+      kind: 'refused',
+    });
+    await expect(answering(503, { detail: 'x' }).segment(request, shape)).resolves.toMatchObject({
+      kind: 'no_pixels',
+    });
+    await expect(answering(502, null).segment(request, shape)).rejects.toBeInstanceOf(RsHttpError);
+    await expect(
+      answering(200, { result: { status: 'odd' } }).segment(request, shape)
+    ).rejects.toBeInstanceOf(RsRefused);
+  });
+});

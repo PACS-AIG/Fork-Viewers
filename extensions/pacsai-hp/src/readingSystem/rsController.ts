@@ -27,6 +27,7 @@ import {
   RsRefused,
   type RsEvidenceView,
   type RsInbox,
+  type RsIntakeResponse,
   type RsReport,
   type RsVersions,
 } from './rsContract';
@@ -122,6 +123,16 @@ export interface RsController {
   offerTab(tab: RsTab): void;
   setCollapsed(collapsed: boolean): void;
   accept(inboxEntryId: string): Promise<void>;
+  /**
+   * RS-38: keep a refine's outline as the lesion's next one (a `refine_keep`
+   * event). The intake's answer, or null when nothing was sent (no study, a
+   * post already running) or the service did not answer.
+   */
+  keepRefine(keep: {
+    resultId: string;
+    observationId: string;
+    maskRevision: number | null;
+  }): Promise<RsIntakeResponse | null>;
   reject(inboxEntryId: string): Promise<void>;
   undo(revisionId: string): Promise<void>;
   retry(): Promise<void>;
@@ -416,6 +427,13 @@ export function createRsController(deps: RsControllerDeps): RsController {
   };
 
   async function post(doc: RsIntakeEvent, label: string): Promise<void> {
+    await postForAnswer(doc, label);
+  }
+
+  async function postForAnswer(
+    doc: RsIntakeEvent,
+    label: string
+  ): Promise<RsIntakeResponse | null> {
     const gen = generation;
     counts.events++;
     set({ busy: true, notice: null, canRetry: false });
@@ -435,11 +453,11 @@ export function createRsController(deps: RsControllerDeps): RsController {
           },
         });
       }
-      return;
+      return null;
     }
     lastFailed = null;
     if (gen !== generation) {
-      return;
+      return answer;
     }
     let notice: RsNotice;
     if (answer.status === 'applied') {
@@ -463,12 +481,17 @@ export function createRsController(deps: RsControllerDeps): RsController {
     }
     set({ busy: false, notice });
     await refresh(gen);
+    return answer;
   }
 
   function send(body: RsEventBody, label: string): Promise<void> {
+    return sendForAnswer(body, label).then(() => undefined);
+  }
+
+  function sendForAnswer(body: RsEventBody, label: string): Promise<RsIntakeResponse | null> {
     const docs = state.docs;
     if (!study || !docs || state.busy || patientKey === null) {
-      return Promise.resolve();
+      return Promise.resolve(null);
     }
     const doc = buildIntakeEvent(
       {
@@ -487,7 +510,7 @@ export function createRsController(deps: RsControllerDeps): RsController {
         now: deps.now(),
       }
     );
-    return post(doc, label);
+    return postForAnswer(doc, label);
   }
 
   const selectable = (): DraftPassage[] =>
@@ -604,6 +627,7 @@ export function createRsController(deps: RsControllerDeps): RsController {
     accept: id => send({ type: 'accept', target: { kind: 'inbox_entry', id } }, 'Accepted'),
     reject: id => send({ type: 'reject', target: { kind: 'inbox_entry', id } }, 'Rejected'),
     undo: revisionId => send({ type: 'undo', revisionId }, 'Undone'),
+    keepRefine: keep => sendForAnswer({ type: 'refine_keep', ...keep }, 'Kept the new outline'),
     retry() {
       if (!lastFailed || state.busy) {
         return Promise.resolve();

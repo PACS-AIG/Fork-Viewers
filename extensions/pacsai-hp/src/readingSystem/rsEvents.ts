@@ -40,7 +40,9 @@ export type RsEventBody =
   | { type: 'reject'; target: { kind: 'inbox_entry' | 'proposal'; id: string } }
   | { type: 'undo'; revisionId: string | null }
   | { type: 'keep_wording'; passageId: string }
-  | { type: 'apply_patch'; passageId: string };
+  | { type: 'apply_patch'; passageId: string }
+  /** RS-38: the reader keeps a refine's outline (by the attempt's id) as the lesion's next one. */
+  | { type: 'refine_keep'; resultId: string; observationId: string; maskRevision: number | null };
 
 export interface RsEventContext {
   studyUID: string;

@@ -520,3 +520,51 @@ describe('the reading-system pane state (RS-36)', () => {
     expect(t.controller.getSnapshot().docs).toBeNull();
   });
 });
+
+describe('the refine tool’s keep (RS-38)', () => {
+  const keep = { resultId: 'attempt-1', observationId: 'obs-1', maskRevision: 2 };
+
+  it('posts a refine_keep event through the pane and gives back the intake’s answer', async () => {
+    const t = setup();
+    t.set({ versions: makeVersions({ opened: true }) });
+    t.controller.enter(STUDY);
+    await flush();
+    t.client.postEvent.mockImplementationOnce(async (doc: RsIntakeEvent) => {
+      t.posted.push(doc);
+      return {
+        artifact: 'intake_response',
+        eventId: doc.eventId,
+        studyUID: STUDY,
+        status: 'applied',
+        httpStatus: 200,
+        revision: 4,
+        contractVersion: 'x',
+      };
+    });
+    const answer = await t.controller.keepRefine(keep);
+    expect(answer?.status).toBe('applied');
+    const event = t.posted.at(-1) as RsIntakeEvent;
+    expect(event.event).toEqual({ type: 'refine_keep', ...keep });
+    expect(event.reader).toEqual({ id: 'reader-a', role: 'radiologist' });
+    expect(t.controller.getSnapshot().notice).toEqual({
+      level: 'info',
+      text: 'Kept the new outline: the draft is at revision 4.',
+    });
+  });
+
+  it('answers null when the service did not answer, and nothing is sent before the study is read', async () => {
+    const before = setup();
+    expect(await before.controller.keepRefine(keep)).toBeNull();
+    expect(before.client.postEvent).not.toHaveBeenCalled();
+
+    const t = setup();
+    t.set({ versions: makeVersions({ opened: true }) });
+    t.controller.enter(STUDY);
+    await flush();
+    t.client.postEvent.mockImplementationOnce(async () => {
+      throw new Error('no answer');
+    });
+    expect(await t.controller.keepRefine(keep)).toBeNull();
+    expect(t.controller.getSnapshot().notice?.level).toBe('error');
+  });
+});

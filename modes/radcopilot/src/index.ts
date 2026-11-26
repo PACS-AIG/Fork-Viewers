@@ -56,8 +56,12 @@ import {
   setReadingSystemUser,
   setReadingSystemServices,
   readingSystemMenuOptions,
+  readingSystemEnabled,
   ANATOMY3D_SOP_CLASS_HANDLER_ID,
   ANATOMY3D_VIEWPORT_NAMESPACE,
+  REFINE_TOOL_NAME,
+  REFINE_AVAILABLE_EVALUATOR,
+  registerRefineTool,
 } from '@ohif/extension-pacsai-hp';
 import { id } from './id';
 
@@ -86,6 +90,55 @@ const readingHotkeys = [
 // One item (22 Oct): the layout's buttons and, in Images, the report's
 // microphone beside them; as two, the microphone stacked under the buttons.
 const readingButtons = [{ id: 'ReadingModes', uiType: READING_MODES_UITYPE, props: {} }];
+
+// RS-38: the refine tool, a mouse tool in the main toolbar beside the
+// measurement tools while the CT reading system's pane is on: drag a box
+// around a lesion the system found, or click inside it, and SAM2CT redraws
+// its outline. Greyed out while the study has no lesion to refine.
+const refineButton = {
+  id: REFINE_TOOL_NAME,
+  uiType: 'ohif.toolButton',
+  props: {
+    icon: 'tool-magnetic-roi',
+    label: 'Refine outline',
+    tooltip: 'Refine a lesion’s outline: drag a box around it, or click inside it',
+    commands: {
+      commandName: 'setToolActiveToolbar',
+      commandOptions: { toolGroupIds: ['default'] },
+    },
+    evaluate: ['evaluate.cornerstoneTool', REFINE_AVAILABLE_EVALUATOR],
+  },
+};
+
+interface RefineToolServices {
+  toolbarService: {
+    addButtons: (buttons: unknown[]) => void;
+    createButtonSection: (key: string, buttons: string[]) => void;
+    state?: { buttonSections?: Record<string, string[]> };
+  };
+  toolGroupService?: {
+    getToolGroup?: (
+      id: string
+    ) => { hasTool: (name: string) => boolean; addTool: (name: string) => void } | undefined;
+  };
+}
+
+/** The refine tool in the default tool group, and its button in the main toolbar after the measurement tools. */
+function addRefineTool({ toolbarService, toolGroupService }: RefineToolServices): void {
+  registerRefineTool();
+  const group = toolGroupService?.getToolGroup?.('default');
+  if (group && !group.hasTool(REFINE_TOOL_NAME)) {
+    group.addTool(REFINE_TOOL_NAME);
+  }
+  toolbarService.addButtons([refineButton]);
+  const primary = toolbarService.state?.buttonSections?.primary;
+  if (Array.isArray(primary) && !primary.includes(REFINE_TOOL_NAME)) {
+    const at = primary.indexOf('MeasurementTools');
+    primary.splice(at >= 0 ? at + 1 : primary.length, 0, REFINE_TOOL_NAME);
+  }
+  // Announces the section (an id it holds already is not added again).
+  toolbarService.createButtonSection('primary', [REFINE_TOOL_NAME]);
+}
 
 /** The route's study for the dock, outside React's render (the dock writes the DOM). */
 function enterReadingRoute(servicesManager?: unknown): void {
@@ -277,6 +330,9 @@ function modeFactory({ modeConfiguration }: { modeConfiguration?: Record<string,
           'secondary',
           readingButtons.map(b => b.id)
         );
+        if (readingSystemEnabled()) {
+          addRefineTool(args.servicesManager.services as unknown as RefineToolServices);
+        }
       }
       enterReadingRoute(args.servicesManager);
     },
