@@ -431,6 +431,70 @@ describe('the anatomy layers on the viewports (RS-36)', () => {
     overlay.destroy();
   });
 
+  it('picks the structure a click lands on (no drag), only under a tool that does nothing with a click, and moves no view', async () => {
+    const store = await loadedStore();
+    registerImages(SERIES, 'a');
+    const { element, vp } = viewport('vp1', 'a');
+    const tool: { name: string | null | undefined } = { name: 'WindowLevel' };
+    const overlay = createAnatomyOverlay({
+      store,
+      services: null,
+      cornerstone: { ...cornerstone, primaryTool: () => tool.name },
+      win,
+    });
+    fire('CORNERSTONE_ELEMENT_ENABLED', { element });
+    rendered(element);
+    runFrames();
+    const liver = Object.values(store.getSnapshot().structures).find(
+      s => s.task === 'total' && s.value === 1
+    )!.key;
+    const click = (
+      x: number,
+      y: number,
+      o: { to?: [number, number]; held?: number; shift?: boolean } = {}
+    ) => {
+      element.dispatchEvent(
+        new MouseEvent('mousedown', {
+          clientX: x,
+          clientY: y,
+          button: 0,
+          shiftKey: Boolean(o.shift),
+        })
+      );
+      clock.t += o.held ?? 80;
+      const [ux, uy] = o.to ?? [x, y];
+      element.dispatchEvent(new MouseEvent('mouseup', { clientX: ux, clientY: uy, button: 0 }));
+    };
+    const selected = () => store.getSnapshot().selected;
+    // Nothing shown under it (the cavities are hidden): nothing picked.
+    click(4.5, 0.5);
+    expect(selected()).toBeNull();
+    // A drag (window/level's), a long press, a click with a modifier: no pick.
+    click(1.5, 1.5, { to: [6.5, 1.5] });
+    click(1.5, 1.5, { held: 600 });
+    click(1.5, 1.5, { shift: true });
+    expect(selected()).toBeNull();
+    // A measurement tool, or the refine tool, keeps its clicks; no answer from the tools, no pick.
+    for (const name of ['Length', 'PacsaiRefine', undefined]) {
+      tool.name = name;
+      click(1.5, 1.5);
+    }
+    expect(selected()).toBeNull();
+    // Under window/level: the liver, picked where the view already is.
+    tool.name = 'WindowLevel';
+    click(1.5, 1.5);
+    expect(selected()).toBe(liver);
+    expect(vp.setImageIdIndex).not.toHaveBeenCalled();
+    expect(vp.jumpToWorld).not.toHaveBeenCalled();
+    expect(overlay.harnessState()).toMatchObject({ counts: { picks: 1 } });
+    // With no left-button tool at all a click does nothing else, so it picks too.
+    store.select(null);
+    tool.name = null;
+    click(1.5, 1.5);
+    expect(selected()).toBe(liver);
+    overlay.destroy();
+  });
+
   it("brings a selected structure's largest slice into the active viewport, or the one that shows its series", async () => {
     const store = await loadedStore();
     registerImages(SERIES, 'a');

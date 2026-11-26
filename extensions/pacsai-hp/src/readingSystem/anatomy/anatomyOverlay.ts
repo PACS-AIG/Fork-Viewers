@@ -90,6 +90,11 @@ export interface CornerstoneApi {
   getEnabledElement(element: HTMLDivElement): { viewport?: unknown } | undefined;
   getRenderingEngines(): Array<{ getViewports(): Array<{ element: HTMLElement }> }> | undefined;
   metaData: { get(type: string, imageId: string): unknown };
+  /**
+   * The left mouse button's active tool on a viewport's element (@cornerstonejs/tools'
+   * tool group), null when none; without it a click on the images picks nothing.
+   */
+  primaryTool?: (element: HTMLElement) => string | null | undefined;
 }
 
 export interface AnatomyOverlay {
@@ -167,6 +172,20 @@ export const PULSE_MS = 700;
 export const NAME_MIN_PIXELS = 6;
 /** Past this many pixels, the highlighted structure's box on a view is read at a coarser step. */
 const FOCUS_MAX_PIXELS = 160000;
+/** A click on the images picks a structure when the mouse moved less than this between down and up, px. */
+export const PICK_SLOP_PX = 4;
+/** ... and was let go within this, ms. */
+export const PICK_MS = 500;
+/**
+ * The left-button tools under which a click picks a structure: the ones that
+ * do nothing with a click. A measurement or the refine tool keeps its clicks.
+ */
+export const PICK_TOOLS: ReadonlySet<string> = new Set([
+  'WindowLevel',
+  'Pan',
+  'Zoom',
+  'StackScroll',
+]);
 /** A label's colour, a third of the way to white, for its name and leader on the dark image. */
 const lighten = (c: Rgb, alpha = 1): string => {
   const [r, g, b] = c.map(v => Math.round(v + (255 - v) * 0.35));
@@ -295,7 +314,16 @@ export function createAnatomyOverlay({
   let instances = new Map<string, Array<Record<string, unknown>>>();
   let scanned = '';
   let pendingJump: AnatomyTarget | null = null;
-  const counts = { draws: 0, clears: 0, hovers: 0, jumps: 0, hangs: 0, scans: 0, pulses: 0 };
+  const counts = {
+    draws: 0,
+    clears: 0,
+    hovers: 0,
+    picks: 0,
+    jumps: 0,
+    hangs: 0,
+    scans: 0,
+    pulses: 0,
+  };
   const now = (): number => {
     try {
       return win.performance?.now?.() ?? Date.now();
@@ -881,6 +909,43 @@ export function createAnatomyOverlay({
     a.tip.style.top = `${top}px`;
   }
 
+  /**
+   * A click on the images (no drag): the topmost structure under it is picked,
+   * selected without moving any view, so the tab can show its row. Only under
+   * a left-button tool that does nothing with a click (PICK_TOOLS, or none).
+   */
+  function pickAt(a: Attached, clientX: number, clientY: number) {
+    const vp = viewportOf(a.element);
+    if (!vp || !a.anatomyUID || !store.getSnapshot().settings.enabled) {
+      return;
+    }
+    let tool: string | null | undefined;
+    try {
+      tool = cornerstone.primaryTool?.(a.element);
+    } catch (_) {
+      tool = undefined;
+    }
+    if (tool === undefined || (tool !== null && !PICK_TOOLS.has(tool))) {
+      return;
+    }
+    const r = a.host.getBoundingClientRect();
+    let world: ArrayLike<number> | undefined;
+    try {
+      world = vp.canvasToWorld([clientX - r.left, clientY - r.top]);
+    } catch (_) {
+      world = undefined;
+    }
+    if (!isPoint(world)) {
+      return;
+    }
+    const found = store.structuresAt(a.anatomyUID, sub([world[0], world[1], world[2]], a.shift));
+    if (!found.length) {
+      return;
+    }
+    counts.picks++;
+    store.pick(found[0].key);
+  }
+
   function attach(element: HTMLElement | null | undefined) {
     if (!element || attached.has(element)) {
       return;
@@ -1006,13 +1071,38 @@ export function createAnatomyOverlay({
       a.hoverAt = null;
       hideTip(a);
     };
+    // A click (the left button, no modifier, let go near where it went down and soon): a pick.
+    // Captured, so it is seen before cornerstone's own handlers on the element; it stops nothing.
+    let down: { x: number; y: number; t: number } | null = null;
+    const onDown = (e: MouseEvent) => {
+      down =
+        e.button === 0 && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey
+          ? { x: e.clientX, y: e.clientY, t: now() }
+          : null;
+    };
+    const onUp = (e: MouseEvent) => {
+      const d = down;
+      down = null;
+      if (
+        d &&
+        e.button === 0 &&
+        Math.hypot(e.clientX - d.x, e.clientY - d.y) < PICK_SLOP_PX &&
+        now() - d.t <= PICK_MS
+      ) {
+        pickAt(a, e.clientX, e.clientY);
+      }
+    };
     element.addEventListener(Enums.Events.IMAGE_RENDERED, onRendered as EventListener);
     element.addEventListener('mousemove', onMove, { passive: true });
     element.addEventListener('mouseleave', onLeave, { passive: true });
+    element.addEventListener('mousedown', onDown, { passive: true, capture: true });
+    element.addEventListener('mouseup', onUp, { passive: true, capture: true });
     a.off = () => {
       element.removeEventListener(Enums.Events.IMAGE_RENDERED, onRendered as EventListener);
       element.removeEventListener('mousemove', onMove);
       element.removeEventListener('mouseleave', onLeave);
+      element.removeEventListener('mousedown', onDown, { capture: true });
+      element.removeEventListener('mouseup', onUp, { capture: true });
       stopPulse(a);
       canvas.remove();
       tip.remove();
