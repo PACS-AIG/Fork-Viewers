@@ -38,17 +38,17 @@ import { SURFACES_ENCODING } from '../../src/readingSystem/anatomy/anatomySurfac
 import { makeNifti } from '../../src/readingSystem/anatomy/anatomyTestData';
 import { openStudy, pane, paneState } from './rsE2e';
 
-const RICH = 'renal';
+export const RICH = 'renal';
 
 // ---- the synthetic series -------------------------------------------------------------
-const SERIES = '2.25.880001';
-const FRAME_OF_REFERENCE = '2.25.880002';
+export const SERIES = '2.25.880001';
+export const FRAME_OF_REFERENCE = '2.25.880002';
 const sop = (k: number) => `2.25.8801${String(k).padStart(2, '0')}`;
-const SLICES = 20;
-const SIZE = 64;
-const PIXEL_MM = 4;
-const SLICE_MM = 5;
-const ipp = (k: number) => [-128, -128, -50 + SLICE_MM * k];
+export const SLICES = 20;
+export const SIZE = 64;
+export const PIXEL_MM = 4;
+export const SLICE_MM = 5;
+export const ipp = (k: number) => [-128, -128, -50 + SLICE_MM * k];
 
 const inBody = (u: number, v: number) => ((u - 31.5) / 28) ** 2 + ((v - 31.5) / 24) ** 2 <= 1;
 const inLiver = (u: number, v: number, k: number) =>
@@ -125,7 +125,7 @@ function instanceJson(study: string, k: number) {
 
 // ---- its anatomy ------------------------------------------------------------------------
 /** (column, row, slice) -> RAS mm, the rows flipped: index j holds image row 63 - j. */
-const AFFINE = [
+export const AFFINE = [
   [-PIXEL_MM, 0, 0, 128],
   [0, PIXEL_MM, 0, 128 - PIXEL_MM * (SIZE - 1)],
   [0, 0, SLICE_MM, -50],
@@ -312,7 +312,7 @@ function anatomyJson(study: string) {
 const json = (route: Route, body: unknown) =>
   route.fulfill({ status: 200, contentType: 'application/dicom+json', body: JSON.stringify(body) });
 
-async function serveArchiveAndAnatomy(context: BrowserContext, unknown: string[]) {
+export async function serveArchiveAndAnatomy(context: BrowserContext, unknown: string[]) {
   await context.route(
     url => url.pathname.startsWith('/dicomweb'),
     async route => {
@@ -549,7 +549,7 @@ function lies(drawn: Box, bright: Box, voxel: number): boolean {
 }
 
 /** Whether cornerstone draws the viewport with WebGL ('gpu') or on its CPU path ('cpu'). */
-const renderingOf = (page: Page) =>
+export const renderingOf = (page: Page) =>
   page.evaluate(() => {
     const layer = document.querySelector('canvas[data-pacsai-anatomy-layer]');
     const element = layer?.parentElement?.parentElement as HTMLDivElement | null | undefined;

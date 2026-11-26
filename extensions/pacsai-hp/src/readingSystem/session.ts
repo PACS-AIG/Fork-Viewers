@@ -46,6 +46,10 @@ import { createRsClient, normalizeBase } from './rsClient';
 import { createRsController, type RsController } from './rsController';
 import { freshId, type RsSelection } from './rsEvents';
 import { createRsHost, type RsHost } from './rsHost';
+import { createRefineBarHost, type RefineBarHost } from './refine/refineBarHost';
+import { setCurrentRefineStore } from './refine/refineCurrent';
+import { createRefineOverlay, type RefineOverlay } from './refine/refineOverlay';
+import { createRefineStore, type RefineStore } from './refine/refineStore';
 
 declare global {
   interface Window {
@@ -147,6 +151,11 @@ let anatomy: AnatomyStore | null = null;
 let overlay: AnatomyOverlay | null = null;
 let anatomy3dCell: Anatomy3dCell | null = null;
 let offAnatomyFollow: (() => void) | null = null;
+// RS-38: the refine tool's state, its drawing on the viewports and its bar.
+let refine: RefineStore | null = null;
+let refineOverlay: RefineOverlay | null = null;
+let refineBar: RefineBarHost | null = null;
+let offRefineFollow: (() => void) | null = null;
 // The study the pane was entered for (the anatomy follows it once it is served).
 let enteredStudy: string | null = null;
 
@@ -174,6 +183,9 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
   controller?.leave();
   offAnatomyFollow?.();
   anatomy?.leave();
+  offRefineFollow?.();
+  refine?.leave();
+  dropRefineDrawing();
   controllerKey = key;
   const client = createRsClient({
     base: cfg.base,
@@ -228,8 +240,103 @@ function ensureController(win: Window, cfg: ReadingSystemConfig): RsController {
       a.leave();
     }
   });
+  refine = createRefineStore({
+    client,
+    reader: () => ({ id: readerId(), role: READER_ROLE }),
+    keep: resultId => c.keepRefine(resultId),
+    discard: resultId => c.discardRefine(resultId),
+    selectEntry: entryId => selectEntry(c, entryId),
+    now: () => Date.now(),
+    setTimer: (fn, ms) => win.setTimeout(fn, ms),
+    clearTimer: handle => win.clearTimeout(handle as number),
+    studyRef: studyRefFor,
+  });
+  offRefineFollow = followForRefine(c, refine);
   installHarnessHook(win);
   return controller;
+}
+
+/** The report passage a finding is bound to, selected in the pane (a refine's lesion that is a finding). */
+function selectEntry(c: RsController, entryId: string): void {
+  const passage = c
+    .getSnapshot()
+    .docs?.report.passages.find(p => p.boundEntries?.includes(entryId));
+  if (passage) {
+    c.select(passage.id);
+  }
+}
+
+/**
+ * The refine targets belong to a served study: read once the pane is ready
+ * for it, read again when its revisions move (a keep, another reader's
+ * change), let go when it is not served. The toolbar's button follows
+ * whether there is a lesion to refine.
+ */
+function followForRefine(c: RsController, r: RefineStore): () => void {
+  let seen: string | null = null;
+  const offController = c.subscribe(() => {
+    const snap = c.getSnapshot();
+    if (snap.phase === 'ready' && enteredStudy) {
+      r.enter(enteredStudy);
+      const v = snap.docs?.versions;
+      const revisions = v ? `${v.published.revision}|${v.latest.revision}` : null;
+      if (revisions !== seen) {
+        const first = seen === null;
+        seen = revisions;
+        if (!first) {
+          void r.refresh();
+        }
+      }
+    } else if (snap.phase === 'not_served' || snap.phase === 'idle') {
+      seen = null;
+      r.leave();
+    }
+  });
+  let state = r.getView().targetsState;
+  const offStore = r.subscribe(() => {
+    const next = r.getView().targetsState;
+    if (next !== state) {
+      state = next;
+      refreshToolbar();
+    }
+  });
+  return () => {
+    offController();
+    offStore();
+  };
+}
+
+/** The toolbar's buttons evaluated again (the refine button's availability). */
+function refreshToolbar(): void {
+  const services = viewerServices as
+    | (OverlayServices & {
+        toolbarService?: { refreshToolbarState?: (props: { viewportId?: string | null }) => void };
+      })
+    | null;
+  try {
+    services?.toolbarService?.refreshToolbarState?.({
+      viewportId: services.viewportGridService?.getState?.()?.activeViewportId ?? null,
+    });
+  } catch (_) {
+    /* the toolbar catches up at its next evaluation */
+  }
+}
+
+/** The refine tool's drawing and bar on the viewports (one each per document). */
+function ensureRefineDrawing(win: Window): void {
+  if (!refine || !cornerstoneApi || refineOverlay) {
+    return;
+  }
+  const overlay = createRefineOverlay({ store: refine, cornerstone: cornerstoneApi, win });
+  refineOverlay = overlay;
+  refineBar = createRefineBarHost({ win, store: refine, elementOf: id => overlay.elementOf(id) });
+}
+
+function dropRefineDrawing(): void {
+  refineBar?.destroy();
+  refineBar = null;
+  refineOverlay?.destroy();
+  refineOverlay = null;
 }
 
 /** The overlay that draws the anatomy on the viewports (one per document). */
@@ -346,6 +453,8 @@ export function enterReadingSystem(
   const c = ensureController(win, cfg);
   ensureOverlay(win);
   ensureAnatomy3dCell(win);
+  ensureRefineDrawing(win);
+  setCurrentRefineStore(refine);
   if (!host || host.column !== column) {
     host?.destroy();
     offDock?.();
@@ -379,6 +488,9 @@ export function leaveReadingSystem(): void {
   overlay = null;
   anatomy3dCell?.destroy();
   anatomy3dCell = null;
+  setCurrentRefineStore(null);
+  dropRefineDrawing();
+  refine?.leave();
   enteredStudy = null;
   controller?.leave();
   anatomy?.leave();
@@ -403,6 +515,8 @@ function installHarnessHook(win: Window): void {
                 anatomyOverlay: overlay?.harnessState() ?? null,
                 anatomy3d: anatomy3dHarness(),
                 anatomy3dCell: anatomy3dCell?.harnessState() ?? null,
+                refine: refine?.harnessState() ?? null,
+                refineOverlay: refineOverlay?.harnessState() ?? null,
               }
             : null;
         },

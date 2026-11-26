@@ -17,6 +17,8 @@
  *   GET  /studies/{uid}/anatomy             (the anatomy artifact, contract 1.10)
  *   GET  /studies/{uid}/anatomy/{file}      (one of its labelmaps: NIfTI-1, gzip;
  *                                            or, 1.17, a labelmap's surfaces: gzip)
+ *   GET  /studies/{uid}/refine_targets      (RS-38: the lesions a reader may refine)
+ *   POST /segment                           (RS-38: one refine; 200, 409, 422, 503)
  *
  * Each document read is checked against the contract's rules for a consumer
  * (rsContract.checkDocument): this major, this viewer's mode, the artifact.
@@ -34,6 +36,14 @@ import {
   type RsVersions,
 } from './rsContract';
 import type { RsIntakeEvent } from './rsEvents';
+import {
+  readRefineTargets,
+  readSegmentAnswer,
+  type IndexTriple,
+  type RefineTargets,
+  type SegmentAnswer,
+  type SegmentRequest,
+} from './refine/refineContract';
 import { readAnatomy, type RsAnatomy } from './anatomy/anatomyContract';
 import { SURFACES_BASENAME } from './anatomy/anatomySurfaces';
 
@@ -82,6 +92,13 @@ export interface RsClient {
   anatomy(study: string): Promise<RsAnatomy>;
   /** One of its labelmaps' bytes, or a labelmap's surfaces (1.17), by its file name under `anatomy/`. */
   anatomyFile(study: string, basename: string): Promise<Uint8Array>;
+  /** RS-38: the lesions a reader may refine (404 when the study has none, or the service no such route). */
+  refineTargets(study: string): Promise<RefineTargets>;
+  /**
+   * RS-38: one refine, its answer read on the target's grid (`shape`). 200, 409,
+   * 422 and 503 are answers; anything else throws.
+   */
+  segment(request: SegmentRequest, shape: IndexTriple): Promise<SegmentAnswer>;
 }
 
 /** The base path without a trailing slash; empty when none is configured. */
@@ -189,6 +206,43 @@ export function createRsClient({
         throw new RsRefused('A labelmap is larger than the viewer takes.');
       }
       return new Uint8Array(buffer);
+    },
+    async refineTargets(uid) {
+      const res = await fetchFn(`${root}${study(uid)}/refine_targets`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        throw new RsHttpError(res.status, 'refine targets');
+      }
+      let doc: unknown;
+      try {
+        doc = await res.json();
+      } catch (_) {
+        throw new RsRefused('The CT analysis service sent refine targets that are not JSON.');
+      }
+      return readRefineTargets(doc, mode);
+    },
+    async segment(request, shape) {
+      const res = await fetchFn(`${root}/segment`, {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (res.status !== 200 && res.status !== 409 && res.status !== 422 && res.status !== 503) {
+        throw new RsHttpError(res.status, 'refine');
+      }
+      const body = await res.json().catch(() => null);
+      const answer = readSegmentAnswer(res.status, body, shape);
+      if (!answer) {
+        throw new RsRefused(
+          'The CT analysis service answered the refine with something that is not a refine answer.'
+        );
+      }
+      return answer;
     },
   };
 }

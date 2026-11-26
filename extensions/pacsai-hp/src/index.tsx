@@ -60,6 +60,7 @@ import {
   ANATOMY3D_SOP_CLASS_HANDLER_ID,
   ANATOMY3D_VIEWPORT_NAMESPACE,
 } from './readingSystem/anatomy/anatomy3dCell';
+import { REFINE_TOOL_NAME, registerRefineTool } from './readingSystem/refine/PacsaiRefineTool';
 import type { CornerstoneApi } from './readingSystem/anatomy/anatomyOverlay';
 import {
   Enums as CsEnums,
@@ -68,7 +69,7 @@ import {
   getRenderingEngines as csGetRenderingEngines,
   metaData as csMetaData,
 } from '@cornerstonejs/core';
-import { READING_MODES_UITYPE } from './getToolbarModule';
+import { READING_MODES_UITYPE, REFINE_AVAILABLE_EVALUATOR } from './getToolbarModule';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
 import initMomentumScroll from './momentum/initMomentumScroll';
@@ -258,4 +259,8 @@ export {
   readingSystemMenuOptions,
   ANATOMY3D_SOP_CLASS_HANDLER_ID,
   ANATOMY3D_VIEWPORT_NAMESPACE,
+  // RS-38: the refine tool (radcopilot puts it in the main toolbar).
+  REFINE_TOOL_NAME,
+  REFINE_AVAILABLE_EVALUATOR,
+  registerRefineTool,
 };

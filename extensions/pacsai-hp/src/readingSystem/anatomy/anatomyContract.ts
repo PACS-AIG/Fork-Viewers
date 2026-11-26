@@ -358,7 +358,7 @@ export function readAffine(v: unknown): Mat4 | null {
   return rows;
 }
 
-function readGrid(v: unknown): RsAnatomyGrid | null | 'invalid' {
+export function readGrid(v: unknown): RsAnatomyGrid | null | 'invalid' {
   if (v === null || v === undefined) {
     return null;
   }

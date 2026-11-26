@@ -2,6 +2,7 @@ import SessionStudyDropdown from './toolbar/SessionStudyDropdown';
 import BrowsingModeDropdown from './toolbar/BrowsingModeDropdown';
 import activeViewportHasCT from './utils/activeViewportHasCT';
 import { ReadingControls } from './readingDock/ReadingControls';
+import { currentRefineStore } from './readingSystem/refine/refineCurrent';
 
 /** Toolbar uiType id for the same-session study switcher. */
 export const SESSION_SWITCHER_UITYPE = 'pacsai.sessionSwitcher';
@@ -27,6 +28,9 @@ export const MULTI_STAGE_EVALUATOR = 'evaluate.pacsai.multiStage';
 
 /** Evaluator id: disables a button unless the active viewport is showing CT (HU-calibrated). */
 export const CT_ONLY_EVALUATOR = 'evaluate.pacsai.ctOnly';
+
+/** Evaluator id (RS-38): disables the refine tool's button unless the study has a lesion to refine. */
+export const REFINE_AVAILABLE_EVALUATOR = 'evaluate.pacsai.refineAvailable';
 
 export default function getToolbarModule({ commandsManager, servicesManager }: withAppTypes) {
   return [
@@ -85,6 +89,30 @@ export default function getToolbarModule({ commandsManager, servicesManager }: w
         return {
           disabled,
           disabledText: disabled ? 'HU values require a CT viewport' : undefined,
+        };
+      },
+    },
+    {
+      // RS-38: the refine tool works on the lesions the CT analysis system
+      // found; greyed out (not hidden) while the study has none, or they are
+      // still being read. Says nothing once there are some, so the tool's own
+      // evaluator decides the rest.
+      name: REFINE_AVAILABLE_EVALUATOR,
+      evaluate: () => {
+        const view = currentRefineStore()?.getView();
+        const state = view?.targetsState;
+        if (state === 'ready') {
+          return {};
+        }
+        const withheld = view?.withheld[0]?.reason;
+        return {
+          disabled: true,
+          disabledText:
+            state === 'loading'
+              ? 'Reading the lesions to refine…'
+              : withheld
+                ? `No lesion can be refined now: ${withheld}`
+                : 'No lesion the CT analysis system found to refine in this study',
         };
       },
     },

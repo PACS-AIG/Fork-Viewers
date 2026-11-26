@@ -126,6 +126,12 @@ const CSS = `
 .prs-3d-cell .prs-3d { flex: 1 1 auto; min-height: 0; margin: 0; border: 0; border-radius: 0; }
 .prs-3d-cell .prs-3d-view { flex: 1 1 auto; height: auto; }
 .prs-3d-cell-empty { display: flex; align-items: center; justify-content: center; height: 100%; padding: 12px; color: #7F8EA0; text-align: center; }
+.prs-refine-bar { position: absolute; left: 50%; top: 30px; transform: translateX(-50%); z-index: 20; pointer-events: auto; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 20px); padding: 6px 10px; border: 1px solid #2B3A4D; border-radius: 8px; background: rgba(10, 17, 27, 0.92); color: #E8EEF5; font: 12px/16px system-ui, -apple-system, "Segoe UI", sans-serif; }
+.prs-refine-bar[data-level="warn"] { border-color: #C9A227; }
+.prs-refine-bar[data-level="error"] { border-color: #E06C75; }
+.prs-refine-text { flex: 1 1 auto; min-width: 0; }
+.prs-refine-key { display: inline-block; width: 10px; height: 2px; margin: 0 4px 3px 0; vertical-align: middle; }
+.prs-refine-bar .prs-btn { padding: 1px 8px; font: 12px/16px system-ui, -apple-system, "Segoe UI", sans-serif; }
 .prs-anatomy-resampled { margin: 0 0 6px; font-size: 11px; line-height: 15px; color: #7F8EA0; }
 .prs-anatomy-task { margin: 4px 0 8px; }
 .prs-anatomy-task header { display: flex; align-items: center; gap: 6px; }

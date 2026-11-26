@@ -69,6 +69,10 @@ jest.mock('@ohif/extension-pacsai-hp', () => ({
     .ANATOMY3D_SOP_CLASS_HANDLER_ID,
   ANATOMY3D_VIEWPORT_NAMESPACE: jest.requireActual('../readingSystem/anatomy/anatomy3dCell')
     .ANATOMY3D_VIEWPORT_NAMESPACE,
+  // RS-38: the refine tool (its button only while the reading system is on: off here).
+  REFINE_TOOL_NAME: 'PacsaiRefine',
+  REFINE_AVAILABLE_EVALUATOR: 'evaluate.pacsai.refineAvailable',
+  registerRefineTool: jest.fn(),
 }));
 
 import longitudinal from '@ohif/mode-longitudinal';
@@ -242,6 +246,67 @@ describe('the radcopilot mode', () => {
     first.onLeftPanelClosedChange(false);
     expect(m.routes[0].layoutTemplate({}).props.leftPanelClosed).toBe(false);
     window.localStorage.removeItem('pacsai.radcopilot.seriesRailClosed');
+  });
+
+  it('puts the refine tool after the measurement tools while the reading system is on (RS-38)', () => {
+    const { registerRefineTool } = jest.requireMock('@ohif/extension-pacsai-hp') as {
+      registerRefineTool: jest.Mock;
+    };
+    const m = radcopilot.modeFactory({});
+    const primary = ['SessionStudies', 'MeasurementTools', 'Zoom', 'BrowsingMode'];
+    const sections: Record<string, string[]> = { primary };
+    const buttons: Array<{ id: string; uiType: string; props: Record<string, unknown> }> = [];
+    const added: string[] = [];
+    const servicesManager = {
+      services: {
+        customizationService: { setCustomizations: () => undefined },
+        toolbarService: {
+          state: { buttonSections: sections },
+          addButtons: (b: typeof buttons) => buttons.push(...b),
+          // OHIF's: an existing section takes only the ids it lacks.
+          createButtonSection: (name: string, ids: string[]) => {
+            sections[name] = sections[name]
+              ? [...sections[name], ...ids.filter(id => !sections[name].includes(id))]
+              : ids;
+          },
+        },
+        toolGroupService: {
+          getToolGroup: (id: string) =>
+            id === 'default'
+              ? { hasTool: (n: string) => added.includes(n), addTool: (n: string) => added.push(n) }
+              : undefined,
+        },
+      },
+    };
+    (window as { PACSAI_READING_DOCK?: unknown }).PACSAI_READING_DOCK = 'on';
+    (window as { PACSAI_READING_SYSTEM_API?: unknown }).PACSAI_READING_SYSTEM_API = '/rs-api';
+    try {
+      m.onModeEnter.call(m, { servicesManager });
+      m.onModeEnter.call(m, { servicesManager });
+    } finally {
+      delete (window as { PACSAI_READING_SYSTEM_API?: unknown }).PACSAI_READING_SYSTEM_API;
+    }
+    expect(registerRefineTool).toHaveBeenCalled();
+    expect(added).toEqual(['PacsaiRefine']);
+    expect(sections.primary).toEqual([
+      'SessionStudies',
+      'MeasurementTools',
+      'PacsaiRefine',
+      'Zoom',
+      'BrowsingMode',
+    ]);
+    const refine = buttons.find(b => b.id === 'PacsaiRefine');
+    expect(refine).toMatchObject({
+      uiType: 'ohif.toolButton',
+      props: {
+        label: 'Refine outline',
+        commands: {
+          commandName: 'setToolActiveToolbar',
+          commandOptions: { toolGroupIds: ['default'] },
+        },
+        evaluate: ['evaluate.cornerstoneTool', 'evaluate.pacsai.refineAvailable'],
+      },
+    });
   });
 
   it("enters as longitudinal does (the mode as `this`), then adds the reading controls when on", () => {
