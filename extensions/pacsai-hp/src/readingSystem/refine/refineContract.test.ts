@@ -247,7 +247,45 @@ describe('refine answer', () => {
     expect(readSegmentAnswer(200, silent, SHAPE)).toMatchObject({ keep: { possible: false } });
     const noOutline = segmentOk(disc([10, 12], 3, [2]), { mask: null });
     expect(readSegmentAnswer(200, noOutline, SHAPE)).toMatchObject({
-      keep: { possible: false, reason: 'There is no outline to keep.' },
+      keep: { possible: false, reason: null },
+    });
+    const noId = segmentOk(disc([10, 12], 3, [2]), { resultId: null });
+    expect(readSegmentAnswer(200, noId, SHAPE)).toMatchObject({
+      keep: {
+        possible: false,
+        reason: 'The CT analysis service gave this outline no id, so it cannot be kept.',
+      },
+    });
+  });
+
+  it('gives the answer’s reason for an attempt with no outline, as one sentence (D-347)', () => {
+    const body = segmentOk(disc([10, 12], 3, [2]), {
+      mask: null,
+      keep: {
+        possible: false,
+        reason:
+          'SAM2CT isn’t running on the reading system’s host right now, so it drew no outline',
+      },
+    });
+    (body.result as Record<string, unknown>).status = 'unavailable';
+    (body.result as Record<string, unknown>).reasons = [
+      'no container answers at http://segmenter:8090',
+    ];
+    expect(readSegmentAnswer(200, body, SHAPE)).toMatchObject({
+      status: 'unavailable',
+      reasons: ['no container answers at http://segmenter:8090'],
+      keep: {
+        possible: false,
+        reason:
+          'SAM2CT isn’t running on the reading system’s host right now, so it drew no outline.',
+      },
+    });
+    // A reason in lower case without a stop is given its capital and its stop.
+    const plain = segmentOk(disc([10, 12], 3, [2]), {
+      keep: { possible: false, reason: 'what keeping it would change could not be computed' },
+    });
+    expect(readSegmentAnswer(200, plain, SHAPE)).toMatchObject({
+      keep: { possible: false, reason: 'What keeping it would change could not be computed.' },
     });
   });
 

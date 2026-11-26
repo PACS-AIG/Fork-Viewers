@@ -380,6 +380,27 @@ describe('refine store', () => {
       'SAM2CT gave no outline (unavailable: the backend is not pinned).'
     );
 
+    // With the answer's own reason for the reader (D-347), the bar gives that instead.
+    s.setAnswer(async () => ({
+      kind: 'result',
+      status: 'unavailable',
+      reasons: ['no container answers at http://segmenter:8090'],
+      resultId: 'attempt-2',
+      keep: {
+        possible: false,
+        reason:
+          'SAM2CT isn’t running on the reading system’s host right now, so it drew no outline.',
+      },
+      maskRevision: null,
+      mask: null,
+      qc: null,
+      runtimeS: 0.8,
+    }));
+    await boxAround(s);
+    expect(s.store.getView().message?.text).toBe(
+      'SAM2CT isn’t running on the reading system’s host right now, so it drew no outline.'
+    );
+
     s.setAnswer(async () => {
       throw new RsHttpError(502, 'refine');
     });
