@@ -9,16 +9,20 @@
  *   - Per task (organs, vertebrae, body cavities): shown or hidden, and its
  *     structures from head to feet, each with its colour, a switch, its slice
  *     extent and, for a measurement-eligible structure only (FINAL_SPEC §2.3),
- *     its volume ("≥" when the document says it is only a lower bound). A
- *     click on a structure's name shows it and brings its largest slice into
- *     the viewport; pointing at a row brings the structure out on the images.
+ *     its volume ("≥" and "touches the scan edge" when the document says it is
+ *     only a lower bound); any other structure says it is for localization
+ *     only (invariant 8). A click on a structure's name shows it and brings its
+ *     largest slice into the viewport; pointing at a row brings the structure
+ *     out on the images; a structure clicked on the images (the overlay's pick)
+ *     has its task unfolded and its row scrolled into view.
  *   - When the document has it (contract 1.14), the whole-mask median and
  *     interquartile range in HU, in a column named for that statistic so it is
  *     never read as the report's ROI median (invariant 9).
- *   - Its research features (contract 1.15's radiomics, WeiWei: "Yes, research
- *     label"), behind a Research button on its row: a section of their own,
- *     marked research use only and not validated for diagnosis, never a
- *     column of the table, a finding, a measurement or report content.
+ *   - Its research features (contract 1.15's radiomics; WeiWei, 27 Nov 2026,
+ *     the Tau case session's design): a "Radiomics · 80" chip on its row when
+ *     they were computed, which opens them under it (RadiomicsSection), marked
+ *     research use only, never a column of the table, a finding, a measurement
+ *     or report content. The study's side by side: the Radiomics tab.
  *   - What its concept record's checks found wrong (contract 1.13), under the
  *     structure's row; a volume outside the record's band in amber.
  *   - Which other series of the acquisition carry the labelmap, resampled
@@ -40,10 +44,10 @@ import {
   type AnatomySeriesView,
   type AnatomySnapshot,
   type AnatomyStore,
-  type AnatomyRadiomics,
   type AnatomyStructure,
   type AnatomyTask,
 } from './anatomyStore';
+import { RadiomicsSection } from './RadiomicsSection';
 
 /**
  * What a series view says of the other series of its acquisition that carry
@@ -177,12 +181,12 @@ function Enlarged3D({
   );
 }
 
-/** A volume as the table shows it. */
+/** A volume as the table shows it: whole mL from 1,000, one decimal from 1, two below. */
 export function formatVolume(ml: number): string {
   if (!Number.isFinite(ml) || ml <= 0) {
     return '—';
   }
-  if (ml >= 100) {
+  if (Math.round(ml * 10) / 10 >= 1000) {
     return `${Math.round(ml).toLocaleString('en-US')} mL`;
   }
   if (ml >= 1) {
@@ -191,90 +195,33 @@ export function formatVolume(ml: number): string {
   return `${ml.toFixed(2)} mL`;
 }
 
-/** The volume cell's text and title, or empty for a structure that shows no volume. */
-export function volumeCell(s: AnatomyStructure): { text: string; title: string | undefined } {
+/** The volume cell's text, whether it is a lower bound at the scan's edge, and its title; empty for no volume. */
+export function volumeCell(s: AnatomyStructure): {
+  text: string;
+  edge: boolean;
+  title: string | undefined;
+} {
   const v = s.volume;
   if (!v) {
-    return { text: '', title: undefined };
+    return { text: '', edge: false, title: undefined };
   }
   const text = `${v.atLeast ? '≥ ' : ''}${formatVolume(v.ml)}`;
   const parts = [
     v.from === 'document'
       ? 'From the reading system'
       : `From ${s.voxels.toLocaleString('en-US')} voxels`,
-    v.atLeast ? 'at least: the structure reaches the scan’s edge' : null,
+    v.atLeast
+      ? 'at least: the structure touches the scan’s edge, so its volume is a minimum'
+      : null,
     s.outOfBand ? 'outside the expected range for this organ' : null,
   ].filter(Boolean);
-  return { text, title: `${parts.join('; ')}.` };
+  return { text, edge: v.atLeast, title: `${parts.join('; ')}.` };
 }
 
-/** A research feature's value as the section shows it: four significant digits, or an exponent past them. */
-export function formatFeature(v: number | null): string {
-  if (v === null) {
-    return '—';
-  }
-  const a = Math.abs(v);
-  if (a !== 0 && (a >= 1e5 || a < 1e-3)) {
-    return v.toExponential(2);
-  }
-  return String(Number(v.toPrecision(4)));
-}
-
-const RESEARCH_STATE: Record<string, string> = {
-  disabled: 'Disabled',
-  not_computed: 'Not computed',
-};
-
-/** The research banner's words (WeiWei: clearly labelled research features, not for diagnosis). */
-export const RESEARCH_BANNER =
-  'Research use only: not validated for diagnosis. Never a finding, a measurement or report content.';
-
-/** A structure's research features (1.15): by class, the first open; or why they were not computed. */
-function ResearchFeatures({ r }: { r: AnatomyRadiomics }) {
-  return (
-    <div
-      className="prs-research"
-      role="region"
-      aria-label={`Research features (${r.featureSet})`}
-    >
-      <div className="prs-research-head">
-        Research features ({r.featureSet}){r.engine ? ` · ${r.engine}` : ''}
-      </div>
-      <div className="prs-research-banner">{RESEARCH_BANNER}</div>
-      {r.state !== 'computed' ? (
-        <div
-          className="prs-research-reason"
-          data-rs-research-reason=""
-        >
-          {RESEARCH_STATE[r.state] ?? r.state}
-          {r.reason ? `: ${r.reason.replace(/[.]$/, '')}` : ''}.
-        </div>
-      ) : r.groups.length ? (
-        r.groups.map((g, i) => (
-          <details
-            key={g.cls}
-            open={i === 0}
-            data-rs-research-class={g.cls}
-          >
-            <summary>
-              {g.title} ({g.features.length})
-            </summary>
-            <dl className="prs-research-grid">
-              {g.features.map(([name, value]) => (
-                <React.Fragment key={name}>
-                  <dt title={name}>{name}</dt>
-                  <dd>{formatFeature(value)}</dd>
-                </React.Fragment>
-              ))}
-            </dl>
-          </details>
-        ))
-      ) : (
-        <div className="prs-empty">No features.</div>
-      )}
-    </div>
-  );
-}
+/** What a structure that is not measurement eligible says instead of numbers (invariant 8). */
+export const LOCALIZATION_ONLY = 'localization only';
+export const LOCALIZATION_TITLE =
+  'Drawn and named; this structure is not qualified for measurement.';
 
 /** The attenuation column's header title (invariant 9: the statistic is named). */
 export const ATTENUATION_TITLE =
@@ -327,8 +274,26 @@ function Task({
   const withAttenuation = Object.values(snap.structures).some(x => x.attenuation);
   const columns = withAttenuation ? 6 : 5;
   // The structure whose research features are open (one at a time).
-  const [research, setResearch] = useState<string | null>(null);
+  const [radiomics, setRadiomics] = useState<string | null>(null);
   const loading = task.status === 'loading' || task.status === 'waiting';
+  // A structure selected here or picked on the images: its task unfolds and its row comes into view.
+  const selectedHere =
+    snap.selected !== null && task.structures.includes(snap.selected) ? snap.selected : null;
+  useEffect(() => {
+    if (selectedHere) {
+      setOpen(true);
+    }
+  }, [selectedHere]);
+  const body = useRef<HTMLTableSectionElement>(null);
+  useEffect(() => {
+    if (!selectedHere || !open) {
+      return;
+    }
+    const row = body.current?.querySelector<HTMLElement>(
+      `tr[data-rs-structure-key="${selectedHere}"]`
+    );
+    row?.scrollIntoView?.({ block: 'nearest' });
+  }, [selectedHere, open]);
   return (
     <section
       className="prs-anatomy-task"
@@ -384,7 +349,7 @@ function Task({
               ) : null}
             </tr>
           </thead>
-          <tbody>
+          <tbody ref={body}>
             {task.structures.map(key => {
               const s = snap.structures[key];
               if (!s) {
@@ -402,6 +367,7 @@ function Task({
                 <React.Fragment key={key}>
                   <tr
                     data-rs-structure={`${s.task}/${s.value}`}
+                    data-rs-structure-key={key}
                     aria-selected={snap.selected === key}
                     {...rowProps}
                   >
@@ -446,16 +412,16 @@ function Task({
                           !
                         </span>
                       ) : null}
-                      {s.radiomics ? (
+                      {s.radiomics?.state === 'computed' ? (
                         <button
                           type="button"
-                          className="prs-research-toggle"
-                          aria-expanded={research === key}
-                          data-rs-research-toggle={`${s.task}/${s.value}`}
-                          title="Research features (radiomics): research use only, not for diagnosis"
-                          onClick={() => setResearch(research === key ? null : key)}
+                          className="prs-chip"
+                          aria-expanded={radiomics === key}
+                          data-rs-radiomics-chip={`${s.task}/${s.value}`}
+                          title={`${name}'s research features (radiomics): research use only, not part of the report`}
+                          onClick={() => setRadiomics(radiomics === key ? null : key)}
                         >
-                          Research
+                          Radiomics · {s.radiomics.finite}
                         </button>
                       ) : null}
                     </td>
@@ -466,23 +432,45 @@ function Task({
                     >
                       {extent.text}
                     </td>
-                    <td
-                      className="prs-num"
-                      data-rs-volume=""
-                      data-out-of-band={s.outOfBand || undefined}
-                      title={volume.title}
-                    >
-                      {volume.text}
-                    </td>
-                    {withAttenuation ? (
+                    {s.eligible ? (
+                      <>
+                        <td
+                          className="prs-num"
+                          data-rs-volume=""
+                          data-out-of-band={s.outOfBand || undefined}
+                          title={volume.title}
+                        >
+                          {volume.text}
+                          {volume.edge ? (
+                            <span
+                              className="prs-cell-sub"
+                              data-rs-volume-edge=""
+                            >
+                              touches the scan edge
+                            </span>
+                          ) : null}
+                        </td>
+                        {withAttenuation ? (
+                          <td
+                            className="prs-num"
+                            data-rs-attenuation=""
+                            title={attenuationCell(s).title}
+                          >
+                            {attenuationCell(s).text}
+                          </td>
+                        ) : null}
+                      </>
+                    ) : (
                       <td
-                        className="prs-num"
-                        data-rs-attenuation=""
-                        title={attenuationCell(s).title}
+                        className="prs-num prs-localization"
+                        colSpan={withAttenuation ? 2 : 1}
+                        data-rs-volume=""
+                        data-rs-localization-only=""
+                        title={LOCALIZATION_TITLE}
                       >
-                        {attenuationCell(s).text}
+                        {LOCALIZATION_ONLY}
                       </td>
-                    ) : null}
+                    )}
                   </tr>
                   {s.warnings.length ? (
                     <tr
@@ -494,14 +482,14 @@ function Task({
                       <td colSpan={columns - 2}>{s.warnings.join(' ')}</td>
                     </tr>
                   ) : null}
-                  {s.radiomics && research === key ? (
+                  {s.radiomics?.state === 'computed' && radiomics === key ? (
                     <tr
-                      className="prs-research-row"
-                      data-rs-research={`${s.task}/${s.value}`}
+                      className="prs-radiomics-row"
+                      data-rs-radiomics={`${s.task}/${s.value}`}
                       {...rowProps}
                     >
                       <td colSpan={columns}>
-                        <ResearchFeatures r={s.radiomics} />
+                        <RadiomicsSection r={s.radiomics} />
                       </td>
                     </tr>
                   ) : null}

@@ -62,6 +62,7 @@ import { buildLayer, type AnatomyLayerData, type Yielder } from './anatomyLayer'
 import { labelsAt, packColor, type RenderLayer } from './anatomyRender';
 import { isGzip, NiftiError, parseNifti, unpackNifti, type Gunzip } from './nifti';
 import { decodeSurfaces, type SurfaceMesh, type SurfaceStatus } from './anatomySurfaces';
+import { familyTitle, finiteCount, RADIOMICS_FAMILIES, studyFileRef } from './radiomicsView';
 
 export type AnatomyPhase = 'idle' | 'loading' | 'ready' | 'none' | 'refused' | 'failed';
 export type AnatomyStyle = 'fill' | 'outline';
@@ -92,6 +93,11 @@ export interface AnatomyStructure {
   visible: boolean;
   /** The document's voxel count. */
   voxels: number;
+  /**
+   * Whether its mapping allows a measurement (§2.3). Without it the structure is
+   * drawn and named only: no volume, attenuation or research features (invariant 8).
+   */
+  eligible: boolean;
   /** Only for a measurement-eligible structure (§2.3); null otherwise. */
   volume: AnatomyVolume | null;
   /** How many slices it spans (null until known), and whether it runs past the scan's first or last slice. */
@@ -120,18 +126,9 @@ export interface AnatomyRadiomics {
   reason: string;
   /** By class, in pyradiomics' usual order; each feature as pyradiomics names it, with its value or null. */
   groups: Array<{ cls: string; title: string; features: Array<[string, number | null]> }>;
+  /** How many of its features have a finite value (the row's chip). */
+  finite: number;
 }
-
-/** pyradiomics' feature classes, in the order the tab lists them, with their titles. */
-const RADIOMICS_CLASSES: Array<[string, string]> = [
-  ['firstorder', 'First order'],
-  ['shape', 'Shape'],
-  ['glcm', 'GLCM (co-occurrence)'],
-  ['glrlm', 'GLRLM (run length)'],
-  ['glszm', 'GLSZM (size zone)'],
-  ['gldm', 'GLDM (dependence)'],
-  ['ngtdm', 'NGTDM (neighbourhood tone difference)'],
-];
 
 /** A label's research features, grouped by class (a class the tab does not know comes last, by name). */
 export function radiomicsOf(label: RsAnatomyLabel): AnatomyRadiomics | null {
@@ -148,21 +145,23 @@ export function radiomicsOf(label: RsAnatomyLabel): AnatomyRadiomics | null {
     }
     byClass.get(cls)!.push([key.slice(cut + 1), value]);
   }
-  const known = RADIOMICS_CLASSES.map(([cls]) => cls);
+  const known = RADIOMICS_FAMILIES.map(([cls]) => cls);
   const order = [
     ...known.filter(cls => byClass.has(cls)),
     ...[...byClass.keys()].filter(cls => !known.includes(cls)).sort(),
   ];
+  const groups = order.map(cls => ({
+    cls,
+    title: familyTitle(cls),
+    features: byClass.get(cls)!,
+  }));
   return {
     featureSet: r.featureSet,
     engine: r.engine,
     state: r.state,
     reason: r.reason,
-    groups: order.map(cls => ({
-      cls,
-      title: RADIOMICS_CLASSES.find(([c]) => c === cls)?.[1] ?? cls,
-      features: byClass.get(cls)!,
-    })),
+    groups,
+    finite: finiteCount(groups),
   };
 }
 
@@ -363,8 +362,16 @@ export interface AnatomyStore {
    * navigator to bring it into view.
    */
   select(key: string | null): void;
+  /**
+   * The overlay's, for a click on a structure in a view: selects it as `select`
+   * does, but the views stay where they are (the reader is looking at it). The
+   * selected one again changes nothing.
+   */
+  pick(key: string): void;
   /** The structure the reader points at in the table (null: none). */
   hover(key: string | null): void;
+  /** The study's name for a file (the CT side's study ref, never the UID); null before a study. */
+  studyFileRef(): Promise<string | null>;
   /** The overlay's: brings a target into a viewport; answers whether it could. */
   setNavigator(navigate: ((target: AnatomyTarget) => boolean) | null): void;
   /** The series index for a series UID, when it has drawable layers. */
@@ -512,6 +519,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
     files: 0,
     refusedFiles: 0,
     selections: 0,
+    picks: 0,
     jumps: 0,
     jumpMisses: 0,
     surfaceFiles: 0,
@@ -890,6 +898,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
                 color: labelColor(label),
                 visible: true,
                 voxels: label.voxels,
+                eligible: label.measurementEligible,
                 volume: volumeOf(label, vox),
                 extent: documentExtent(label, sliceMm),
                 components: label.components,
@@ -1115,21 +1124,7 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
         return;
       }
       counts.selections++;
-      let structures = state.structures;
-      if (!s.visible) {
-        structures = { ...structures, [key]: { ...s, visible: true } };
-        refreshColors(s.series, s.task, structures);
-      }
-      const settings = state.settings.enabled
-        ? state.settings
-        : { ...state.settings, enabled: true };
-      if (settings !== state.settings) {
-        saveSettings(settings);
-      }
-      const t = state.series[s.series]?.tasks.find(x => x.task === s.task);
-      const series =
-        t && !t.visible ? updateTask(s.series, s.task, { visible: true }) : state.series;
-      set({ selected: key, structures, settings, series });
+      choose(s);
       const target = targetOf(s);
       if (target && navigate) {
         counts.jumps++;
@@ -1137,6 +1132,17 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
           counts.jumpMisses++;
         }
       }
+    },
+    pick(key) {
+      const s = state.structures[key];
+      if (!s || key === state.selected) {
+        return;
+      }
+      counts.picks++;
+      choose(s);
+    },
+    studyFileRef() {
+      return study ? studyFileRef(study, { fallback: deps.studyRef }) : Promise.resolve(null);
     },
     hover(key) {
       const next = key && state.structures[key] ? key : null;
@@ -1255,6 +1261,8 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
         related: state.series.map(s => s.related),
         structures: all.length,
         visibleStructures: all.filter(s => s.visible).length,
+        eligible: all.filter(s => s.eligible).length,
+        radiomics: all.filter(s => s.radiomics?.state === 'computed').length,
         settings: { ...state.settings },
         selected: sel ? `${sel.task}/${sel.value}` : null,
         selectedSlices: sel?.slices ?? null,
@@ -1264,6 +1272,22 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
       };
     },
   };
+
+  /** Selects a structure: shown, its task shown, the layers on (select and pick). */
+  function choose(s: AnatomyStructure) {
+    let structures = state.structures;
+    if (!s.visible) {
+      structures = { ...structures, [s.key]: { ...s, visible: true } };
+      refreshColors(s.series, s.task, structures);
+    }
+    const settings = state.settings.enabled ? state.settings : { ...state.settings, enabled: true };
+    if (settings !== state.settings) {
+      saveSettings(settings);
+    }
+    const t = state.series[s.series]?.tasks.find(x => x.task === s.task);
+    const series = t && !t.visible ? updateTask(s.series, s.task, { visible: true }) : state.series;
+    set({ selected: s.key, structures, settings, series });
+  }
 
   function targetOf(s: AnatomyStructure): AnatomyTarget | null {
     const series = doc?.series[s.series];

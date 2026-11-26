@@ -24,6 +24,7 @@
  * report column and back with Esc; without WebGL, the view says so.
  */
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import {
@@ -609,41 +610,83 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
     await expect(organs).toHaveCount(2);
     await expect(organs.nth(0).locator('.prs-structure')).toHaveText('Liver');
     await expect(organs.nth(0).locator('[data-rs-extent]')).toHaveText('5 sl');
-    await expect(organs.nth(0).locator('[data-rs-volume]')).toHaveText('102 mL');
+    await expect(organs.nth(0).locator('[data-rs-volume]')).toHaveText('102.4 mL');
     await expect(organs.nth(1).locator('.prs-structure')).toHaveText('Left kidney');
     await expect(organs.nth(1).locator('[data-rs-extent]')).toHaveText('10 sl');
     await expect(organs.nth(1).locator('[data-rs-volume]')).toHaveText('51.2 mL');
     const cavities = pane(page).locator('[data-rs-anatomy-task="trunk_cavities"]');
     await expect(cavities.locator('[data-rs-anatomy-task-toggle]')).not.toBeChecked();
-    // Unfolded: the abdominal cavity, not measurement eligible, shows its extent and no volume.
+    // Unfolded: the abdominal cavity, not measurement eligible, shows its extent and says it is
+    // for localization only (invariant 8).
     await cavities.locator('.prs-fold').click();
     const cavity = cavities.locator('tr[data-rs-structure]');
     await expect(cavity.locator('.prs-structure')).toHaveText('Abdominal cavity');
     await expect(cavity.locator('[data-rs-extent]')).toHaveText('16 sl');
-    await expect(cavity.locator('[data-rs-volume]')).toHaveText('');
+    await expect(cavity.locator('[data-rs-volume]')).toHaveText('localization only');
 
-    // Research features (1.15): a section of their own behind each row's Research button, marked research use only.
-    await organs.nth(0).locator('[data-rs-research-toggle]').click();
-    const research = pane(page).locator('[data-rs-research="total/1"]');
-    await expect(research.locator('.prs-research-head')).toHaveText(
-      'Research features (radiomics_v1) · pyradiomics 3.0.1'
+    // Research features (1.15): a "Radiomics · n" chip on a row whose features were computed
+    // (the kidney's were not: no chip), opening them under it, research use only.
+    await expect(organs.nth(1).locator('[data-rs-radiomics-chip]')).toHaveCount(0);
+    const chip = organs.nth(0).locator('[data-rs-radiomics-chip]');
+    await expect(chip).toHaveText('Radiomics · 3');
+    await chip.click();
+    const radiomics = pane(page).locator('[data-rs-radiomics="total/1"]');
+    await expect(radiomics.locator('.prs-radiomics-head')).toHaveText(
+      'Radiomics (radiomics_v1 · pyradiomics 3.0.1). Research use only, not part of the report.'
     );
-    await expect(research.locator('.prs-research-banner')).toContainText('Research use only');
     await expect(
-      research.locator('details[data-rs-research-class="firstorder"] dd').first()
-    ).toHaveText('180.3');
+      radiomics.locator('[data-rs-radiomics-feature="firstorder_Median"] + dd')
+    ).toHaveText('180 HU');
+    await expect(radiomics.locator('[data-rs-radiomics-family="glcm"] button')).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    await radiomics.locator('[data-rs-radiomics-search]').fill('contrast');
+    await expect(radiomics.locator('[data-rs-radiomics-feature="glcm_Contrast"] + dd')).toHaveText(
+      '—'
+    );
     if (process.env.RS_E2E_SHOTS) {
       await pane(page).screenshot({
-        path: path.join(__dirname, 'test-results', `anatomy-research-${want}.png`),
+        path: path.join(__dirname, 'test-results', `anatomy-radiomics-${want}.png`),
       });
     }
-    await organs.nth(1).locator('[data-rs-research-toggle]').click();
-    await expect(research).toHaveCount(0);
-    await expect(
-      pane(page).locator('[data-rs-research="total/2"] [data-rs-research-reason]')
-    ).toHaveText('Not computed: no radiomics engine is installed in this build.');
-    await organs.nth(1).locator('[data-rs-research-toggle]').click();
-    await expect(pane(page).locator('[data-rs-research]')).toHaveCount(0);
+    await chip.click();
+    await expect(pane(page).locator('[data-rs-radiomics]')).toHaveCount(0);
+
+    // The study side by side in the Radiomics tab, right after Anatomy; Export CSV, named by the
+    // study ref (the UID's SHA-256, 12 hex), never the UID.
+    await expect(pane(page).locator('[role="tab"]').nth(1)).toHaveText('Radiomics (1)');
+    await pane(page).locator('[data-rs-tab="radiomics"]').click();
+    const table = pane(page).locator('[data-rs-radiomics-tab]');
+    await expect(table.locator('[data-rs-radiomics-banner]')).toHaveText(
+      'Research use only, not part of the report.'
+    );
+    await expect(table.locator('thead th')).toHaveText(['Feature', 'Liver']);
+    await expect(table.locator('[data-rs-radiomics-missing]')).toHaveText(
+      'Left kidney: not computed (no radiomics engine is installed in this build).'
+    );
+    const download = page.waitForEvent('download');
+    await table.locator('[data-rs-radiomics-export]').click();
+    const file = await download;
+    // The study's UID from the route the harness opened, kept here and never printed.
+    const uid = new URL(page.url()).searchParams.get('StudyInstanceUIDs') ?? '';
+    expect(uid.length > 0).toBe(true);
+    const ref = `study-${createHash('sha256').update(uid).digest('hex').slice(0, 12)}`;
+    expect(file.suggestedFilename()).toBe(`${ref}-radiomics_v1.csv`);
+    const csv = await readFile((await file.path())!, 'utf8');
+    expect(csv.split('\r\n').slice(0, 3)).toEqual([
+      '# Research use only: not part of the report. radiomics_v1 by pyradiomics 3.0.1',
+      'family,feature,name,unit,Liver',
+      'firstorder,firstorder_Median,Median,HU,180.25',
+    ]);
+    expect(csv.includes(uid) || file.suggestedFilename().includes(uid)).toBe(false);
+    if (process.env.RS_E2E_SHOTS) {
+      await pane(page).screenshot({
+        path: path.join(__dirname, 'test-results', `anatomy-radiomics-tab-${want}.png`),
+      });
+    }
+    await pane(page).locator('[data-rs-tab="anatomy"]').click();
+    await expect(organs).toHaveCount(2);
 
     // The series is on a viewport, with the layer canvas over it.
     await expect

@@ -69,6 +69,7 @@ import {
   getRenderingEngines as csGetRenderingEngines,
   metaData as csMetaData,
 } from '@cornerstonejs/core';
+import { ToolGroupManager as CsToolGroupManager } from '@cornerstonejs/tools';
 import { READING_MODES_UITYPE, REFINE_AVAILABLE_EVALUATOR } from './getToolbarModule';
 import initAllInOneAutoRefresh from './allinone/initAllInOneAutoRefresh';
 import initScrollSyncBinding from './sync/initScrollSyncBinding';
@@ -122,13 +123,25 @@ const pacsaiHpExtension: Types.Extensions.Extension = {
     // display sets for the chosen study before re-hanging.
     configurePriorSwitching({ servicesManager, extensionManager });
 
-    // RS-36: the CT analysis pane's anatomy layers draw on cornerstone's viewports.
+    // RS-36: the CT analysis pane's anatomy layers draw on cornerstone's viewports; a click
+    // on them picks a structure only under a left-button tool that does nothing with a click.
     setReadingSystemCornerstone({
       Enums: CsEnums,
       eventTarget: csEventTarget,
       getEnabledElement: csGetEnabledElement,
       getRenderingEngines: csGetRenderingEngines,
       metaData: csMetaData,
+      primaryTool: (element: HTMLElement) => {
+        const enabled = csGetEnabledElement(element as HTMLDivElement);
+        if (!enabled) {
+          return undefined;
+        }
+        const group = CsToolGroupManager.getToolGroupForViewport(
+          enabled.viewportId,
+          enabled.renderingEngineId
+        );
+        return group ? (group.getActivePrimaryMouseButtonTool() ?? null) : undefined;
+      },
     } as unknown as CornerstoneApi);
 
     // B01 (Rev 11 milestone 2): derive the display-set, first-pixels, matching-

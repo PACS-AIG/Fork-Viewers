@@ -8,7 +8,7 @@ import { RsHttpError } from '../rsClient';
 import { RsRefused } from '../rsContract';
 import { readAnatomy } from './anatomyContract';
 import { createAnatomyStore, type AnatomyClient, type AnatomyTarget } from './anatomyStore';
-import { formatFeature, formatVolume, resampledNote } from './AnatomyTab';
+import { formatVolume, LOCALIZATION_TITLE, resampledNote } from './AnatomyTab';
 import {
   AFFINE,
   CAVITIES,
@@ -171,8 +171,14 @@ describe("the pane's Anatomy tab (RS-36)", () => {
       ['total/2', 'Spleen', '1 sl', '0.11 mL'],
       ['total/1', 'Liver', '3 sl', '0.32 mL'],
     ]);
-    // §2.3: a structure that is not measurement eligible shows no volume.
-    expect(rows(groups[1])).toEqual([['vertebrae_pp/1', 'L1 vertebra', '≥ 2 sl', '']]);
+    // §2.3: a structure that is not measurement eligible shows no number; it says it is for
+    // localization only (invariant 8).
+    expect(rows(groups[1])).toEqual([
+      ['vertebrae_pp/1', 'L1 vertebra', '≥ 2 sl', 'localization only'],
+    ]);
+    expect(groups[1].querySelector('[data-rs-localization-only]')?.getAttribute('title')).toBe(
+      LOCALIZATION_TITLE
+    );
     // The body cavities start hidden, folded.
     expect(groups[2].querySelectorAll('tr')).toHaveLength(0);
     expect(
@@ -406,10 +412,13 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     });
     const liver = column.querySelector('[data-rs-structure="total/1"]') as HTMLElement;
     const volume = liver.querySelector('[data-rs-volume]') as HTMLElement;
-    expect(volume.textContent).toBe('≥ 1,464 mL');
+    expect(volume.firstChild?.textContent).toBe('≥ 1,464 mL');
+    expect(volume.querySelector('[data-rs-volume-edge]')?.textContent).toBe(
+      'touches the scan edge'
+    );
     expect(volume.getAttribute('data-out-of-band')).toBe('true');
     expect(volume.getAttribute('title')).toBe(
-      'From the reading system; at least: the structure reaches the scan’s edge; outside the expected range for this organ.'
+      'From the reading system; at least: the structure touches the scan’s edge, so its volume is a minimum; outside the expected range for this organ.'
     );
     const extent = liver.querySelector('[data-rs-extent]') as HTMLElement;
     expect(extent.textContent).toBe('≥ 29 sl');
@@ -428,6 +437,7 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     ) as HTMLElement;
     expect(spleen.getAttribute('title')).toBe('From 9 voxels.');
     expect(spleen.hasAttribute('data-out-of-band')).toBe(false);
+    expect(spleen.querySelector('[data-rs-volume-edge]')).toBeNull();
     destroy();
   });
 
@@ -468,12 +478,16 @@ describe("the pane's Anatomy tab (RS-36)", () => {
     );
     expect(cell('total/2').textContent).toBe('—');
     expect(cell('total/2').getAttribute('title')).toBe('Not measured: too few voxels.');
-    // Not measurement eligible: no attenuation, an empty cell.
-    expect(cell('vertebrae_pp/1').textContent).toBe('');
+    // Not measurement eligible: no attenuation; one cell across both columns says why.
+    expect(cell('vertebrae_pp/1')).toBeNull();
+    const only = column.querySelector(
+      '[data-rs-structure="vertebrae_pp/1"] [data-rs-localization-only]'
+    ) as HTMLTableCellElement;
+    expect([only.textContent, only.colSpan]).toEqual(['localization only', 2]);
     destroy();
   });
 
-  it("shows 1.15's research features in a section of their own, marked research use only, or why they were not computed", async () => {
+  it("shows 1.15's research features behind a Radiomics chip when computed: families that fold, a search, units, research use only", async () => {
     const { s } = await store(undefined, raw => {
       const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
       total.labels[0].radiomics = {
@@ -482,7 +496,19 @@ describe("the pane's Anatomy tab (RS-36)", () => {
         engine: 'pyradiomics 3.0.1',
         state: 'computed',
         reason: '',
-        features: { firstorder_Median: 41.537, firstorder_Mean: null, glcm_Contrast: 123456.7 },
+        features: {
+          firstorder_Median: 41.537,
+          firstorder_Mean: null,
+          firstorder_InterquartileRange: 12.25,
+          firstorder_10Percentile: 20,
+          firstorder_90Percentile: 60,
+          firstorder_Kurtosis: 3.1,
+          firstorder_Energy: 5.1e9,
+          shape_LeastAxisLength: 31.4,
+          shape_Sphericity: 0.71,
+          glcm_Contrast: 123456.7,
+          glcm_Idmn: 0.98,
+        },
       };
       total.labels[1].radiomics = {
         use: 'research',
@@ -498,79 +524,324 @@ describe("the pane's Anatomy tab (RS-36)", () => {
       s.enter(STUDY);
       await flush();
     });
-    const toggle = (key: string) =>
-      column.querySelector(`[data-rs-research-toggle="${key}"]`) as HTMLButtonElement | null;
-    // Only the structures with research features have the button; nothing is open yet.
-    expect(toggle('total/1')).not.toBeNull();
-    expect(toggle('total/2')).not.toBeNull();
-    expect(toggle('vertebrae_pp/1')).toBeNull();
-    expect(column.querySelector('[data-rs-research]')).toBeNull();
+    const chip = (key: string) =>
+      column.querySelector(`[data-rs-radiomics-chip="${key}"]`) as HTMLButtonElement | null;
+    // Only computed features get a chip, which counts the finite values; nothing is open yet.
+    expect(chip('total/1')?.textContent).toBe('Radiomics · 10');
+    expect(chip('total/2')).toBeNull();
+    expect(chip('vertebrae_pp/1')).toBeNull();
+    expect(column.querySelector('[data-rs-radiomics]')).toBeNull();
     act(() => {
-      fireEvent.click(toggle('total/1')!);
+      fireEvent.click(chip('total/1')!);
     });
-    const section = column.querySelector('[data-rs-research="total/1"]') as HTMLElement;
-    expect(toggle('total/1')!.getAttribute('aria-expanded')).toBe('true');
-    expect(section.querySelector('.prs-research-head')?.textContent).toBe(
-      'Research features (radiomics_v1) · pyradiomics 3.0.1'
+    expect(chip('total/1')!.getAttribute('aria-expanded')).toBe('true');
+    const section = column.querySelector('[data-rs-radiomics="total/1"]') as HTMLElement;
+    expect(section.querySelector('.prs-radiomics-head')?.textContent).toBe(
+      'Radiomics (radiomics_v1 · pyradiomics 3.0.1). Research use only, not part of the report.'
     );
-    expect(section.querySelector('.prs-research-banner')?.textContent).toBe(
-      'Research use only: not validated for diagnosis. Never a finding, a measurement or report content.'
-    );
-    const classes = Array.from(section.querySelectorAll('details'));
-    expect(
-      classes.map(d => [
-        d.getAttribute('data-rs-research-class'),
-        d.open,
-        d.querySelector('summary')?.textContent,
-      ])
-    ).toEqual([
-      ['firstorder', true, 'First order (2)'],
-      ['glcm', false, 'GLCM (co-occurrence) (1)'],
+    const families = () =>
+      Array.from(section.querySelectorAll('[data-rs-radiomics-family]')).map(f => [
+        f.getAttribute('data-rs-radiomics-family'),
+        f.querySelector('button')?.getAttribute('aria-expanded'),
+        f.querySelector('button')?.textContent,
+      ]);
+    expect(families()).toEqual([
+      ['firstorder', 'true', '▾ First order 7'],
+      ['shape', 'true', '▾ Shape 2'],
+      ['glcm', 'false', '▸ GLCM (co-occurrence) 2'],
     ]);
-    expect(Array.from(classes[0].querySelectorAll('dt, dd')).map(e => e.textContent)).toEqual([
+    const pairs = (cls: string) =>
+      Array.from(
+        section.querySelectorAll(
+          `[data-rs-radiomics-family="${cls}"] dt, [data-rs-radiomics-family="${cls}"] dd`
+        )
+      ).map(e => e.textContent);
+    const valueOf = (key: string) =>
+      section.querySelector(`[data-rs-radiomics-feature="${key}"]`)!
+        .nextElementSibling as HTMLElement;
+    // First order opens on its key features, in their order; Mean has no finite value.
+    expect(pairs('firstorder')).toEqual([
       'Median',
-      '41.54',
+      '41.5 HU',
       'Mean',
       '—',
+      'Interquartile range',
+      '12.3 HU',
+      '10th percentile',
+      '20 HU',
+      '90th percentile',
+      '60 HU',
     ]);
-    expect(classes[1].querySelector('dd')?.textContent).toBe('1.23e+5');
-    // The research features are no column of the table.
-    expect(Array.from(column.querySelectorAll('th')).map(th => th.textContent)).not.toContain(
-      'Research'
+    expect(
+      section
+        .querySelector('[data-rs-radiomics-feature="firstorder_Median"]')
+        ?.getAttribute('title')
+    ).toBe('firstorder_Median');
+    expect(valueOf('firstorder_Median').getAttribute('title')).toBe('41.537 HU');
+    expect(valueOf('firstorder_Mean').getAttribute('title')).toBe('No finite value.');
+    act(() => {
+      fireEvent.click(section.querySelector('[data-rs-radiomics-more]')!);
+    });
+    expect(pairs('firstorder')).toHaveLength(14);
+    expect(section.querySelector('[data-rs-radiomics-more]')).toBeNull();
+    expect(valueOf('firstorder_Energy').getAttribute('title')).toBe(
+      '5100000000 HU², of HU + 1000 (the registry’s voxelArrayShift)'
     );
-    // Another structure's: one open at a time; why they were not computed.
+    expect(pairs('shape')).toEqual(['Least axis length', '31.4 mm', 'Sphericity', '0.71']);
+    // GLCM starts folded.
+    expect(pairs('glcm')).toEqual([]);
     act(() => {
-      fireEvent.click(toggle('total/2')!);
+      fireEvent.click(section.querySelector('[data-rs-radiomics-family="glcm"] button')!);
     });
-    expect(column.querySelector('[data-rs-research="total/1"]')).toBeNull();
-    expect(
-      column.querySelector('[data-rs-research="total/2"] [data-rs-research-reason]')?.textContent
-    ).toBe('Not computed: no radiomics engine is installed in this build.');
-    expect(
-      column.querySelector('[data-rs-research="total/2"] .prs-research-head')?.textContent
-    ).toBe('Research features (radiomics_v1)');
+    expect(pairs('glcm')).toEqual([
+      'Contrast',
+      '1.23 × 10⁵',
+      'Inverse difference moment normalized',
+      '0.98',
+    ]);
+    // A search: only the families with a match, open, with their counts.
+    const search = section.querySelector('[data-rs-radiomics-search]') as HTMLInputElement;
     act(() => {
-      fireEvent.click(toggle('total/2')!);
+      fireEvent.change(search, { target: { value: 'axis' } });
     });
-    expect(column.querySelector('[data-rs-research]')).toBeNull();
+    expect(families()).toEqual([['shape', 'true', '▾ Shape 1 of 2']]);
+    act(() => {
+      fireEvent.change(search, { target: { value: 'zzz' } });
+    });
+    expect(section.querySelector('[data-rs-radiomics-none]')?.textContent).toBe(
+      'No feature matches “zzz”.'
+    );
+    // Esc empties the search, and goes no further (the spotlight keeps its structure).
+    s.select(
+      Object.values(s.getSnapshot().structures).find(x => x.task === 'total' && x.value === 1)!.key
+    );
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+    act(() => {
+      search.dispatchEvent(esc);
+    });
+    expect(search.value).toBe('');
+    expect(s.getSnapshot().selected).not.toBeNull();
+    // The research features are no column of the table; the chip again folds them.
+    expect(Array.from(column.querySelectorAll('th')).map(th => th.textContent)).not.toContain(
+      'Radiomics'
+    );
+    act(() => {
+      fireEvent.click(chip('total/1')!);
+    });
+    expect(column.querySelector('[data-rs-radiomics]')).toBeNull();
     destroy();
   });
 
-  it('formats a research feature: four significant digits, an exponent beyond them, a dash for none', () => {
-    expect(formatFeature(41.537)).toBe('41.54');
-    expect(formatFeature(0.123456)).toBe('0.1235');
-    expect(formatFeature(12345.6)).toBe('12350');
-    expect(formatFeature(123456.7)).toBe('1.23e+5');
-    expect(formatFeature(0.0001234)).toBe('1.23e-4');
-    expect(formatFeature(0)).toBe('0');
-    expect(formatFeature(-2.5)).toBe('-2.5');
-    expect(formatFeature(null)).toBe('—');
+  it('unfolds the task of a structure picked on the images and brings its row into view', async () => {
+    const scrolled: string[] = [];
+    const proto = Element.prototype as unknown as { scrollIntoView?: unknown };
+    const before = proto.scrollIntoView;
+    proto.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute('data-rs-structure') ?? '');
+    };
+    try {
+      const { s, navigations } = await store();
+      const { column, destroy } = mount(fakeController(), s);
+      await act(async () => {
+        s.enter(STUDY);
+        await flush();
+      });
+      const cavities = column.querySelector(
+        '[data-rs-anatomy-task="trunk_cavities"]'
+      ) as HTMLElement;
+      expect(cavities.querySelectorAll('tr')).toHaveLength(0);
+      const key = Object.values(s.getSnapshot().structures).find(
+        x => x.task === 'trunk_cavities'
+      )!.key;
+      act(() => s.pick(key));
+      expect(
+        cavities
+          .querySelector('tr[data-rs-structure="trunk_cavities/1"]')
+          ?.getAttribute('aria-selected')
+      ).toBe('true');
+      expect(scrolled).toContain('trunk_cavities/1');
+      expect(navigations).toEqual([]);
+      destroy();
+    } finally {
+      proto.scrollIntoView = before;
+    }
   });
 
-  it('formats a volume for the table', () => {
+  it('formats a volume for the table: whole mL from 1,000, one decimal from 1, two below', () => {
     expect(formatVolume(1523.4)).toBe('1,523 mL');
+    expect(formatVolume(999.96)).toBe('1,000 mL');
+    expect(formatVolume(108.66)).toBe('108.7 mL');
     expect(formatVolume(62.44)).toBe('62.4 mL');
     expect(formatVolume(0.324)).toBe('0.32 mL');
     expect(formatVolume(0)).toBe('—');
+  });
+});
+
+describe("the pane's Radiomics tab (RS-36)", () => {
+  const computed = (features: Record<string, number | null>) => ({
+    use: 'research',
+    featureSet: 'radiomics_v1',
+    engine: 'pyradiomics 3.0.1',
+    state: 'computed',
+    reason: '',
+    features,
+  });
+
+  it('comes after Anatomy while a structure has computed features: side by side, sortable, searchable, research use only', async () => {
+    const { s } = await store(undefined, raw => {
+      const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+      // The liver (value 1) and the spleen (value 2).
+      total.labels[0].radiomics = computed({
+        firstorder_Median: 41.5,
+        firstorder_Mean: 40,
+        shape_Sphericity: 0.7,
+      });
+      total.labels[1].radiomics = computed({
+        firstorder_Median: 52.25,
+        firstorder_Mean: null,
+        shape_Sphericity: 0.9,
+      });
+    });
+    const controller = fakeController();
+    const { column, destroy } = mount(controller, s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    expect(tabs(column)).toEqual([
+      'Anatomy (4)',
+      'Radiomics (2)',
+      'Draft',
+      'Inbox (0)',
+      'Changes (0)',
+    ]);
+    act(() => {
+      fireEvent.click(column.querySelector('[data-rs-tab="radiomics"]')!);
+    });
+    const tab = column.querySelector('[data-rs-radiomics-tab]') as HTMLElement;
+    expect(tab.querySelector('[data-rs-radiomics-banner]')?.textContent).toBe(
+      'Research use only, not part of the report.'
+    );
+    const head = () => Array.from(tab.querySelectorAll('thead th')).map(th => th.textContent);
+    const body = () =>
+      Array.from(tab.querySelectorAll('tbody tr')).map(tr =>
+        Array.from(tr.children).map(c => c.textContent)
+      );
+    // The structures head to feet, as the Anatomy tab lists them.
+    expect(head()).toEqual(['Feature', 'Spleen', 'Liver']);
+    expect(body()).toEqual([
+      ['First order 2'],
+      ['Median HU', '52.3', '41.5'],
+      ['Mean HU', '—', '40'],
+      ['Shape 1'],
+      ['Sphericity', '0.9', '0.7'],
+    ]);
+    expect(
+      tab.querySelector('[data-rs-radiomics-row="firstorder_Median"] td')?.getAttribute('title')
+    ).toBe('52.25 HU');
+    // Sorted by the liver's values: ascending, descending, then the registry's order again.
+    const liver = tab.querySelector('[data-rs-radiomics-sort="0/total/1"]') as HTMLButtonElement;
+    const firsts = () => body().map(r => r[0]);
+    act(() => {
+      fireEvent.click(liver);
+    });
+    expect(firsts()).toEqual(['First order 2', 'Mean HU', 'Median HU', 'Shape 1', 'Sphericity']);
+    expect(liver.closest('th')?.getAttribute('aria-sort')).toBe('ascending');
+    act(() => {
+      fireEvent.click(liver);
+    });
+    expect(firsts()).toEqual(['First order 2', 'Median HU', 'Mean HU', 'Shape 1', 'Sphericity']);
+    act(() => {
+      fireEvent.click(liver);
+    });
+    expect(liver.closest('th')?.getAttribute('aria-sort')).toBe('none');
+    // By the feature's name.
+    act(() => {
+      fireEvent.click(tab.querySelector('[data-rs-radiomics-sort="name"]')!);
+    });
+    expect(firsts()).toEqual(['First order 2', 'Mean HU', 'Median HU', 'Shape 1', 'Sphericity']);
+    // A search keeps the families with a match.
+    act(() => {
+      fireEvent.change(tab.querySelector('[data-rs-radiomics-search]')!, {
+        target: { value: 'spher' },
+      });
+    });
+    expect(body()).toEqual([['Shape 1 of 1'], ['Sphericity', '0.9', '0.7']]);
+    destroy();
+  });
+
+  it("exports the study's features as CSV, unrounded, named by the study ref and never the UID", async () => {
+    const { s } = await store(undefined, raw => {
+      const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+      total.labels[0].radiomics = computed({ firstorder_Median: 41.5, firstorder_Mean: 40 });
+      total.labels[1].radiomics = {
+        use: 'research',
+        featureSet: 'radiomics_v1',
+        engine: null,
+        state: 'not_computed',
+        reason: 'no radiomics engine is installed in this build',
+        features: {},
+      };
+    });
+    const blobs: Blob[] = [];
+    const names: string[] = [];
+    const url = window.URL as unknown as {
+      createObjectURL?: (b: Blob) => string;
+      revokeObjectURL?: (u: string) => void;
+    };
+    const saved = { create: url.createObjectURL, revoke: url.revokeObjectURL };
+    url.createObjectURL = (b: Blob) => {
+      blobs.push(b);
+      return 'blob:radiomics';
+    };
+    url.revokeObjectURL = () => {};
+    const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement
+    ) {
+      names.push(this.download);
+    });
+    try {
+      const { column, destroy } = mount(fakeController(), s);
+      await act(async () => {
+        s.enter(STUDY);
+        await flush();
+      });
+      expect(tabs(column)).toContain('Radiomics (1)');
+      act(() => {
+        fireEvent.click(column.querySelector('[data-rs-tab="radiomics"]')!);
+      });
+      const tab = column.querySelector('[data-rs-radiomics-tab]') as HTMLElement;
+      // The structure not computed is said under the table, with its reason.
+      expect(tab.querySelector('[data-rs-radiomics-missing]')?.textContent).toBe(
+        'Spleen: not computed (no radiomics engine is installed in this build).'
+      );
+      await act(async () => {
+        fireEvent.click(tab.querySelector('[data-rs-radiomics-export]')!);
+        await flush();
+      });
+      const subtle = (globalThis as { crypto?: { subtle?: unknown } }).crypto?.subtle;
+      const ref = subtle
+        ? `study-${createHash('sha256').update(STUDY).digest('hex').slice(0, 12)}`
+        : 'ref';
+      expect(names).toEqual([`${ref}-radiomics_v1.csv`]);
+      const text = await new Promise<string>(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.readAsText(blobs[0]);
+      });
+      expect(text.split('\r\n')).toEqual([
+        '# Research use only: not part of the report. radiomics_v1 by pyradiomics 3.0.1',
+        'family,feature,name,unit,Liver',
+        'firstorder,firstorder_Median,Median,HU,41.5',
+        'firstorder,firstorder_Mean,Mean,HU,40',
+        '',
+      ]);
+      expect(`${names[0]}\n${text}`).not.toContain(STUDY);
+      destroy();
+    } finally {
+      click.mockRestore();
+      url.createObjectURL = saved.create;
+      url.revokeObjectURL = saved.revoke;
+    }
   });
 });

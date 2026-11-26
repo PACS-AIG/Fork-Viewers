@@ -43,10 +43,12 @@ import { draftView, selectionOf, type DraftPassage } from './rsModel';
 export type RsPhase = 'idle' | 'loading' | 'ready' | 'not_served' | 'refused' | 'failed';
 /**
  * `anatomy`: the study's anatomy layers (anatomy/AnatomyTab), when it has them;
+ * `radiomics`: its structures' research features side by side (anatomy/RadiomicsTab),
+ * when any were computed;
  * `pathgrade`: its findings with a held reference-case strip (pathgrade/PathGradeTab),
  * when it has any.
  */
-export type RsTab = 'anatomy' | 'draft' | 'inbox' | 'changes' | 'pathgrade';
+export type RsTab = 'anatomy' | 'radiomics' | 'draft' | 'inbox' | 'changes' | 'pathgrade';
 
 export interface RsNotice {
   level: 'info' | 'warn' | 'error';

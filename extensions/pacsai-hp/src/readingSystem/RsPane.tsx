@@ -21,6 +21,10 @@
  *   - PathGrade, only while a finding of the study has a held reference-case
  *     strip (a qualified characterizer for its class): those findings with
  *     their strips (pathgrade/PathGradeTab); hidden otherwise.
+ *   - Radiomics, right after Anatomy and only while a structure of the study
+ *     has computed research features: every such structure's features side
+ *     by side, with Export CSV (anatomy/RadiomicsTab); research use only,
+ *     never part of the report.
  * The Copilot is a card over the tabs (Escape or its Close button closes it).
  *
  * Rendered with its own React root, outside OHIF's tree, like the dock it sits
@@ -30,6 +34,7 @@ import React, { useEffect, useRef, useSyncExternalStore } from 'react';
 import { AnatomyTab } from './anatomy/AnatomyTab';
 import type { Anatomy3dCell } from './anatomy/anatomy3dCell';
 import type { AnatomySnapshot, AnatomyStore } from './anatomy/anatomyStore';
+import { computedRadiomicsCount, RadiomicsTab } from './anatomy/RadiomicsTab';
 import { heldStrips, PathGradeTab } from './pathgrade/PathGradeTab';
 import type { RsController, RsSnapshot, RsTab } from './rsController';
 import {
@@ -153,16 +158,42 @@ const CSS = `
 .prs-num[data-out-of-band="true"] { color: #F5C36B; }
 .prs-flag { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 8px; background: #3A2E12; color: #F5C36B; font-size: 11px; line-height: 16px; font-weight: 700; cursor: help; }
 .prs-structure-warnings td { padding: 0 4px 3px; font-size: 12px; line-height: 16px; color: #F5C36B; }
-.prs-research-toggle { margin-left: 6px; padding: 0 6px; border: 1px solid #4B3F72; border-radius: 8px; background: transparent; color: #B7A8F0; font: inherit; font-size: 11px; line-height: 16px; cursor: pointer; }
-.prs-research-toggle[aria-expanded="true"] { background: #231C3D; }
-.prs-research { margin: 2px 0 6px 18px; padding: 6px 8px; border: 1px dashed #4B3F72; border-radius: 6px; background: #120F1F; }
-.prs-research-head { font-weight: 600; color: #D8D0FA; }
+.prs-cell-sub { display: block; font-size: 10px; line-height: 13px; color: #6B7A8C; }
+.prs-localization { color: #6B7A8C; font-style: italic; cursor: help; }
+.prs-chip { margin-left: 6px; padding: 0 7px; border: 1px solid #4B3F72; border-radius: 9px; background: #17122A; color: #C9BDF7; font: inherit; font-size: 11px; line-height: 16px; white-space: nowrap; cursor: pointer; }
+.prs-chip:hover, .prs-chip:focus-visible { border-color: #8F7FD6; outline: none; }
+.prs-chip[aria-expanded="true"] { background: #2A2148; border-color: #8F7FD6; }
 .prs-research-banner { margin: 2px 0 6px; font-size: 12px; color: #F5C36B; }
-.prs-research-reason { font-size: 12px; color: #9AA8B8; }
-.prs-research summary { cursor: pointer; color: #B7A8F0; font-size: 12px; }
-.prs-research-grid { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 0 10px; margin: 2px 0 4px 12px; font-size: 12px; }
-.prs-research-grid dt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9AA8B8; }
-.prs-research-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.prs-radiomics { margin: 2px 0 6px 18px; padding: 6px 8px; border: 1px dashed #4B3F72; border-radius: 6px; background: #120F1F; }
+.prs-radiomics-head { font-weight: 600; color: #D8D0FA; }
+.prs-radiomics-head .prs-research-banner { font-weight: 400; }
+.prs-radiomics-search { box-sizing: border-box; width: 100%; max-width: 260px; margin: 2px 0 6px; padding: 2px 8px; border: 1px solid #2B3A4D; border-radius: 6px; background: #0A111B; color: #E8EEF5; font: inherit; font-size: 12px; color-scheme: dark; }
+.prs-radiomics-search:focus { border-color: #8AB4F8; outline: none; }
+.prs-family-toggle { display: block; padding: 1px 0; border: 0; background: transparent; color: #B7A8F0; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.prs-family-toggle:disabled { cursor: default; }
+.prs-family-toggle:focus-visible { outline: 1px solid #8AB4F8; }
+.prs-radiomics-grid { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 0 10px; margin: 2px 0 4px 14px; font-size: 12px; }
+.prs-radiomics-grid dt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9AA8B8; }
+.prs-radiomics-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.prs-unit { color: #6B7A8C; font-size: 11px; }
+.prs-link { margin: 0 0 4px 14px; padding: 0; border: 0; background: transparent; color: #8AB4F8; font: inherit; font-size: 12px; cursor: pointer; }
+.prs-link:hover, .prs-link:focus-visible { text-decoration: underline; outline: none; }
+.prs-radiomics-tab { display: flex; flex-direction: column; gap: 4px; }
+.prs-radiomics-banner { margin: 0; padding: 4px 8px; border: 1px dashed #4B3F72; border-radius: 6px; background: #120F1F; }
+.prs-radiomics-tools { display: flex; align-items: center; gap: 8px; }
+.prs-radiomics-tools .prs-radiomics-search { margin: 0; flex: 1 1 auto; }
+.prs-radiomics-meta { font-size: 11px; color: #6B7A8C; }
+.prs-radiomics-scroll { overflow-x: auto; border: 1px solid #1B2735; border-radius: 6px; }
+.prs-radiomics-table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-size: 12px; }
+.prs-radiomics-table th, .prs-radiomics-table td { padding: 1px 8px; white-space: nowrap; }
+.prs-radiomics-table thead th { position: sticky; top: 0; background: #0D1620; border-bottom: 1px solid #1B2735; font-weight: 400; color: #6B7A8C; }
+.prs-radiomics-feature { position: sticky; left: 0; z-index: 1; background: #0A111B; text-align: left; font-weight: 400; color: #9AA8B8; }
+.prs-radiomics-table thead .prs-radiomics-feature { z-index: 2; background: #0D1620; }
+.prs-radiomics-family-row th { position: sticky; left: 0; padding-top: 6px; background: #0A111B; text-align: left; font-weight: 600; color: #B7A8F0; }
+.prs-radiomics-table tbody tr:hover td, .prs-radiomics-table tbody tr:hover .prs-radiomics-feature { background: #111C29; }
+.prs-sort { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.prs-sort:hover, .prs-sort:focus-visible { color: #8AB4F8; outline: none; }
+.prs-radiomics-missing { margin: 4px 0; padding-left: 18px; font-size: 12px; color: #9AA8B8; }
 .prs-anatomy-notes { margin: 6px 0; padding-left: 18px; color: #F5C36B; }
 .prs-anatomy-foot { margin-top: 8px; font-size: 11px; color: #6B7A8C; }
 .prs-pg-strips { margin: 2px 0; padding-left: 18px; }
@@ -190,6 +221,7 @@ const TABS: Array<{ id: RsTab; label: string }> = [
   { id: 'changes', label: 'Changes' },
 ];
 const ANATOMY_TAB: { id: RsTab; label: string } = { id: 'anatomy', label: 'Anatomy' };
+const RADIOMICS_TAB: { id: RsTab; label: string } = { id: 'radiomics', label: 'Radiomics' };
 const PATHGRADE_TAB: { id: RsTab; label: string } = { id: 'pathgrade', label: 'PathGrade' };
 
 // A pane without an anatomy store: no Anatomy tab.
@@ -588,13 +620,19 @@ export function RsPane({
   // PathGrade only for this study's results: a finding with a held strip (WeiWei, 25 Nov 2026).
   const heldCount = heldStrips(snap.docs?.evidence).length;
   const withPathgrade = heldCount > 0;
+  // Radiomics only while a structure has computed research features (WeiWei, 27 Nov 2026).
+  const radiomicsCount = anatomyReady ? computedRadiomicsCount(anat) : 0;
+  const withRadiomics = radiomicsCount > 0;
   const tabs = [
     ...(withAnatomy ? [ANATOMY_TAB] : []),
+    ...(withRadiomics ? [RADIOMICS_TAB] : []),
     ...TABS,
     ...(withPathgrade ? [PATHGRADE_TAB] : []),
   ];
   const tab: RsTab =
-    (snap.tab === 'anatomy' && !withAnatomy) || (snap.tab === 'pathgrade' && !withPathgrade)
+    (snap.tab === 'anatomy' && !withAnatomy) ||
+    (snap.tab === 'radiomics' && !withRadiomics) ||
+    (snap.tab === 'pathgrade' && !withPathgrade)
       ? 'draft'
       : snap.tab;
   const structureCount = Object.keys(anat.structures).length;
@@ -732,9 +770,11 @@ export function RsPane({
                     ? ` (${changeCount})`
                     : t.id === 'anatomy' && anatomyReady
                       ? ` (${structureCount})`
-                      : t.id === 'pathgrade'
-                        ? ` (${heldCount})`
-                        : ''}
+                      : t.id === 'radiomics'
+                        ? ` (${radiomicsCount})`
+                        : t.id === 'pathgrade'
+                          ? ` (${heldCount})`
+                          : ''}
               </button>
             ))}
           </div>
@@ -748,6 +788,8 @@ export function RsPane({
                 store={anatomy}
                 cell={cell}
               />
+            ) : tab === 'radiomics' && anatomy && withRadiomics ? (
+              <RadiomicsTab store={anatomy} />
             ) : tab === 'pathgrade' && withPathgrade ? (
               <PathGradeTab evidence={docs?.evidence ?? null} />
             ) : tab === 'draft' ? (

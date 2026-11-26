@@ -372,6 +372,8 @@ describe('the anatomy layers’ state (RS-36)', () => {
       engine: 'pyradiomics 3.0.1',
       state: 'computed',
       reason: '',
+      // The row's chip counts the finite values: Mean has none.
+      finite: 4,
     });
     expect(r.groups.map(g => [g.cls, g.title, g.features])).toEqual([
       [
@@ -387,6 +389,29 @@ describe('the anatomy layers’ state (RS-36)', () => {
       ['zzz', 'zzz', [['Extra', 1]]],
     ]);
     expect(store.getSnapshot().structures[keyOf('total', 2)].radiomics).toBeNull();
+    expect(store.harnessState()).toMatchObject({ radiomics: 1 });
+  });
+
+  it('marks which structures are measurement eligible; the others are for localization only (invariant 8)', async () => {
+    const { store } = setup();
+    store.enter(STUDY);
+    await flush();
+    const s = store.getSnapshot().structures;
+    expect([s[keyOf('total', 1)].eligible, s[keyOf('vertebrae_pp', 1)].eligible]).toEqual([
+      true,
+      false,
+    ]);
+    expect(store.harnessState()).toMatchObject({ eligible: 2, radiomics: 0 });
+  });
+
+  it("names a file for the study by the CT side's study ref, never by its UID", async () => {
+    const { store } = setup();
+    await expect(store.studyFileRef()).resolves.toBeNull();
+    store.enter(STUDY);
+    await flush();
+    const name = await store.studyFileRef();
+    expect(name).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(name).not.toContain(STUDY);
   });
 
   it("keeps the reader's settings in the browser: on or off, opacity (10 to 100 %), fill or outline", async () => {
@@ -511,6 +536,30 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(store.renderSetFor(SERIES)!.highlight).toEqual({ layer: 1, value: 1 });
     store.select(null);
     expect(store.getSnapshot().selected).toBeNull();
+  });
+
+  it('picks a structure clicked on the images as select does, but asks the navigator for nothing', async () => {
+    const { store, navigations } = setup();
+    store.enter(STUDY);
+    await flush();
+    store.setTaskVisible(0, 'trunk_cavities', false);
+    store.pick(keyOf('trunk_cavities', 1));
+    const snap = store.getSnapshot();
+    expect(snap.selected).toBe(keyOf('trunk_cavities', 1));
+    expect(snap.series[0].tasks.find(t => t.task === 'trunk_cavities')!.visible).toBe(true);
+    expect(store.renderSetFor(SERIES)!.focus).toMatchObject({ key: keyOf('trunk_cavities', 1) });
+    expect(navigations).toEqual([]);
+    // The picked one again changes nothing (a click is not a toggle); an unknown key neither.
+    store.pick(keyOf('trunk_cavities', 1));
+    store.pick('0/nothing/9');
+    expect(store.getSnapshot().selected).toBe(keyOf('trunk_cavities', 1));
+    expect(store.harnessState()).toMatchObject({ counts: { picks: 1, selections: 0, jumps: 0 } });
+    // Another structure: picked in its place; Esc's select(null) clears it.
+    store.pick(keyOf('total', 1));
+    expect(store.getSnapshot().selected).toBe(keyOf('total', 1));
+    store.select(null);
+    expect(store.getSnapshot().selected).toBeNull();
+    expect(navigations).toEqual([]);
   });
 
   it('draws the selected structure in the spotlight with its name, and clears it when it is selected again', async () => {
