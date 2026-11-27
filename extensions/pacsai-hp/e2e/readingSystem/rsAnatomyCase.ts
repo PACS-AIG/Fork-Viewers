@@ -145,6 +145,47 @@ function labelmap(value: (u: number, v: number, k: number) => number) {
   return { gz, sha256: createHash('sha256').update(gz).digest('hex'), data };
 }
 const TOTAL = labelmap((u, v, k) => (inLiver(u, v, k) ? 1 : inKidney(u, v, k) ? 2 : 0));
+/**
+ * Made-up texture features under the registry's names (radiomics_v1), so the liver's section and
+ * the Radiomics tab's table are long enough to scroll.
+ */
+const TEXTURE: Record<string, number> = Object.fromEntries(
+  [
+    ...['ClusterProminence', 'ClusterShade', 'ClusterTendency', 'Correlation', 'DifferenceAverage']
+      .concat([
+        'DifferenceEntropy',
+        'DifferenceVariance',
+        'Id',
+        'Idm',
+        'Idmn',
+        'Idn',
+        'Imc1',
+        'Imc2',
+      ])
+      .concat([
+        'InverseVariance',
+        'JointEnergy',
+        'JointEntropy',
+        'MaximumProbability',
+        'SumEntropy',
+      ])
+      .concat(['SumSquares'])
+      .map(n => `glcm_${n}`),
+    ...['GrayLevelNonUniformity', 'GrayLevelNonUniformityNormalized', 'GrayLevelVariance']
+      .concat(['LongRunEmphasis', 'RunEntropy', 'RunLengthNonUniformity'])
+      .concat([
+        'RunLengthNonUniformityNormalized',
+        'RunPercentage',
+        'RunVariance',
+        'ShortRunEmphasis',
+      ])
+      .map(n => `glrlm_${n}`),
+    ...['GrayLevelNonUniformity', 'GrayLevelNonUniformityNormalized', 'GrayLevelVariance']
+      .concat(['LargeAreaEmphasis', 'SizeZoneNonUniformity', 'SizeZoneNonUniformityNormalized'])
+      .concat(['SmallAreaEmphasis', 'ZoneEntropy', 'ZonePercentage', 'ZoneVariance'])
+      .map(n => `glszm_${n}`),
+  ].map((key, i) => [key, 0.5 + i])
+);
 const CAVITIES = labelmap((u, v, k) => (inBody(u, v) && k >= 2 && k <= 17 ? 1 : 0));
 const count = (data: number[], value: number) => data.filter(x => x === value).length;
 
@@ -261,6 +302,7 @@ function anatomyJson(study: string) {
                     firstorder_Entropy: 0.5,
                     shape_Sphericity: 0.81,
                     glcm_Contrast: null,
+                    ...TEXTURE,
                   },
                 },
               },
@@ -628,7 +670,7 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
     // (the kidney's were not: no chip), opening them under it, research use only.
     await expect(organs.nth(1).locator('[data-rs-radiomics-chip]')).toHaveCount(0);
     const chip = organs.nth(0).locator('[data-rs-radiomics-chip]');
-    await expect(chip).toHaveText('Radiomics · 3');
+    await expect(chip).toHaveText('Radiomics · 42');
     await chip.click();
     const radiomics = pane(page).locator('[data-rs-radiomics="total/1"]');
     await expect(radiomics.locator('.prs-radiomics-head')).toHaveText(
@@ -650,8 +692,16 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
         path: path.join(__dirname, 'test-results', `anatomy-radiomics-${want}.png`),
       });
     }
-    await chip.click();
-    await expect(pane(page).locator('[data-rs-radiomics]')).toHaveCount(0);
+    // The section long (every texture family open) and the panel scrolled to its foot.
+    await radiomics.locator('[data-rs-radiomics-search]').fill('');
+    for (const cls of ['glcm', 'glrlm', 'glszm']) {
+      await radiomics.locator(`[data-rs-radiomics-family="${cls}"] button`).click();
+    }
+    const panel = pane(page).locator('[data-rs-panel]');
+    await panel.evaluate(el => {
+      el.scrollTop = el.scrollHeight;
+    });
+    expect(await panel.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
 
     // The study side by side in the Radiomics tab, right after Anatomy; Export CSV, named by the
     // study ref (the UID's SHA-256, 12 hex), never the UID.
@@ -661,6 +711,28 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
     await expect(table.locator('[data-rs-radiomics-banner]')).toHaveText(
       'Research use only, not part of the report.'
     );
+    // It opens at its own top, not at the Anatomy tab's scroll: the banner in view.
+    const bannerInView = () =>
+      page.evaluate(() => {
+        const p = document.querySelector('[data-rs-panel]')!.getBoundingClientRect();
+        const b = document.querySelector('[data-rs-radiomics-banner]')!.getBoundingClientRect();
+        return b.top >= p.top - 1 && b.bottom <= p.bottom + 1;
+      });
+    expect(await panel.evaluate(el => el.scrollTop)).toBe(0);
+    expect(await bannerInView()).toBe(true);
+    // The table scrolls in its own box: its header row stays at the box's top, the banner in view.
+    const box = table.locator('.prs-radiomics-scroll');
+    await box.evaluate(el => {
+      el.scrollTop = el.scrollHeight;
+    });
+    expect(
+      await box.evaluate(el => {
+        const top = el.getBoundingClientRect().top;
+        const head = el.querySelector('thead th')!.getBoundingClientRect().top;
+        return el.scrollTop > 0 && Math.abs(head - top) <= 2;
+      })
+    ).toBe(true);
+    expect(await bannerInView()).toBe(true);
     await expect(table.locator('thead th')).toHaveText(['Feature', 'Liver']);
     await expect(table.locator('[data-rs-radiomics-missing]')).toHaveText(
       'Left kidney: not computed (no radiomics engine is installed in this build).'
@@ -687,6 +759,7 @@ export function defineAnatomyTest(want: 'cpu' | 'gpu'): void {
     }
     await pane(page).locator('[data-rs-tab="anatomy"]').click();
     await expect(organs).toHaveCount(2);
+    await expect(pane(page).locator('[data-rs-radiomics]')).toHaveCount(0);
 
     // The series is on a viewport, with the layer canvas over it.
     await expect

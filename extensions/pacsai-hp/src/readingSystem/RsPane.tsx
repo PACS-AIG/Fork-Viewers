@@ -30,7 +30,7 @@
  * Rendered with its own React root, outside OHIF's tree, like the dock it sits
  * in: the viewer's route changes and its study-not-found page leave it alone.
  */
-import React, { useEffect, useRef, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { AnatomyTab } from './anatomy/AnatomyTab';
 import type { Anatomy3dCell } from './anatomy/anatomy3dCell';
 import type { AnatomySnapshot, AnatomyStore } from './anatomy/anatomyStore';
@@ -178,22 +178,23 @@ const CSS = `
 .prs-unit { color: #6B7A8C; font-size: 11px; }
 .prs-link { margin: 0 0 4px 14px; padding: 0; border: 0; background: transparent; color: #8AB4F8; font: inherit; font-size: 12px; cursor: pointer; }
 .prs-link:hover, .prs-link:focus-visible { text-decoration: underline; outline: none; }
-.prs-radiomics-tab { display: flex; flex-direction: column; gap: 4px; }
-.prs-radiomics-banner { margin: 0; padding: 4px 8px; border: 1px dashed #4B3F72; border-radius: 6px; background: #120F1F; }
-.prs-radiomics-tools { display: flex; align-items: center; gap: 8px; }
+.prs-radiomics-tab { display: flex; flex-direction: column; gap: 4px; height: 100%; min-height: 0; }
+.prs-radiomics-banner { flex: 0 0 auto; margin: 0; padding: 4px 8px; border: 1px dashed #4B3F72; border-radius: 6px; background: #120F1F; }
+.prs-radiomics-tools { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
 .prs-radiomics-tools .prs-radiomics-search { margin: 0; flex: 1 1 auto; }
-.prs-radiomics-meta { font-size: 11px; color: #6B7A8C; }
-.prs-radiomics-scroll { overflow-x: auto; border: 1px solid #1B2735; border-radius: 6px; }
+.prs-radiomics-meta { flex: 0 0 auto; font-size: 11px; color: #6B7A8C; }
+/* The table scrolls in its own box, both ways: its column headers and feature names stay in view, the banner and tools above it. */
+.prs-radiomics-scroll { flex: 1 1 auto; min-height: 120px; overflow: auto; border: 1px solid #1B2735; border-radius: 6px; }
 .prs-radiomics-table { border-collapse: separate; border-spacing: 0; min-width: 100%; font-size: 12px; }
 .prs-radiomics-table th, .prs-radiomics-table td { padding: 1px 8px; white-space: nowrap; }
-.prs-radiomics-table thead th { position: sticky; top: 0; background: #0D1620; border-bottom: 1px solid #1B2735; font-weight: 400; color: #6B7A8C; }
+.prs-radiomics-table thead th { position: sticky; top: 0; z-index: 3; background: #0D1620; border-bottom: 1px solid #1B2735; font-weight: 400; color: #6B7A8C; }
 .prs-radiomics-feature { position: sticky; left: 0; z-index: 1; background: #0A111B; text-align: left; font-weight: 400; color: #9AA8B8; }
-.prs-radiomics-table thead .prs-radiomics-feature { z-index: 2; background: #0D1620; }
+.prs-radiomics-table thead .prs-radiomics-feature { z-index: 4; background: #0D1620; }
 .prs-radiomics-family-row th { position: sticky; left: 0; padding-top: 6px; background: #0A111B; text-align: left; font-weight: 600; color: #B7A8F0; }
 .prs-radiomics-table tbody tr:hover td, .prs-radiomics-table tbody tr:hover .prs-radiomics-feature { background: #111C29; }
 .prs-sort { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
 .prs-sort:hover, .prs-sort:focus-visible { color: #8AB4F8; outline: none; }
-.prs-radiomics-missing { margin: 4px 0; padding-left: 18px; font-size: 12px; color: #9AA8B8; }
+.prs-radiomics-missing { flex: 0 0 auto; margin: 4px 0; padding-left: 18px; font-size: 12px; color: #9AA8B8; }
 .prs-anatomy-notes { margin: 6px 0; padding-left: 18px; color: #F5C36B; }
 .prs-anatomy-foot { margin-top: 8px; font-size: 11px; color: #6B7A8C; }
 .prs-pg-strips { margin: 2px 0; padding-left: 18px; }
@@ -635,6 +636,21 @@ export function RsPane({
     (snap.tab === 'pathgrade' && !withPathgrade)
       ? 'draft'
       : snap.tab;
+  // Each tab keeps its own place in the panel: back where the reader left it, at its top the
+  // first time. One tab never opens at another's scroll, which hid the Radiomics tab's research
+  // banner on dev (27 Nov 2026). A layout effect, so a tab's own effects (the Anatomy tab
+  // scrolling a picked structure's row into view) come after it.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const scrolls = useRef(new Map<RsTab, number>());
+  const placed = useRef<RsTab | null>(null);
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || placed.current === tab) {
+      return;
+    }
+    placed.current = tab;
+    panel.scrollTop = scrolls.current.get(tab) ?? 0;
+  });
   const structureCount = Object.keys(anat.structures).length;
   const docs = snap.docs;
   const inboxCount = docs?.inbox.entries.length ?? 0;
@@ -779,9 +795,11 @@ export function RsPane({
             ))}
           </div>
           <div
+            ref={panelRef}
             className="prs-panel"
             role="tabpanel"
             data-rs-panel={tab}
+            onScroll={e => scrolls.current.set(tab, e.currentTarget.scrollTop)}
           >
             {tab === 'anatomy' && anatomy ? (
               <AnatomyTab
