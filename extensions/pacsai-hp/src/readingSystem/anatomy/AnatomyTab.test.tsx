@@ -844,4 +844,49 @@ describe("the pane's Radiomics tab (RS-36)", () => {
       url.revokeObjectURL = saved.revoke;
     }
   });
+  it("gives each tab its own place in the panel: none opens at another's scroll, and a tab returns where it was left", async () => {
+    const { s } = await store(undefined, raw => {
+      const total = raw.series[0].labelmaps[1] as { labels: Array<Record<string, unknown>> };
+      total.labels[0].radiomics = computed({ firstorder_Median: 41.5 });
+    });
+    const { column, destroy } = mount(fakeController(), s);
+    await act(async () => {
+      s.enter(STUDY);
+      await flush();
+    });
+    const panel = column.querySelector('[data-rs-panel]') as HTMLElement;
+    expect(panel.getAttribute('data-rs-panel')).toBe('anatomy');
+    // jsdom lays nothing out: here the panel's scroll is a plain value.
+    let top = 0;
+    Object.defineProperty(panel, 'scrollTop', {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+      },
+    });
+    const scrollTo = (v: number) =>
+      act(() => {
+        top = v;
+        panel.dispatchEvent(new Event('scroll'));
+      });
+    const open = (id: string) =>
+      act(() => {
+        fireEvent.click(column.querySelector(`[data-rs-tab="${id}"]`)!);
+      });
+    scrollTo(150);
+    // The Radiomics tab's first time: its top, whatever the Anatomy tab's scroll.
+    open('radiomics');
+    expect(column.querySelector('[data-rs-panel]')).toBe(panel);
+    expect(top).toBe(0);
+    scrollTo(40);
+    // Each tab back where the reader left it; a tab not yet shown at its top.
+    open('anatomy');
+    expect(top).toBe(150);
+    open('radiomics');
+    expect(top).toBe(40);
+    open('draft');
+    expect(top).toBe(0);
+    destroy();
+  });
 });
