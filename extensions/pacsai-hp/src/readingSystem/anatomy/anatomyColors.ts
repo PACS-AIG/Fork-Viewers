@@ -5,9 +5,10 @@
  * close to how anatomy atlases tint them (arteries red, veins blue, bone
  * pale), keyed by words in TotalSegmentator's class names, paired left and
  * right structures one hue apart in lightness, vertebrae cycling through
- * distinct hues so neighbouring levels never share one, and every other
- * label a golden-angle hue of its own. Deterministic: the same label always
- * gets the same colour.
+ * distinct hues by their level down the spine, so neighbouring levels never
+ * share one even when two tasks draw them, and every other label a
+ * golden-angle hue of its own. Deterministic: the same label always gets the
+ * same colour.
  *
  * Pure: no window, React or OHIF here.
  */
@@ -95,9 +96,36 @@ export const isVertebra = (label: { rawClass: string | null; name: string }): bo
     `${label.rawClass ?? ''} ${label.name}`.toLowerCase()
   );
 
+/** Each region's first place down the spine, and how many levels it may have (a sixth lumbar included). */
+const SPINE: Record<string, [number, number]> = {
+  c: [0, 7],
+  t: [7, 12],
+  l: [19, 6],
+  s: [25, 5],
+};
+
 /**
- * The n-th vertebra from the head's colour: the store recolours a task's
- * vertebrae in their head-to-feet order once its labelmap is read, since their
+ * A vertebra's place down the spine (C1 is 0, T1 7, L1 19, S1 25), from its
+ * display phrase ("L1 vertebral body", "S1 vertebra") or else its class name
+ * (`vertebrae_L1`); null when neither names a level.
+ */
+export function spinalLevel(label: { rawClass: string | null; name: string }): number | null {
+  const found =
+    /^\s*([ctls])(\d{1,2})\b/i.exec(label.name) ??
+    /(?:^|[_\s-])([ctls])(\d{1,2})$/i.exec((label.rawClass ?? '').trim());
+  if (!found) {
+    return null;
+  }
+  const [first, count] = SPINE[found[1].toLowerCase()];
+  const n = Number(found[2]);
+  return n >= 1 && n <= count ? first + n - 1 : null;
+}
+
+/**
+ * The colour at a vertebra's place down the spine (spinalLevel), so
+ * neighbouring levels never share one, even when two tasks draw them (total's
+ * S1 under vertebrae_pp's L5 body). The store gives a vertebra that names no
+ * level the next colour in its task's head-to-feet order instead, since label
  * values need not follow the spine (T9 is 9 and L1 is 1 on dev).
  */
 export const vertebraColor = (rank: number): Rgb =>
@@ -107,7 +135,7 @@ export const vertebraColor = (rank: number): Rgb =>
 export function labelColor(label: { rawClass: string | null; name: string; value: number }): Rgb {
   const words = `${label.rawClass ?? ''} ${label.name}`.toLowerCase();
   if (isVertebra(label)) {
-    return vertebraColor(label.value - 1);
+    return vertebraColor(spinalLevel(label) ?? label.value - 1);
   }
   for (const [pattern, rgb] of BY_WORD) {
     if (pattern.test(words)) {

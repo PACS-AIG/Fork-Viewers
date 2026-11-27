@@ -39,7 +39,7 @@
  */
 import { RsRefused } from '../rsContract';
 import { RsHttpError } from '../rsClient';
-import { isVertebra, labelColor, vertebraColor, type Rgb } from './anatomyColors';
+import { isVertebra, labelColor, spinalLevel, vertebraColor, type Rgb } from './anatomyColors';
 import {
   phraseOf,
   WHOLE_MASK_MEDIAN,
@@ -716,11 +716,12 @@ export function createAnatomyStore(deps: AnatomyStoreDeps): AnatomyStore {
         const zb = structures[b]?.superior ?? -Infinity;
         return zb - za || (structures[a]?.name ?? '').localeCompare(structures[b]?.name ?? '');
       });
-    // Neighbouring vertebrae never share a colour: they take theirs in head-to-feet order.
+    // A vertebra keeps the colour of its level down the spine (labelColor), so neighbours never share one, even
+    // across tasks. One that names no level takes the next colour in its task's head-to-feet order instead.
     let rank = 0;
     for (const key of order) {
       const st = structures[key];
-      if (st && isVertebra(st)) {
+      if (st && isVertebra(st) && spinalLevel(st) === null) {
         structures[key] = { ...st, color: vertebraColor(rank++) };
       }
     }

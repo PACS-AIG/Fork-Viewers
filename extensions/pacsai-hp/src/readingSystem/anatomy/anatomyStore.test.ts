@@ -595,7 +595,7 @@ describe('the anatomy layers’ state (RS-36)', () => {
     expect(rs()).toMatchObject({ highlight: null, dim: 1, focus: null });
   });
 
-  it('colours vertebrae in their head-to-feet order, so neighbours never share a colour whatever their values', async () => {
+  it('lists vertebrae head to feet and colours them by level, so neighbours never share a colour whatever their values', async () => {
     // L1 holds value 1 in slices 0-1 and T12 value 2 in slices 3-4: T12 is the upper one.
     const spine = gridVolume((i, j, k) =>
       i >= 3 && i <= 4 && j >= 4 ? (k <= 1 ? 1 : k >= 3 ? 2 : 0) : 0
@@ -630,9 +630,57 @@ describe('the anatomy layers’ state (RS-36)', () => {
       'T12 vertebra',
       'L1 vertebra',
     ]);
-    expect(snap.structures[keyOf('vertebrae_pp', 2)].color).toEqual(vertebraColor(0));
-    expect(snap.structures[keyOf('vertebrae_pp', 1)].color).toEqual(vertebraColor(1));
-    expect(vertebraColor(0)).not.toEqual(vertebraColor(1));
+    // T12 is 18th down the spine from C1 (counting from 0), L1 19th.
+    expect(snap.structures[keyOf('vertebrae_pp', 2)].color).toEqual(vertebraColor(18));
+    expect(snap.structures[keyOf('vertebrae_pp', 1)].color).toEqual(vertebraColor(19));
+    expect(vertebraColor(18)).not.toEqual(vertebraColor(19));
+  });
+
+  it('colours a vertebra by its level across tasks too: total’s S1 never takes the colour of vertebrae_pp’s L5 body above it', async () => {
+    // Case 4 on dev: vertebrae_pp draws the L5 body (value 1, slices 3-4) and total the whole S1 (value 1, slices
+    // 0-1), each the only vertebra in its task. Counted task by task, both took the first colour.
+    const body = gridVolume((i, j, k) => (i >= 3 && i <= 4 && j >= 4 && k >= 3 ? 1 : 0));
+    const sacral = gridVolume((i, j, k) => (i >= 3 && i <= 4 && j >= 4 && k <= 1 ? 1 : 0));
+    const { store } = setup({
+      voxels: { total: sacral, vertebrae_pp: body },
+      mutate: raw => {
+        const lms = raw.series[0].labelmaps as Array<{
+          task: string;
+          labels: Array<Record<string, unknown>>;
+        }>;
+        lms.find(l => l.task === 'total')!.labels = [
+          {
+            value: 1,
+            concept: 'vertebrae_S1',
+            name: null,
+            rawClass: 'vertebrae_S1',
+            voxels: countOf(sacral, 1),
+          },
+        ];
+        lms.find(l => l.task === 'vertebrae_pp')!.labels = [
+          {
+            value: 1,
+            concept: 'vertebrae_L5',
+            name: 'L5 vertebral body',
+            rawClass: 'vertebrae_L5',
+            voxels: countOf(body, 1),
+          },
+        ];
+      },
+    });
+    store.enter(STUDY);
+    await flush();
+    const snap = store.getSnapshot();
+    const s1 = snap.structures[keyOf('total', 1)];
+    const l5 = snap.structures[keyOf('vertebrae_pp', 1)];
+    expect([s1.name, l5.name]).toEqual(['S1 vertebra', 'L5 vertebral body']);
+    // Both labelmaps were read, so each task's head-to-feet pass has run.
+    expect(s1.superior).not.toBeNull();
+    expect(l5.superior).not.toBeNull();
+    expect(l5.superior!).toBeGreaterThan(s1.superior!);
+    expect(l5.color).toEqual(vertebraColor(23));
+    expect(s1.color).toEqual(vertebraColor(25));
+    expect(s1.color).not.toEqual(l5.color);
   });
 
   it('names nothing by UID in the harness state, and lets go of a study it leaves', async () => {
